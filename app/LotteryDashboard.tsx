@@ -54,7 +54,9 @@ export function LotteryDashboard() {
   const [aiError, setAiError] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState(0);
   const [activeScenario, setActiveScenario] = useState<AiScenario["id"]>("balanced");
+  const [activeSection, setActiveSection] = useState("draws");
   const aiAbortRef = useRef<AbortController | null>(null);
+  const drawGridRef = useRef<HTMLElement | null>(null);
 
   const resetAi = useCallback(() => {
     aiAbortRef.current?.abort();
@@ -209,9 +211,36 @@ export function LotteryDashboard() {
 
   useEffect(() => () => aiAbortRef.current?.abort(), []);
 
+  useEffect(() => {
+    drawGridRef.current?.scrollTo({ left: 0, behavior: "smooth" });
+  }, [selectedGame]);
+
+  useEffect(() => {
+    if (!("IntersectionObserver" in window)) return;
+    const sections = ["draws", "analysis", "lab", "history"];
+    const observer = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((entry) => entry.isIntersecting)
+          .sort((left, right) => right.intersectionRatio - left.intersectionRatio);
+        if (visible[0]?.target.id) setActiveSection(visible[0].target.id);
+      },
+      { rootMargin: "-18% 0px -62% 0px", threshold: [0, 0.01, 0.2] },
+    );
+    sections.forEach((id) => {
+      const section = document.getElementById(id);
+      if (section) observer.observe(section);
+    });
+    return () => observer.disconnect();
+  }, []);
+
   const liveDraw = latest;
   const stageVisible = demo || liveWindow.visible;
   const stageReveal = demo ? revealed : realReveal.key === realRevealKey ? realReveal.count : 0;
+  const orderedGames = [
+    selectedGame,
+    ...GAME_IDS.filter((game) => game !== selectedGame),
+  ];
 
   return (
     <div className="site-shell">
@@ -286,8 +315,12 @@ export function LotteryDashboard() {
           />
         )}
 
-        <section className="draw-grid" aria-label="最新开奖结果">
-          {GAME_IDS.map((game) => (
+        <div className="draw-strip-head" aria-hidden="true">
+          <strong>最新开奖</strong>
+          <span>左右滑动查看其他彩种 →</span>
+        </div>
+        <section ref={drawGridRef} className="draw-grid" aria-label="最新开奖结果">
+          {orderedGames.map((game) => (
             <DrawCard
               key={game}
               game={game}
@@ -411,10 +444,10 @@ export function LotteryDashboard() {
         <div className="footer-links"><a href="#analysis">方法说明</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
       <nav className="mobile-nav" aria-label="手机端快捷导航">
-        <a href="#draws"><span>01</span>开奖</a>
-        <a href="#analysis"><span>02</span>统计</a>
-        <a href="#lab"><span>03</span>AI</a>
-        <a href="#history"><span>04</span>历史</a>
+        <a className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
+        <a className={activeSection === "analysis" ? "active" : ""} aria-current={activeSection === "analysis" ? "page" : undefined} href="#analysis"><span>02</span>统计</a>
+        <a className={activeSection === "lab" ? "active" : ""} aria-current={activeSection === "lab" ? "page" : undefined} href="#lab"><span>03</span>AI</a>
+        <a className={activeSection === "history" ? "active" : ""} aria-current={activeSection === "history" ? "page" : undefined} href="#history"><span>04</span>历史</a>
       </nav>
     </div>
   );
@@ -505,6 +538,7 @@ function ScratchSpecialBall({
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scratchingRef = useRef(false);
+  const completeRef = useRef(false);
   const activePointerIdRef = useRef<number | null>(null);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
   const moveCountRef = useRef(0);
@@ -521,6 +555,7 @@ function ScratchSpecialBall({
     canvas?.blur();
     setProgress(100);
     setComplete(true);
+    completeRef.current = true;
     scratchingRef.current = false;
     activePointerIdRef.current = null;
     lastPointRef.current = null;
@@ -546,42 +581,65 @@ function ScratchSpecialBall({
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    setReady(false);
-    const bounds = canvas.getBoundingClientRect();
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
-    canvas.width = Math.max(Math.round(bounds.width * ratio), 1);
-    canvas.height = Math.max(Math.round(bounds.height * ratio), 1);
-    const context = canvas.getContext("2d", { willReadFrequently: true });
-    if (!context) return;
-    context.setTransform(ratio, 0, 0, ratio, 0, 0);
-    const gradient = context.createLinearGradient(0, 0, bounds.width, bounds.height);
-    gradient.addColorStop(0, "#d9d3c7");
-    gradient.addColorStop(0.42, "#8d9293");
-    gradient.addColorStop(0.7, "#d6d0c3");
-    gradient.addColorStop(1, "#777d7e");
-    context.globalCompositeOperation = "source-over";
-    context.fillStyle = gradient;
-    context.fillRect(0, 0, bounds.width, bounds.height);
-    context.fillStyle = "rgba(255,255,255,0.22)";
-    for (let x = 7; x < bounds.width; x += 12) {
-      for (let y = 8; y < bounds.height; y += 13) {
-        context.beginPath();
-        context.arc(x, y, 1.2, 0, Math.PI * 2);
-        context.fill();
+    let frame = 0;
+    let initialized = false;
+    const paintCoating = () => {
+      const bounds = canvas.getBoundingClientRect();
+      if (bounds.width === 0 || bounds.height === 0) return;
+      const ratio = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(Math.round(bounds.width * ratio), 1);
+      canvas.height = Math.max(Math.round(bounds.height * ratio), 1);
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return;
+      context.setTransform(ratio, 0, 0, ratio, 0, 0);
+      if (completeRef.current && initialized) {
+        context.clearRect(0, 0, bounds.width, bounds.height);
+        setReady(true);
+        return;
       }
-    }
-    context.fillStyle = "#2d3434";
-    context.font = `800 ${Math.max(Math.min(bounds.width * 0.19, 12), 9)}px sans-serif`;
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText("慢慢刮开", bounds.width / 2, bounds.height / 2);
-    setComplete(false);
-    setProgress(0);
-    scratchingRef.current = false;
-    activePointerIdRef.current = null;
-    lastPointRef.current = null;
-    moveCountRef.current = 0;
-    setReady(true);
+      setReady(false);
+      const gradient = context.createLinearGradient(0, 0, bounds.width, bounds.height);
+      gradient.addColorStop(0, "#d9d3c7");
+      gradient.addColorStop(0.42, "#8d9293");
+      gradient.addColorStop(0.7, "#d6d0c3");
+      gradient.addColorStop(1, "#777d7e");
+      context.globalCompositeOperation = "source-over";
+      context.fillStyle = gradient;
+      context.fillRect(0, 0, bounds.width, bounds.height);
+      context.fillStyle = "rgba(255,255,255,0.22)";
+      for (let x = 7; x < bounds.width; x += 12) {
+        for (let y = 8; y < bounds.height; y += 13) {
+          context.beginPath();
+          context.arc(x, y, 1.2, 0, Math.PI * 2);
+          context.fill();
+        }
+      }
+      context.fillStyle = "#2d3434";
+      context.font = `800 ${Math.max(Math.min(bounds.width * 0.1, 18), 11)}px sans-serif`;
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillText("慢慢刮开", bounds.width / 2, bounds.height / 2);
+      completeRef.current = false;
+      setComplete(false);
+      setProgress(0);
+      scratchingRef.current = false;
+      activePointerIdRef.current = null;
+      lastPointRef.current = null;
+      moveCountRef.current = 0;
+      initialized = true;
+      setReady(true);
+    };
+    const schedulePaint = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(paintCoating);
+    };
+    schedulePaint();
+    const resizeObserver = new ResizeObserver(schedulePaint);
+    resizeObserver.observe(canvas);
+    return () => {
+      resizeObserver.disconnect();
+      window.cancelAnimationFrame(frame);
+    };
   }, [number, resetKey]);
 
   const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -927,14 +985,22 @@ function AiReport({
         <div className="evidence-meter"><i style={{ width: `${report.evidenceStrength.score}%` }} /></div>
         <small>不是中奖概率</small>
       </div>
-      <p className="ai-overview">{report.synthesis.executiveSummary}</p>
       {recommended && (
         <div className="ai-recommendation">
           <span>AI 推荐观察场景</span>
           <div><strong>{recommended.name}</strong><em>证据指数 {recommended.evidenceScore}</em></div>
+          <div className="ai-recommendation-balls">
+            <BallRow
+              numbers={recommended.numbers}
+              special={recommended.special}
+              compact
+              drawAt={report.target.expectedDrawAt}
+            />
+          </div>
           <p>{report.synthesis.recommendationReason}</p>
         </div>
       )}
+      <p className="ai-overview">{report.synthesis.executiveSummary}</p>
       <div className="signal-columns">
         <div>
           <span>最强信号</span>
