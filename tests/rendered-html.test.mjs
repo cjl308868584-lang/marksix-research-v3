@@ -41,9 +41,9 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /香港六合彩/);
   assert.match(html, /澳门六合彩/);
   assert.match(html, /新澳门六合彩/);
-  assert.match(html, /羊肖/);
-  assert.match(html, /号码 12，羊肖，红波/);
-  assert.match(html, /特码 25，马肖，蓝波/);
+  assert.match(html, /号码 12，羊，红波/);
+  assert.match(html, /特码 25，马，蓝波/);
+  assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
   assert.match(html, /AI 多策略预测实验室/);
   assert.match(html, /九维证据/);
   assert.match(html, /滚动回测/);
@@ -70,6 +70,10 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(page, /<LotteryDashboard \/>/);
   assert.match(layout, /lang="zh-CN"/);
   assert.match(dashboard, /开奖前 3 分钟自动开启开奖台/);
+  assert.match(dashboard, /function ScratchSpecialBall/);
+  assert.match(dashboard, /destination-out/);
+  assert.match(dashboard, /onLostPointerCapture/);
+  assert.match(dashboard, /tabIndex=\{complete \? -1 : 0\}/);
   assert.match(dashboard, /AI_FOCUS_OPTIONS/);
   assert.match(dashboard, /AiEvidenceSection/);
   assert.match(dashboard, /ball-zodiac/);
@@ -77,6 +81,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /再加载/);
   assert.match(styles, /history-mobile-list/);
   assert.match(styles, /max-width: 370px/);
+  assert.match(styles, /touch-action: none/);
+  assert.match(styles, /\.special-stage-wrap[\s\S]*grid-column: 1 \/ -1/);
   assert.match(lotteryLib, /new_macau/);
   assert.match(lotteryLib, /\[12, 11, 31, 3, 44, 37\], 25/);
   assert.match(lotteryRoute, /info\.cld\.hkjc\.com/);

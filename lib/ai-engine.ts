@@ -142,8 +142,8 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
       "zodiac",
       "生肖",
       scoreFromDeviation(zodiacShare - 1 / 12, 0.035),
-      `${topZodiac[0]?.name ?? "—"}肖为样本第一，前列为 ${topZodiac.map((item) => item.name).join("、")}`,
-      topZodiac.map((item) => `${item.name}肖`),
+      `${topZodiac[0]?.name ?? "—"}为样本第一，前列为 ${topZodiac.map((item) => item.name).join("、")}`,
+      topZodiac.map((item) => item.name),
       [
         metric(
           "zodiac.top_share",
@@ -162,7 +162,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           draws.length,
         ),
       ],
-      `生肖维度以开奖日期映射，当前样本由${topZodiac[0]?.name ?? "—"}肖领先。`,
+      `生肖维度以开奖日期映射，当前样本由${topZodiac[0]?.name ?? "—"}领先。`,
       ["生肖只是号码分组方式，同一生肖内仍包含多个等机会号码。"],
     ),
     dimension(

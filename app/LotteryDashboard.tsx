@@ -438,35 +438,275 @@ function LiveStage({
   onClose: () => void;
 }) {
   const all = [...draw.numbers, draw.special];
+  const specialReady = revealed >= all.length;
   return (
-    <section className="live-stage" aria-live="polite">
+    <section className="live-stage" aria-label="实时开奖台">
       <div className="live-stage-head">
         <div><span className="live-pill"><span /> {demo ? "动效预演" : "LIVE"}</span><strong>{GAME_META[game].name} · 开奖台</strong></div>
         {demo && <button type="button" onClick={onClose} aria-label="关闭开奖动效">关闭</button>}
       </div>
       <div className="stage-countdown">
-        <small>{countdown > 0 ? "距离开奖" : waiting ? "正在等待数据源确认" : "本期号码依次揭晓"}</small>
+        <small aria-live="polite">
+          {countdown > 0
+            ? "距离开奖"
+            : waiting
+              ? "正在等待数据源确认"
+              : specialReady
+                ? "特码已开出，请慢慢刮开涂层"
+                : "本期号码依次揭晓"}
+        </small>
         <strong>{formatCountdown(countdown)}</strong>
       </div>
       <div className="stage-balls" aria-label="开奖号码">
-        {all.map((number, index) => (
-          <div className="stage-ball-wrap" key={`${number}-${index}`}>
+        {all.map((number, index) => {
+          const isSpecial = index === 6;
+          const isRevealed = revealed > index;
+          return (
+          <div className={`stage-ball-wrap ${isSpecial ? "special-stage-wrap" : ""}`} key={`${number}-${index}`}>
             {index === 6 && <span className="plus">+</span>}
-            <span className={`ball stage-ball ${revealed > index ? `wave-${getWave(number)} revealed` : "pending"}`}>
-              {revealed > index ? formatBall(number) : String(index + 1).padStart(2, "0")}
-            </span>
-            <small>
-              {revealed > index ? (
+            {isSpecial && isRevealed ? (
+              <ScratchSpecialBall
+                key={`${game}:${draw.issue}:${number}:${demo ? "demo" : "live"}`}
+                number={number}
+                drawAt={draw.drawAt}
+                resetKey={`${game}:${draw.issue}:${number}:${demo ? "demo" : "live"}`}
+              />
+            ) : (
+              <>
+                <span className={`ball stage-ball ${isRevealed ? `wave-${getWave(number)} revealed` : "pending"}`}>
+                  {isRevealed ? formatBall(number) : String(index + 1).padStart(2, "0")}
+                </span>
+                <small>
+                  {isRevealed ? (
                 <>
-                  <strong>{getZodiac(number, draw.drawAt)}肖</strong>
+                  <strong className="stage-zodiac">{getZodiac(number, draw.drawAt)}</strong>
                   <span>{WAVE_LABEL[getWave(number)]}</span>
                 </>
-              ) : index === 6 ? "特码" : "待开"}
-            </small>
+                  ) : isSpecial ? "特码" : "待开"}
+                </small>
+              </>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </section>
+  );
+}
+
+function ScratchSpecialBall({
+  number,
+  drawAt,
+  resetKey,
+}: {
+  number: number;
+  drawAt: string;
+  resetKey: string;
+}) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const scratchingRef = useRef(false);
+  const activePointerIdRef = useRef<number | null>(null);
+  const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const moveCountRef = useRef(0);
+  const [complete, setComplete] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [ready, setReady] = useState(false);
+  const zodiac = getZodiac(number, drawAt);
+  const wave = WAVE_LABEL[getWave(number)];
+
+  const revealAll = useCallback(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d");
+    if (canvas && context) context.clearRect(0, 0, canvas.width, canvas.height);
+    canvas?.blur();
+    setProgress(100);
+    setComplete(true);
+    scratchingRef.current = false;
+    activePointerIdRef.current = null;
+    lastPointRef.current = null;
+  }, []);
+
+  const measureProgress = useCallback(() => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d", { willReadFrequently: true });
+    if (!canvas || !context || canvas.width === 0 || canvas.height === 0) return 0;
+    const pixels = context.getImageData(0, 0, canvas.width, canvas.height).data;
+    let transparent = 0;
+    let sampled = 0;
+    for (let index = 3; index < pixels.length; index += 16) {
+      sampled += 1;
+      if (pixels[index] < 64) transparent += 1;
+    }
+    const next = Math.round((transparent / Math.max(sampled, 1)) * 100);
+    setProgress(next);
+    if (next >= 62) revealAll();
+    return next;
+  }, [revealAll]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    setReady(false);
+    const bounds = canvas.getBoundingClientRect();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(Math.round(bounds.width * ratio), 1);
+    canvas.height = Math.max(Math.round(bounds.height * ratio), 1);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) return;
+    context.setTransform(ratio, 0, 0, ratio, 0, 0);
+    const gradient = context.createLinearGradient(0, 0, bounds.width, bounds.height);
+    gradient.addColorStop(0, "#d9d3c7");
+    gradient.addColorStop(0.42, "#8d9293");
+    gradient.addColorStop(0.7, "#d6d0c3");
+    gradient.addColorStop(1, "#777d7e");
+    context.globalCompositeOperation = "source-over";
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, bounds.width, bounds.height);
+    context.fillStyle = "rgba(255,255,255,0.22)";
+    for (let x = 7; x < bounds.width; x += 12) {
+      for (let y = 8; y < bounds.height; y += 13) {
+        context.beginPath();
+        context.arc(x, y, 1.2, 0, Math.PI * 2);
+        context.fill();
+      }
+    }
+    context.fillStyle = "#2d3434";
+    context.font = `800 ${Math.max(Math.min(bounds.width * 0.19, 12), 9)}px sans-serif`;
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    context.fillText("慢慢刮开", bounds.width / 2, bounds.height / 2);
+    setComplete(false);
+    setProgress(0);
+    scratchingRef.current = false;
+    activePointerIdRef.current = null;
+    lastPointRef.current = null;
+    moveCountRef.current = 0;
+    setReady(true);
+  }, [number, resetKey]);
+
+  const pointFromEvent = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    return {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    };
+  };
+
+  const eraseTo = (point: { x: number; y: number }) => {
+    const canvas = canvasRef.current;
+    const context = canvas?.getContext("2d", { willReadFrequently: true });
+    if (!canvas || !context) return;
+    const previous = lastPointRef.current ?? point;
+    const bounds = canvas.getBoundingClientRect();
+    context.globalCompositeOperation = "destination-out";
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    context.lineWidth = Math.max(bounds.width * 0.24, 13);
+    context.beginPath();
+    context.moveTo(previous.x, previous.y);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    context.beginPath();
+    context.arc(point.x, point.y, context.lineWidth / 2, 0, Math.PI * 2);
+    context.fill();
+    lastPointRef.current = point;
+  };
+
+  const startScratch = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (complete || !ready || activePointerIdRef.current !== null) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    scratchingRef.current = true;
+    activePointerIdRef.current = event.pointerId;
+    const point = pointFromEvent(event);
+    lastPointRef.current = point;
+    eraseTo(point);
+  };
+
+  const continueScratch = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      !scratchingRef.current ||
+      activePointerIdRef.current !== event.pointerId ||
+      complete
+    ) {
+      return;
+    }
+    event.preventDefault();
+    eraseTo(pointFromEvent(event));
+    moveCountRef.current += 1;
+    if (moveCountRef.current % 5 === 0) measureProgress();
+  };
+
+  const stopScratch = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      !scratchingRef.current ||
+      activePointerIdRef.current !== event.pointerId
+    ) {
+      return;
+    }
+    scratchingRef.current = false;
+    activePointerIdRef.current = null;
+    lastPointRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    measureProgress();
+  };
+
+  const cancelScratch = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    if (
+      activePointerIdRef.current !== null &&
+      activePointerIdRef.current !== event.pointerId
+    ) {
+      return;
+    }
+    scratchingRef.current = false;
+    activePointerIdRef.current = null;
+    lastPointRef.current = null;
+  };
+
+  return (
+    <>
+      <div className={`scratch-ticket ${ready ? "ready" : ""} ${complete ? "complete" : ""}`}>
+        <div className={`scratch-reward ${ready ? "ready" : ""}`} aria-hidden={!complete}>
+          <span className={`ball stage-ball wave-${getWave(number)} revealed`}>
+            {formatBall(number)}
+          </span>
+          <small>
+            <strong className="stage-zodiac">{zodiac}</strong>
+            <span>{wave}</span>
+          </small>
+        </div>
+        <canvas
+          ref={canvasRef}
+          className={`scratch-canvas ${ready ? "ready" : ""} ${complete ? "complete" : ""}`}
+          role="button"
+          tabIndex={complete ? -1 : 0}
+          aria-label={
+            complete
+              ? `特码 ${formatBall(number)}，${zodiac}，${wave}`
+              : "特码已开奖，使用手指或鼠标慢慢刮开；按回车键可直接揭晓"
+          }
+          onPointerDown={startScratch}
+          onPointerMove={continueScratch}
+          onPointerUp={stopScratch}
+          onPointerCancel={cancelScratch}
+          onLostPointerCapture={cancelScratch}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              revealAll();
+            }
+          }}
+        />
+      </div>
+      <small className="scratch-status">
+        {complete ? "特码已揭晓" : progress > 0 ? `已刮开 ${progress}%` : "慢慢刮开"}
+      </small>
+      <span className="scratch-announcement" role="status">
+        {complete ? "特码已揭晓" : ready ? "特码已开出，可以开始刮开" : ""}
+      </span>
+    </>
   );
 }
 
@@ -503,12 +743,12 @@ function Ball({ number, special = false, drawAt }: { number: number; special?: b
   return (
     <span
       className={`ball-item ${special ? "special-item" : ""}`}
-      aria-label={`${special ? "特码" : "号码"} ${formatBall(number)}，${zodiac}肖，${WAVE_LABEL[getWave(number)]}`}
+      aria-label={`${special ? "特码" : "号码"} ${formatBall(number)}，${zodiac}，${WAVE_LABEL[getWave(number)]}`}
     >
       <span className={`ball wave-${getWave(number)} ${special ? "special" : ""}`}>
         {formatBall(number)}
       </span>
-      <span className="ball-zodiac">{zodiac}肖</span>
+      <span className="ball-zodiac">{zodiac}</span>
     </span>
   );
 }
@@ -541,7 +781,7 @@ function NumberHeatmap({ analysis }: { analysis: Analysis }) {
           const info = scoreMap.get(number);
           const hot = analysis.hot.some((item) => item.number === number);
           const overdue = analysis.overdue.some((item) => item.number === number);
-          return <div className={`number-cell ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} key={number}><strong>{formatBall(number)}</strong><span>{getZodiac(number)}肖</span><small>{info ? `${info.frequency}次 · 遗${info.omission}` : "—"}</small></div>;
+          return <div className={`number-cell ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} key={number}><strong>{formatBall(number)}</strong><span>{getZodiac(number)}</span><small>{info ? `${info.frequency}次 · 遗${info.omission}` : "—"}</small></div>;
         })}
       </div>
     </article>
@@ -801,7 +1041,7 @@ function StrategySection({
             <div className="strategy-tags">
               <span>{scenario.structure.odd} 奇</span>
               <span>{scenario.structure.big} 大</span>
-              <span>{scenario.structure.zodiacCount} 肖</span>
+              <span>生肖 {scenario.structure.zodiacCount} 类</span>
               <span>{scenario.structure.tails.length} 尾</span>
             </div>
             {report && (
@@ -937,7 +1177,7 @@ function HistoryTable({ draws }: { draws: Draw[] }) {
           <thead><tr><th>彩种 / 期号</th><th>开奖时间（北京）</th><th>开奖号码与生肖</th><th>结构摘要</th><th>状态</th></tr></thead>
           <tbody>{draws.map((draw) => {
             const all = [...draw.numbers, draw.special];
-            return <tr key={`${draw.game}-${draw.issue}`}><td><strong>{GAME_META[draw.game].shortName}</strong> {draw.issue}</td><td>{formatDrawDate(draw.drawAt)}</td><td><BallRow numbers={draw.numbers} special={draw.special} compact drawAt={draw.drawAt} /></td><td>{all.filter((number) => number % 2).length}奇 · {new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}肖 · 和值{all.reduce((a, b) => a + b, 0)}</td><td><span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "双源一致" : "第三方数据"}</span></td></tr>;
+            return <tr key={`${draw.game}-${draw.issue}`}><td><strong>{GAME_META[draw.game].shortName}</strong> {draw.issue}</td><td>{formatDrawDate(draw.drawAt)}</td><td><BallRow numbers={draw.numbers} special={draw.special} compact drawAt={draw.drawAt} /></td><td>{all.filter((number) => number % 2).length}奇 · 生肖{new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}类 · 和值{all.reduce((a, b) => a + b, 0)}</td><td><span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "双源一致" : "第三方数据"}</span></td></tr>;
           })}</tbody>
         </table>
       </div>
@@ -952,7 +1192,7 @@ function HistoryTable({ draws }: { draws: Draw[] }) {
               </div>
               <BallRow numbers={draw.numbers} special={draw.special} compact drawAt={draw.drawAt} />
               <div className="history-mobile-foot">
-                <span>{all.filter((number) => number % 2).length}奇 · {new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}肖 · 和值{all.reduce((a, b) => a + b, 0)}</span>
+                <span>{all.filter((number) => number % 2).length}奇 · 生肖{new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}类 · 和值{all.reduce((a, b) => a + b, 0)}</span>
                 <span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "双源一致" : "第三方数据"}</span>
               </div>
             </article>

@@ -652,7 +652,8 @@ function isSafeModelText(text: string) {
     /命中率|中奖率|胜率|提高概率|必出|必中|稳赚|保证中奖|收益率|回本|追号|翻倍/.test(
       text,
     );
-  return !containsNumericClaim && !containsForbiddenClaim;
+  const containsZodiacSuffix = /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/.test(text);
+  return !containsNumericClaim && !containsForbiddenClaim && !containsZodiacSuffix;
 }
 
 async function buildSafetyIdentifier(request: NextRequest) {
@@ -706,6 +707,7 @@ const SYSTEM_PROMPT = `你是“六合智研”的统计解释与情景研判模
 4. 必须正面说明冲突信号、滚动回测与随机基准的关系。
 5. 结论要强、清晰、具体，但不夸大确定性。
 6. evidenceScore 和 evidenceStrength 表示样本内证据一致性，不是中奖概率。
+7. 提到具体生肖时只写“鼠、牛、虎、兔、龙、蛇、马、羊、猴、鸡、狗、猪”单字，不在后面添加“肖”字。
 
 禁止：
 - 编造号码、期号、时间、证据、概率、命中率、赔率或收益。

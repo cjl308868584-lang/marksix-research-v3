@@ -261,7 +261,7 @@ export function buildAnalysis(draws: Draw[]): Analysis {
   const dominantZodiac = [...zodiacMap.entries()].sort((a, b) => b[1] - a[1])[0] ?? ["—", 0];
   const summary = [
     `近 ${safeDraws.length} 期中，${WAVE_LABEL[dominantWave[0]]}占比 ${percent(dominantWave[1], totalBalls)}，为当前样本最高波色。`,
-    `${dominantZodiac[0]}肖出现 ${dominantZodiac[1]} 次；热度只描述历史频率，不代表下一期必然延续。`,
+    `${dominantZodiac[0]}出现 ${dominantZodiac[1]} 次；热度只描述历史频率，不代表下一期必然延续。`,
     `奇偶比 ${odd}:${even}，大小比 ${big}:${small}，平均单球值 ${round(sum / Math.max(totalBalls, 1))}。`,
   ];
 
