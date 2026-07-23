@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  AI_FOCUS_OPTIONS,
+  type AiAnalysisResponse,
+  type AiDimensionId,
+  type AiFocus,
+  type AiScenario,
+} from "../lib/ai-types";
 import {
   FALLBACK_DRAWS,
   GAME_IDS,
@@ -26,15 +33,6 @@ type ApiPayload = {
   fetchedAt: string;
 };
 
-type AiNarrative = {
-  headline: string;
-  overview: string;
-  observations: string[];
-  counterpoint: string;
-};
-
-const FOCUS_OPTIONS = ["综合", "号码", "生肖", "波色", "遗漏", "形态"] as const;
-
 export function LotteryDashboard() {
   const [draws, setDraws] = useState<Record<GameId, Draw[]>>(FALLBACK_DRAWS);
   const [status, setStatus] = useState<Record<GameId, ApiPayload | null>>({
@@ -45,18 +43,25 @@ export function LotteryDashboard() {
   const [selectedGame, setSelectedGame] = useState<GameId>("hk");
   const [windowSize, setWindowSize] = useState(30);
   const [historyVisible, setHistoryVisible] = useState(20);
-  const [focus, setFocus] = useState<(typeof FOCUS_OPTIONS)[number]>("综合");
+  const [focus, setFocus] = useState<AiFocus>("comprehensive");
   const [now, setNow] = useState(() => new Date());
   const [demo, setDemo] = useState(false);
   const [demoSeconds, setDemoSeconds] = useState(3);
   const [revealed, setRevealed] = useState(0);
   const [realReveal, setRealReveal] = useState({ key: "", count: 0 });
-  const [aiNarrative, setAiNarrative] = useState<AiNarrative | null>(null);
-  const [aiMode, setAiMode] = useState<"idle" | "loading" | "ai" | "statistical">("idle");
+  const [aiReport, setAiReport] = useState<AiAnalysisResponse | null>(null);
+  const [aiMode, setAiMode] = useState<"idle" | "loading" | "ai" | "statistical" | "error">("idle");
+  const [aiError, setAiError] = useState("");
+  const [aiLoadingStep, setAiLoadingStep] = useState(0);
+  const [activeScenario, setActiveScenario] = useState<AiScenario["id"]>("balanced");
+  const aiAbortRef = useRef<AbortController | null>(null);
 
   const resetAi = useCallback(() => {
-    setAiNarrative(null);
+    aiAbortRef.current?.abort();
+    setAiReport(null);
     setAiMode("idle");
+    setAiError("");
+    setAiLoadingStep(0);
   }, []);
 
   const chooseGame = useCallback((game: GameId) => {
@@ -70,7 +75,7 @@ export function LotteryDashboard() {
     resetAi();
   }, [resetAi]);
 
-  const chooseFocus = useCallback((item: (typeof FOCUS_OPTIONS)[number]) => {
+  const chooseFocus = useCallback((item: AiFocus) => {
     setFocus(item);
     resetAi();
   }, [resetAi]);
@@ -162,23 +167,47 @@ export function LotteryDashboard() {
   }, [isCurrentResult, realRevealKey]);
 
   const requestAi = useCallback(async () => {
+    aiAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiAbortRef.current = controller;
+    setAiReport(null);
+    setAiError("");
+    setAiLoadingStep(0);
     setAiMode("loading");
+    const progress = window.setInterval(
+      () => setAiLoadingStep((current) => Math.min(current + 1, 2)),
+      1_400,
+    );
     try {
       const response = await fetch("/api/analyze", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ game: selectedGame, draws: scopedDraws, focus }),
+        body: JSON.stringify({
+          game: selectedGame,
+          window: windowSize,
+          focus,
+          depth: "deep",
+        }),
+        signal: controller.signal,
       });
-      const payload = (await response.json()) as {
-        mode?: "ai" | "statistical";
-        narrative?: AiNarrative;
-      };
-      if (payload.narrative) setAiNarrative(payload.narrative);
+      const payload = (await response.json()) as AiAnalysisResponse & { error?: string };
+      if (!response.ok || payload.schemaVersion !== "2") {
+        throw new Error(payload.error || "分析服务暂时不可用。");
+      }
+      setAiReport(payload);
+      setActiveScenario(payload.synthesis.recommendedScenarioId);
       setAiMode(payload.mode === "ai" ? "ai" : "statistical");
-    } catch {
-      setAiMode("statistical");
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setAiError(error instanceof Error ? error.message : "分析服务暂时不可用。");
+      setAiMode("error");
+    } finally {
+      window.clearInterval(progress);
+      if (aiAbortRef.current === controller) aiAbortRef.current = null;
     }
-  }, [focus, scopedDraws, selectedGame]);
+  }, [focus, selectedGame, windowSize]);
+
+  useEffect(() => () => aiAbortRef.current?.abort(), []);
 
   const liveDraw = latest;
   const stageVisible = demo || liveWindow.visible;
@@ -290,64 +319,71 @@ export function LotteryDashboard() {
           </div>
         </section>
 
-        <section className="ai-lab section-block" id="lab">
-          <div className="ai-intro">
+        <section className="section-block" id="lab">
+          <div className="ai-lab-header">
             <SectionHeading
-              eyebrow="AI MODEL LENS"
-              title="六维研判实验室"
-              description="先由统计引擎计算，再交给 AI 解释；候选组合始终附带样本、结构和反方观点。"
+              eyebrow="GPT‑5.6 · EVIDENCE ENGINE"
+              title="AI 多策略预测实验室"
+              description="服务端先计算九类信号、三路候选和无未来数据泄漏的滚动回测，再由 GPT‑5.6 深度归纳、识别冲突并形成强总结。"
             />
-            <div className="focus-tabs" role="tablist" aria-label="AI 分析维度">
-              {FOCUS_OPTIONS.map((item) => (
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={focus === item}
-                  className={focus === item ? "active" : ""}
-                  onClick={() => chooseFocus(item)}
-                  key={item}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
-            <button className="primary-action ai-button" type="button" onClick={requestAi} disabled={aiMode === "loading"}>
-              {aiMode === "loading" ? "正在形成研判…" : "生成本窗口 AI 深度报告"}
-            </button>
-            <p className="microcopy">AI 只解释已计算的数据，不会把随机波动包装成确定规律。</p>
+            <AiContextBar
+              game={selectedGame}
+              latest={latest}
+              target={liveWindow.target}
+              windowSize={Math.min(windowSize, draws[selectedGame].length)}
+              report={aiReport}
+            />
           </div>
-          <AiReport analysis={analysis} narrative={aiNarrative} mode={aiMode} focus={focus} game={selectedGame} />
+          <div className="ai-lab">
+            <div className="ai-intro">
+              <span className="control-label">选择主研维度</span>
+              <div className="focus-tabs" role="group" aria-label="AI 主研维度">
+                {AI_FOCUS_OPTIONS.map((item) => (
+                  <button
+                    type="button"
+                    aria-pressed={focus === item.id}
+                    className={focus === item.id ? "active" : ""}
+                    onClick={() => chooseFocus(item.id)}
+                    key={item.id}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+              <div className="ai-capability-list">
+                <span><i>01</i> 号码与特码分层</span>
+                <span><i>02</i> 生肖 / 波色 / 尾数</span>
+                <span><i>03</i> 冷热 / 遗漏 / 形态</span>
+                <span><i>04</i> 随机基准回测</span>
+              </div>
+              <button className="primary-action ai-button" type="button" onClick={requestAi} disabled={aiMode === "loading"}>
+                {aiMode === "loading"
+                  ? ["正在校验历史数据…", "正在运行三路回测…", "GPT‑5.6 正在深度归纳…"][aiLoadingStep]
+                  : aiReport
+                    ? "重新生成 AI 深度报告"
+                    : "生成 GPT‑5.6 深度报告"}
+              </button>
+              <p className="microcopy">每份报告绑定彩种、目标期号、统计窗口和数据指纹；大模型不能自行编造号码或回测数字。</p>
+            </div>
+            <AiReport
+              analysis={analysis}
+              report={aiReport}
+              mode={aiMode}
+              focus={focus}
+              game={selectedGame}
+              error={aiError}
+            />
+          </div>
         </section>
 
-        <section className="strategy-section section-block">
-          <SectionHeading
-            eyebrow="WALK-FORWARD VIEW"
-            title="三路候选策略"
-            description="同一批数据用三种权重观察，避免单一算法只放大某一类历史特征。"
-          />
-          <div className="strategy-grid">
-            {analysis.candidates.map((candidate, index) => (
-              <article className="strategy-card" key={candidate.id}>
-                <div className="strategy-topline">
-                  <span>0{index + 1}</span>
-                  <span>结构分 {candidate.score}</span>
-                </div>
-                <h3>{candidate.name}</h3>
-                <p>{candidate.description}</p>
-                <BallRow numbers={candidate.numbers} special={candidate.special} compact />
-                <div className="strategy-tags">
-                  <span>{candidate.numbers.filter((number) => number % 2).length} 奇</span>
-                  <span>{candidate.numbers.filter((number) => number >= 25).length} 大</span>
-                  <span>{new Set(candidate.numbers.map((number) => getZodiac(number))).size} 肖</span>
-                </div>
-              </article>
-            ))}
-          </div>
-          <div className="responsible-note">
-            <span>!</span>
-            <p><strong>理性提示</strong>　候选组合来自第三方历史数据的统计演示。彩票结果具有随机性，过去数据无法保证未来结果；本站不是官方彩票网站，不提供投注或收益承诺。</p>
-          </div>
-        </section>
+        <StrategySection
+          analysis={analysis}
+          report={aiReport}
+          activeScenario={activeScenario}
+          onScenario={setActiveScenario}
+        />
+
+        {aiReport && <AiEvidenceSection report={aiReport} />}
 
         <section className="history-section section-block" id="history">
           <SectionHeading
@@ -549,21 +585,347 @@ function ZodiacPanel({ analysis }: { analysis: Analysis }) {
   );
 }
 
-function AiReport({ analysis, narrative, mode, focus, game }: { analysis: Analysis; narrative: AiNarrative | null; mode: "idle" | "loading" | "ai" | "statistical"; focus: string; game: GameId }) {
-  const report = narrative ?? {
-    headline: `${GAME_META[game].shortName} · ${focus}预研摘要`,
-    overview: analysis.summary[0],
-    observations: analysis.summary,
-    counterpoint: "点击生成报告后，系统会基于当前窗口给出完整证据链和反方观点。",
-  };
+function AiContextBar({
+  game,
+  latest,
+  target,
+  windowSize,
+  report,
+}: {
+  game: GameId;
+  latest: Draw;
+  target: Date;
+  windowSize: number;
+  report: AiAnalysisResponse | null;
+}) {
   return (
-    <article className="ai-report">
-      <div className="ai-report-head"><div className="ai-orb">AI</div><div><span>{mode === "ai" ? "大模型增强" : "统计引擎在线"}</span><h3>{report.headline}</h3></div><small>{analysis.sampleSize} 期样本</small></div>
-      <p className="ai-overview">{report.overview}</p>
-      <ol>{report.observations.map((item, index) => <li key={`${item}-${index}`}><span>0{index + 1}</span><p>{item}</p></li>)}</ol>
-      <div className="counterpoint"><span>反方校验</span><p>{report.counterpoint}</p></div>
-      <div className="report-meta"><span>GROUNDING · 结构化数据</span><span>NO GUARANTEE · 不承诺命中</span></div>
+    <div className="ai-context-bar" aria-label="本次分析上下文">
+      <div><span>分析彩种</span><strong>{GAME_META[game].shortName}</strong></div>
+      <div><span>目标期号</span><strong>{report?.target.issue ?? `下一期`}</strong></div>
+      <div><span>历史窗口</span><strong>{windowSize} 期</strong></div>
+      <div><span>最新数据</span><strong>{latest.issue}</strong></div>
+      <div><span>预计开奖</span><strong>{formatBeijingDate(target)}</strong></div>
+    </div>
+  );
+}
+
+function AiReport({
+  analysis,
+  report,
+  mode,
+  focus,
+  game,
+  error,
+}: {
+  analysis: Analysis;
+  report: AiAnalysisResponse | null;
+  mode: "idle" | "loading" | "ai" | "statistical" | "error";
+  focus: AiFocus;
+  game: GameId;
+  error: string;
+}) {
+  const focusLabel = AI_FOCUS_OPTIONS.find((item) => item.id === focus)?.label ?? "综合";
+  if (!report) {
+    return (
+      <article className={`ai-report ai-report-${mode}`}>
+        <div className="ai-report-head">
+          <div className="ai-orb">{mode === "loading" ? "···" : "AI"}</div>
+          <div>
+            <span>{mode === "loading" ? "DEEP REASONING" : mode === "error" ? "SERVICE NOTICE" : "READY"}</span>
+            <h3>
+              {mode === "loading"
+                ? "正在建立跨维度证据链"
+                : mode === "error"
+                  ? "本次报告未能生成"
+                  : `${GAME_META[game].shortName} · ${focusLabel}预测工作台`}
+            </h3>
+          </div>
+          <small>{analysis.sampleSize} 期样本</small>
+        </div>
+        {mode === "loading" ? (
+          <div className="ai-processing">
+            <span /><span /><span />
+            <p>统计计算、回测和大模型归纳都在服务端完成，通常需要数秒。</p>
+          </div>
+        ) : mode === "error" ? (
+          <div className="ai-empty-state error">
+            <strong>{error || "分析服务暂时不可用。"}</strong>
+            <p>请稍后重试；现有统计图表与三路本地场景仍可正常使用。</p>
+          </div>
+        ) : (
+          <div className="ai-empty-state">
+            <strong>一键生成完整预测研究包</strong>
+            <p>包含九维信号、三路候选、推荐场景、反方证据和随机基准回测。所有数值都由统计引擎先行计算。</p>
+            <div className="empty-signal-grid">
+              <span>九维证据</span><span>三路场景</span><span>滚动回测</span><span>强总结</span>
+            </div>
+          </div>
+        )}
+        <div className="report-meta"><span>SERVER-SIDE · 密钥不下发</span><span>NO GUARANTEE · 不承诺命中</span></div>
+      </article>
+    );
+  }
+
+  const recommended = report.candidateSets.find(
+    (scenario) => scenario.id === report.synthesis.recommendedScenarioId,
+  );
+  return (
+    <article className="ai-report ai-report-complete">
+      <div className="ai-report-head">
+        <div className="ai-orb">AI</div>
+        <div>
+          <span>{mode === "ai" ? "GPT‑5.6 深度归纳" : "本地证据引擎降级"}</span>
+          <h3>{report.synthesis.headline}</h3>
+        </div>
+        <small>{report.cached ? "缓存报告" : `${report.model.latencyMs / 1000}s`}</small>
+      </div>
+      <div className="evidence-strength">
+        <div>
+          <span>样本内证据强度</span>
+          <strong>{report.evidenceStrength.label} · {report.evidenceStrength.score}</strong>
+        </div>
+        <div className="evidence-meter"><i style={{ width: `${report.evidenceStrength.score}%` }} /></div>
+        <small>不是中奖概率</small>
+      </div>
+      <p className="ai-overview">{report.synthesis.executiveSummary}</p>
+      {recommended && (
+        <div className="ai-recommendation">
+          <span>AI 推荐观察场景</span>
+          <div><strong>{recommended.name}</strong><em>证据指数 {recommended.evidenceScore}</em></div>
+          <p>{report.synthesis.recommendationReason}</p>
+        </div>
+      )}
+      <div className="signal-columns">
+        <div>
+          <span>最强信号</span>
+          <ul>{report.synthesis.strongestSignals.map((item) => <li key={item}>{item}</li>)}</ul>
+        </div>
+        <div>
+          <span>冲突信号</span>
+          <ul>{report.synthesis.conflictingSignals.map((item) => <li key={item}>{item}</li>)}</ul>
+        </div>
+      </div>
+      <div className="counterpoint">
+        <span>不确定性</span>
+        <p>{report.synthesis.uncertainty}</p>
+      </div>
+      <p className="ai-notice">{report.notice}</p>
+      <div className="report-meta">
+        <span>{report.model.name} · {report.model.reasoning.toUpperCase()}</span>
+        <span>{formatGeneratedTime(report.generatedAt)} · 数据 {report.dataQuality.fingerprint}</span>
+      </div>
     </article>
+  );
+}
+
+function StrategySection({
+  analysis,
+  report,
+  activeScenario,
+  onScenario,
+}: {
+  analysis: Analysis;
+  report: AiAnalysisResponse | null;
+  activeScenario: AiScenario["id"];
+  onScenario: (scenario: AiScenario["id"]) => void;
+}) {
+  const scenarios: AiScenario[] = report?.candidateSets ?? analysis.candidates.map((candidate) => {
+    const all = [...candidate.numbers, candidate.special];
+    const waves = all.reduce<Record<Wave, number>>(
+      (current, number) => {
+        current[getWave(number)] += 1;
+        return current;
+      },
+      { red: 0, blue: 0, green: 0 },
+    );
+    return {
+      id: candidate.id,
+      name: candidate.name,
+      description: candidate.description,
+      numbers: candidate.numbers,
+      special: candidate.special,
+      evidenceScore: Math.round(candidate.score),
+      structure: {
+        zodiacCount: new Set(all.map((number) => getZodiac(number))).size,
+        waves,
+        odd: all.filter((number) => number % 2 === 1).length,
+        even: all.filter((number) => number % 2 === 0).length,
+        big: all.filter((number) => number >= 25).length,
+        small: all.filter((number) => number < 25).length,
+        tails: [...new Set(all.map((number) => number % 10))].sort((a, b) => a - b),
+      },
+      supportingEvidence: ["等待 AI 生成后展示完整证据链。"],
+      counterEvidence: ["结构排序不代表中奖概率。"],
+    };
+  });
+  const recommendedId = report?.synthesis.recommendedScenarioId;
+  return (
+    <section className="strategy-section section-block">
+      <SectionHeading
+        eyebrow="SCENARIO FORECAST"
+        title="三路候选场景"
+        description="同一历史窗口分别观察均衡共识、趋势延续和逆向遗漏。AI 只从服务端生成的候选中推荐，不会凭空编造号码。"
+      />
+      <div className="scenario-switch" role="group" aria-label="切换候选场景">
+        {scenarios.map((scenario) => (
+          <button
+            type="button"
+            className={activeScenario === scenario.id ? "active" : ""}
+            aria-pressed={activeScenario === scenario.id}
+            onClick={() => onScenario(scenario.id)}
+            key={scenario.id}
+          >
+            {scenario.name}
+            {recommendedId === scenario.id && <span>AI 推荐</span>}
+          </button>
+        ))}
+      </div>
+      <div className="strategy-grid">
+        {scenarios.map((scenario, index) => (
+          <article
+            className={`strategy-card ${activeScenario === scenario.id ? "active" : ""} ${recommendedId === scenario.id ? "recommended" : ""}`}
+            key={scenario.id}
+          >
+            <div className="strategy-topline">
+              <span>0{index + 1}</span>
+              <span>{report ? `证据指数 ${scenario.evidenceScore}` : "本地预研"}</span>
+            </div>
+            <h3>{scenario.name}{recommendedId === scenario.id && <small>AI PICK</small>}</h3>
+            <p>{scenario.description}</p>
+            <BallRow
+              numbers={scenario.numbers}
+              special={scenario.special}
+              compact
+              drawAt={report?.target.expectedDrawAt}
+            />
+            <div className="strategy-tags">
+              <span>{scenario.structure.odd} 奇</span>
+              <span>{scenario.structure.big} 大</span>
+              <span>{scenario.structure.zodiacCount} 肖</span>
+              <span>{scenario.structure.tails.length} 尾</span>
+            </div>
+            {report && (
+              <div className="strategy-evidence">
+                <span>入选依据</span>
+                <ul>{scenario.supportingEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
+                <details>
+                  <summary>查看反方证据</summary>
+                  <ul>{scenario.counterEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
+                </details>
+              </div>
+            )}
+          </article>
+        ))}
+      </div>
+      <div className="responsible-note">
+        <span>!</span>
+        <p><strong>理性提示</strong>　证据指数、AI 推荐和历史回测均不是中奖概率。彩票结果具有随机性；本站不是官方彩票网站，不提供投注、资金或收益建议。</p>
+      </div>
+    </section>
+  );
+}
+
+function AiEvidenceSection({ report }: { report: AiAnalysisResponse }) {
+  const [openDimension, setOpenDimension] = useState<AiDimensionId | null>(
+    report.focus === "comprehensive" ? report.dimensions[0]?.id ?? null : report.focus,
+  );
+  const insightMap = new Map(
+    report.synthesis.dimensionInsights.map((insight) => [insight.id, insight]),
+  );
+  const dimensions = [...report.dimensions].sort((a, b) => {
+    if (a.id === report.focus) return -1;
+    if (b.id === report.focus) return 1;
+    return b.evidenceScore - a.evidenceScore;
+  });
+  const recommended =
+    report.backtest.strategies.find(
+      (strategy) => strategy.id === report.synthesis.recommendedScenarioId,
+    ) ?? report.backtest.strategies[0];
+  return (
+    <section className="ai-evidence-section section-block">
+      <SectionHeading
+        eyebrow="EVIDENCE & BACKTEST"
+        title="证据链与滚动回测"
+        description="每条 AI 结论都落回真实统计指标；每次回测只使用目标期以前的数据，并与理论随机基准对照。"
+      />
+      <div className="data-quality-strip">
+        <span>样本完整度 <strong>{report.dataQuality.completeness}%</strong></span>
+        <span>回测期数 <strong>{report.backtest.testCount}</strong></span>
+        <span>训练窗口 <strong>{report.backtest.trainWindow}</strong></span>
+        <span>数据模式 <strong>{report.dataQuality.sourceMode === "live" ? "实时历史源" : "同步快照"}</strong></span>
+      </div>
+      <div className="evidence-layout">
+        <div className="dimension-accordion">
+          {dimensions.map((dimension) => {
+            const insight = insightMap.get(dimension.id);
+            return (
+              <details
+                className="dimension-card"
+                open={openDimension === dimension.id}
+                key={dimension.id}
+              >
+                <summary
+                  onClick={(event) => {
+                    event.preventDefault();
+                    setOpenDimension((current) => current === dimension.id ? null : dimension.id);
+                  }}
+                >
+                  <span>{dimension.label}</span>
+                  <strong>{dimension.direction}</strong>
+                  <em>{signalLabel(dimension.signal)} · {dimension.evidenceScore}</em>
+                </summary>
+                <div className="dimension-body">
+                  <p>{insight?.summary ?? dimension.explanation}</p>
+                  <div className="dimension-metrics">
+                    {dimension.metrics.map((metricItem) => (
+                      <div key={metricItem.id}>
+                        <span>{metricItem.label}</span>
+                        <strong>{metricItem.value}</strong>
+                        <small>基准：{metricItem.baseline}</small>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="dimension-counter">
+                    <span>反方校验</span>
+                    <p>{insight?.counterpoint ?? dimension.counterEvidence[0]}</p>
+                  </div>
+                </div>
+              </details>
+            );
+          })}
+        </div>
+        <aside className="backtest-panel">
+          <span className="control-label">WALK-FORWARD · 无前视</span>
+          <h3>{recommended?.name ?? "三路策略"}历史表现</h3>
+          <p>{report.backtest.conclusion}</p>
+          <div className="backtest-metrics">
+            <div><span>平均正码覆盖</span><strong>{recommended?.averageMainOverlap ?? 0}</strong><small>随机期望 {report.backtest.baseline.averageMainOverlap}</small></div>
+            <div><span>至少覆盖 1 码</span><strong>{recommended?.anyMainOverlapRate ?? 0}%</strong><small>随机基准 {report.backtest.baseline.anyMainOverlapRate}%</small></div>
+            <div><span>特码精确覆盖</span><strong>{recommended?.specialExactRate ?? 0}%</strong><small>随机基准 {report.backtest.baseline.specialExactRate}%</small></div>
+            <div><span>跨期稳定度</span><strong>{recommended?.stabilityScore ?? 0}</strong><small>候选集合相似度</small></div>
+          </div>
+          <div className="backtest-comparison">
+            {report.backtest.strategies.map((strategy) => (
+              <div key={strategy.id}>
+                <span>{strategy.name}</span>
+                <i style={{ width: `${Math.min(strategy.averageMainOverlap / 2.5 * 100, 100)}%` }} />
+                <strong>{strategy.averageMainOverlap}</strong>
+              </div>
+            ))}
+          </div>
+          <div className="model-boundary">
+            <strong>模型边界</strong>
+            <p>{report.risk.randomnessNotice}</p>
+            <p>{report.risk.noGuarantee}</p>
+          </div>
+        </aside>
+      </div>
+      {report.dataQuality.warnings.length > 0 && (
+        <div className="data-warnings">
+          {report.dataQuality.warnings.map((warning) => <span key={warning}>{warning}</span>)}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -620,6 +982,26 @@ function formatDrawDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function formatGeneratedTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function signalLabel(signal: AiAnalysisResponse["dimensions"][number]["signal"]) {
+  if (signal === "moderate") return "中等";
+  if (signal === "weak") return "有限";
+  return "中性";
 }
 
 function formatCountdown(ms: number) {
