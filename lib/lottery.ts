@@ -14,6 +14,15 @@ export type Draw = {
   verified: boolean;
 };
 
+export type LiveDrawProgress = {
+  game: GameId;
+  issue: string;
+  drawAt: string;
+  numbers: number[];
+  special: number | null;
+  source: string;
+};
+
 export type NumberScore = {
   number: number;
   frequency: number;

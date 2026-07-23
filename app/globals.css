@@ -408,6 +408,15 @@ footer {
   letter-spacing: 0.08em;
 }
 
+.live-stage-sync {
+  margin-top: 6px;
+  display: block;
+  color: var(--success);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
 .stage-balls {
   margin: 20px auto 0;
   display: flex;
@@ -752,6 +761,60 @@ footer {
 .ball-row.compact .ball-plus {
   margin-top: 8px;
   font-size: 12px;
+}
+
+.draw-card > .ball-row .ball {
+  width: 48px;
+  height: 48px;
+  font-size: 17px;
+}
+
+.draw-card > .ball-row {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 9px 4px;
+}
+
+.draw-card > .ball-row .ball-item {
+  min-width: 48px;
+  justify-self: center;
+}
+
+.draw-card > .ball-row .ball-plus {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: end;
+  margin-top: 17px;
+}
+
+.draw-card > .ball-row .special-item {
+  grid-column: 4 / span 2;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.draw-card > .ball-row .special-item .ball {
+  width: 58px;
+  height: 58px;
+  font-size: 21px;
+}
+
+.strategy-card > .ball-row.compact .ball,
+.ai-recommendation-balls .ball-row.compact .ball {
+  width: 40px;
+  height: 40px;
+  font-size: 14px;
+}
+
+.strategy-card > .ball-row.compact .ball-item,
+.ai-recommendation-balls .ball-row.compact .ball-item {
+  min-width: 40px;
+}
+
+.draw-card > .ball-row .ball-zodiac,
+.strategy-card > .ball-row .ball-zodiac,
+.ai-recommendation-balls .ball-zodiac {
+  font-size: 11px;
 }
 
 .draw-card-foot {
@@ -2719,6 +2782,11 @@ footer p {
     font-size: 24px;
   }
 
+  .live-stage-sync {
+    margin-top: 7px;
+    font-size: 10px;
+  }
+
   .stage-balls {
     width: 100%;
     margin-top: 15px;
@@ -2728,9 +2796,10 @@ footer p {
   }
 
   .stage-ball {
-    width: 36px;
-    height: 36px;
-    font-size: 11px;
+    width: min(46px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+    font-size: clamp(15px, 4.5vw, 18px);
   }
 
   .stage-ball-wrap {
@@ -2765,9 +2834,9 @@ footer p {
   }
 
   .scratch-reward .stage-ball {
-    width: 58px;
-    height: 58px;
-    font-size: 18px;
+    width: 72px;
+    height: 72px;
+    font-size: 25px;
   }
 
   .scratch-reward small {
@@ -2886,6 +2955,90 @@ footer p {
   .ball-row.compact .ball-plus {
     margin-top: 10px;
     text-align: center;
+  }
+
+  .draw-card > .ball-row,
+  .strategy-card > .ball-row,
+  .ai-recommendation-balls .ball-row {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 11px 4px;
+  }
+
+  .draw-card > .ball-row .ball-item,
+  .strategy-card > .ball-row.compact .ball-item,
+  .ai-recommendation-balls .ball-row.compact .ball-item {
+    min-width: 0;
+    justify-self: center;
+  }
+
+  .draw-card > .ball-row .ball,
+  .strategy-card > .ball-row.compact .ball,
+  .ai-recommendation-balls .ball-row.compact .ball {
+    width: min(46px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+    font-size: clamp(15px, 4.5vw, 18px);
+  }
+
+  .draw-card > .ball-row .ball-zodiac,
+  .strategy-card > .ball-row .ball-zodiac,
+  .ai-recommendation-balls .ball-zodiac {
+    min-width: 29px;
+    padding: 4px 7px;
+    font-size: 12px;
+  }
+
+  .draw-card > .ball-row .ball-plus,
+  .strategy-card > .ball-row .ball-plus,
+  .ai-recommendation-balls .ball-plus {
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: end;
+    margin-top: 19px;
+    font-size: 18px;
+  }
+
+  .draw-card > .ball-row .special-item,
+  .strategy-card > .ball-row .special-item,
+  .ai-recommendation-balls .special-item {
+    grid-column: 4 / span 2;
+    grid-row: 2;
+    justify-self: start;
+  }
+
+  .draw-card > .ball-row .special-item .ball,
+  .strategy-card > .ball-row .special-item .ball,
+  .ai-recommendation-balls .special-item .ball {
+    width: 60px;
+    height: 60px;
+    font-size: 22px;
+  }
+
+  .draw-card > .ball-row .special-item::after,
+  .strategy-card > .ball-row .special-item::after,
+  .ai-recommendation-balls .special-item::after {
+    content: "特码";
+    margin-top: 1px;
+    color: var(--gold);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+  }
+
+  .history-mobile-card .ball-row.compact .ball {
+    width: 32px;
+    height: 32px;
+    font-size: 11px;
+  }
+
+  .history-mobile-card .ball-row.compact .ball-item {
+    min-width: 0;
+  }
+
+  .history-mobile-card .ball-row.compact .ball-zodiac {
+    padding: 3px 5px;
+    font-size: 10px;
   }
 
   .draw-card-foot {
@@ -3539,21 +3692,20 @@ footer p {
   .hero-actions { grid-template-columns: 1fr; }
   .draw-card { padding-inline: 11px; }
   .draw-grid { margin-inline: -9px; padding-inline: 9px; }
-  .stage-ball,
-  .ball,
-  .ball-row.compact .ball {
+  .history-mobile-card .ball,
+  .history-mobile-card .ball-row.compact .ball {
     width: 30px;
     height: 30px;
     font-size: 10px;
   }
   .stage-ball-wrap small,
-  .ball-zodiac,
-  .ball-row.compact .ball-zodiac {
+  .history-mobile-card .ball-zodiac,
+  .history-mobile-card .ball-row.compact .ball-zodiac {
     font-size: 9px;
   }
-  .scratch-status { font-size: 9px !important; }
-  .ball-plus,
-  .ball-row.compact .ball-plus {
+  .scratch-status { font-size: 10px !important; }
+  .history-mobile-card .ball-plus,
+  .history-mobile-card .ball-row.compact .ball-plus {
     margin-top: 7px;
   }
 }

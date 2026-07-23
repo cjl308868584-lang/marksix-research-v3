@@ -21,6 +21,7 @@ import {
   type Analysis,
   type Draw,
   type GameId,
+  type LiveDrawProgress,
   type Wave,
 } from "../lib/lottery";
 
@@ -31,11 +32,20 @@ type ApiPayload = {
   degraded: boolean;
   message: string;
   fetchedAt: string;
+  progress?: LiveDrawProgress | null;
 };
+
+const LIVE_POLL_MS = 3_000;
+const BACKGROUND_POLL_MS = 60_000;
 
 export function LotteryDashboard() {
   const [draws, setDraws] = useState<Record<GameId, Draw[]>>(FALLBACK_DRAWS);
   const [status, setStatus] = useState<Record<GameId, ApiPayload | null>>({
+    hk: null,
+    macau: null,
+    new_macau: null,
+  });
+  const [liveProgress, setLiveProgress] = useState<Record<GameId, LiveDrawProgress | null>>({
     hk: null,
     macau: null,
     new_macau: null,
@@ -57,6 +67,12 @@ export function LotteryDashboard() {
   const [activeSection, setActiveSection] = useState("draws");
   const aiAbortRef = useRef<AbortController | null>(null);
   const drawGridRef = useRef<HTMLElement | null>(null);
+  const refreshInFlightRef = useRef(new Set<string>());
+  const drawsRef = useRef(draws);
+
+  useEffect(() => {
+    drawsRef.current = draws;
+  }, [draws]);
 
   const resetAi = useCallback(() => {
     aiAbortRef.current?.abort();
@@ -82,37 +98,81 @@ export function LotteryDashboard() {
     resetAi();
   }, [resetAi]);
 
-  const refresh = useCallback(async () => {
-    const results = await Promise.allSettled(
-      GAME_IDS.map(async (game) => {
-        const response = await fetch(`/api/lottery?game=${game}&limit=100`, { cache: "no-store" });
-        if (!response.ok) throw new Error(`lottery ${response.status}`);
-        return (await response.json()) as ApiPayload;
+  const refresh = useCallback(async (
+    games: readonly GameId[] = GAME_IDS,
+    options: { limit?: number; fresh?: boolean } = {},
+  ) => {
+    const { limit = 100, fresh = false } = options;
+    await Promise.allSettled(
+      games.map(async (game) => {
+        const requestKey = `${game}:${fresh ? "fresh" : "regular"}`;
+        if (refreshInFlightRef.current.has(requestKey)) return;
+        refreshInFlightRef.current.add(requestKey);
+        try {
+          const params = new URLSearchParams({ game, limit: String(limit) });
+          if (fresh) params.set("live", "1");
+          const response = await fetch(`/api/lottery?${params}`, { cache: "no-store" });
+          if (!response.ok) throw new Error(`lottery ${response.status}`);
+          const payload = (await response.json()) as ApiPayload;
+          if (payload.draws?.length) {
+            setDraws((current) => ({
+              ...current,
+              [game]: mergeDrawLists(current[game], payload.draws),
+            }));
+          }
+          setLiveProgress((current) => ({
+            ...current,
+            [game]: mergeLiveProgress(
+              current[game],
+              payload.progress ?? null,
+              [...(payload.draws ?? []), ...drawsRef.current[game]],
+            ),
+          }));
+          setStatus((current) => ({ ...current, [game]: payload }));
+        } finally {
+          refreshInFlightRef.current.delete(requestKey);
+        }
       }),
     );
-    results.forEach((result) => {
-      if (result.status !== "fulfilled") return;
-      const game = result.value.game;
-      if (result.value.draws?.length) {
-        setDraws((current) => ({ ...current, [game]: result.value.draws }));
-      }
-      setStatus((current) => ({ ...current, [game]: result.value }));
-    });
   }, []);
 
   useEffect(() => {
-    refresh();
+    void refresh();
     const clock = window.setInterval(() => setNow(new Date()), 1_000);
-    return () => window.clearInterval(clock);
+    const backgroundPoll = window.setInterval(
+      () => void refresh(GAME_IDS, { limit: 10 }),
+      BACKGROUND_POLL_MS,
+    );
+    const refreshOnReturn = () => {
+      if (document.visibilityState === "visible") {
+        void refresh(GAME_IDS, { limit: 5, fresh: true });
+      }
+    };
+    window.addEventListener("focus", refreshOnReturn);
+    document.addEventListener("visibilitychange", refreshOnReturn);
+    return () => {
+      window.clearInterval(clock);
+      window.clearInterval(backgroundPoll);
+      window.removeEventListener("focus", refreshOnReturn);
+      document.removeEventListener("visibilitychange", refreshOnReturn);
+    };
   }, [refresh]);
 
   const liveWindow = useMemo(() => getLiveWindow(selectedGame, now), [selectedGame, now]);
+  const liveGameKey = GAME_IDS
+    .filter((game) => getLiveWindow(game, now).visible)
+    .join(",");
 
   useEffect(() => {
-    if (!liveWindow.visible) return;
-    const poll = window.setInterval(refresh, 10_000);
+    if (!liveGameKey) return;
+    const liveGames = liveGameKey.split(",") as GameId[];
+    void refresh(liveGames, { limit: 5, fresh: true });
+    const poll = window.setInterval(
+      () => void refresh(liveGames, { limit: 5, fresh: true }),
+      LIVE_POLL_MS,
+    );
     return () => window.clearInterval(poll);
-  }, [liveWindow.visible, refresh]);
+  }, [liveGameKey, refresh]);
 
   useEffect(() => {
     if (!demo) return;
@@ -134,7 +194,7 @@ export function LotteryDashboard() {
       for (let index = 1; index <= 7; index += 1) {
         if (cancelled) return;
         setRevealed(index);
-        await wait(620);
+        await wait(480);
       }
     }
     play();
@@ -164,7 +224,7 @@ export function LotteryDashboard() {
       count += 1;
       setRealReveal({ key: realRevealKey, count });
       if (count >= 7) window.clearInterval(interval);
-    }, 620);
+    }, 480);
     return () => window.clearInterval(interval);
   }, [isCurrentResult, realRevealKey]);
 
@@ -235,6 +295,12 @@ export function LotteryDashboard() {
   }, []);
 
   const liveDraw = latest;
+  const progressForGame = liveProgress[selectedGame];
+  const selectedProgress =
+    progressForGame &&
+    Math.abs(new Date(progressForGame.drawAt).getTime() - targetTime) < 4 * 3_600_000
+      ? progressForGame
+      : null;
   const stageVisible = demo || liveWindow.visible;
   const stageReveal = demo ? revealed : realReveal.key === realRevealKey ? realReveal.count : 0;
   const orderedGames = [
@@ -310,7 +376,14 @@ export function LotteryDashboard() {
             countdown={demo ? demoSeconds * 1_000 : Math.max(liveWindow.delta, 0)}
             revealed={stageReveal}
             demo={demo}
-            waiting={!demo && liveWindow.delta <= 0 && stageReveal === 0}
+            waiting={
+              !demo &&
+              liveWindow.delta <= 0 &&
+              stageReveal === 0 &&
+              !selectedProgress?.numbers.length
+            }
+            progress={selectedProgress}
+            fetchedAt={status[selectedGame]?.fetchedAt}
             onClose={() => setDemo(false)}
           />
         )}
@@ -461,6 +534,8 @@ function LiveStage({
   revealed,
   demo,
   waiting,
+  progress,
+  fetchedAt,
   onClose,
 }: {
   game: GameId;
@@ -469,10 +544,20 @@ function LiveStage({
   revealed: number;
   demo: boolean;
   waiting: boolean;
+  progress: LiveDrawProgress | null;
+  fetchedAt?: string;
   onClose: () => void;
 }) {
-  const all = [...draw.numbers, draw.special];
-  const specialReady = revealed >= all.length;
+  const drawAt = progress?.drawAt ?? draw.drawAt;
+  const stageIssue = progress?.issue ?? draw.issue;
+  const slots: Array<number | null> = progress
+    ? [
+        ...progress.numbers.slice(0, 6),
+        ...Array.from({ length: Math.max(6 - progress.numbers.length, 0) }, () => null),
+        progress.special,
+      ]
+    : [...draw.numbers, draw.special];
+  const specialReady = progress ? progress.special !== null : revealed >= slots.length;
   return (
     <section className="live-stage" aria-label="实时开奖台">
       <div className="live-stage-head">
@@ -482,38 +567,43 @@ function LiveStage({
       <div className="stage-countdown">
         <small aria-live="polite">
           {countdown > 0
-            ? "距离开奖"
+            ? "距离开奖 · 自动刷新已开启"
             : waiting
-              ? "正在等待数据源确认"
+              ? "自动更新中 · 等待数据源发布本期完整结果"
               : specialReady
                 ? "特码已开出，请慢慢刮开涂层"
                 : "本期号码依次揭晓"}
         </small>
         <strong>{formatCountdown(countdown)}</strong>
+        {!demo && (
+          <span className="live-stage-sync">
+            高频检测每 3 秒 · 最近响应 {fetchedAt ? formatSyncTime(fetchedAt) : "正在连接"}
+          </span>
+        )}
       </div>
       <div className="stage-balls" aria-label="开奖号码">
-        {all.map((number, index) => {
+        {slots.map((number, index) => {
           const isSpecial = index === 6;
-          const isRevealed = revealed > index;
+          const isRevealed = progress ? number !== null : revealed > index;
           return (
-          <div className={`stage-ball-wrap ${isSpecial ? "special-stage-wrap" : ""}`} key={`${number}-${index}`}>
+          <div className={`stage-ball-wrap ${isSpecial ? "special-stage-wrap" : ""}`} key={`${number ?? "pending"}-${index}`}>
             {index === 6 && <span className="plus">+</span>}
-            {isSpecial && isRevealed ? (
+            {isSpecial && isRevealed && number !== null ? (
               <ScratchSpecialBall
-                key={`${game}:${draw.issue}:${number}:${demo ? "demo" : "live"}`}
+                key={`${game}:${stageIssue}:${number}:${demo ? "demo" : "live"}`}
                 number={number}
-                drawAt={draw.drawAt}
-                resetKey={`${game}:${draw.issue}:${number}:${demo ? "demo" : "live"}`}
+                drawAt={drawAt}
+                resetKey={`${game}:${stageIssue}:${number}:${demo ? "demo" : "live"}`}
               />
             ) : (
               <>
-                <span className={`ball stage-ball ${isRevealed ? `wave-${getWave(number)} revealed` : "pending"}`}>
-                  {isRevealed ? formatBall(number) : String(index + 1).padStart(2, "0")}
+                <span className={`ball stage-ball ${isRevealed && number !== null ? `wave-${getWave(number)} revealed` : "pending"}`}>
+                  {isRevealed && number !== null ? formatBall(number) : String(index + 1).padStart(2, "0")}
                 </span>
                 <small>
-                  {isRevealed ? (
+                  {isRevealed && number !== null ? (
                 <>
-                  <strong className="stage-zodiac">{getZodiac(number, draw.drawAt)}</strong>
+                  <strong className="stage-zodiac">{getZodiac(number, drawAt)}</strong>
                   <span>{WAVE_LABEL[getWave(number)]}</span>
                 </>
                   ) : isSpecial ? "特码" : "待开"}
@@ -1347,11 +1437,80 @@ function HistoryTable({ draws }: { draws: Draw[] }) {
   );
 }
 
+function mergeDrawLists(current: Draw[], incoming: Draw[]) {
+  return [
+    ...new Map(
+      [...current, ...incoming].map((draw) => [`${draw.game}:${draw.issue}`, draw]),
+    ).values(),
+  ]
+    .sort((left, right) => right.issue.localeCompare(left.issue, "en", { numeric: true }))
+    .slice(0, 120);
+}
+
+function mergeLiveProgress(
+  current: LiveDrawProgress | null,
+  incoming: LiveDrawProgress | null,
+  completedDraws: Draw[],
+) {
+  if (incoming) {
+    const completed = completedDraws.find((draw) => draw.issue === incoming.issue);
+    if (
+      completed &&
+      (incoming.numbers.length < completed.numbers.length || incoming.special === null)
+    ) {
+      return drawToLiveProgress(completed);
+    }
+    if (
+      current &&
+      incoming.issue === current.issue &&
+      incoming.numbers.length + Number(incoming.special !== null) <
+        current.numbers.length + Number(current.special !== null)
+    ) {
+      return current;
+    }
+    if (
+      current &&
+      incoming.issue.localeCompare(current.issue, "en", { numeric: true }) < 0
+    ) {
+      return current;
+    }
+    return incoming;
+  }
+  if (
+    current &&
+    completedDraws.some((draw) => draw.issue === current.issue)
+  ) {
+    const completed = completedDraws.find((draw) => draw.issue === current.issue);
+    if (completed) return drawToLiveProgress(completed);
+  }
+  if (
+    current &&
+    completedDraws.some(
+      (draw) =>
+        draw.issue.localeCompare(current.issue, "en", { numeric: true }) > 0,
+    )
+  ) {
+    return null;
+  }
+  return current;
+}
+
+function drawToLiveProgress(draw: Draw): LiveDrawProgress {
+  return {
+    game: draw.game,
+    issue: draw.issue,
+    drawAt: draw.drawAt,
+    numbers: draw.numbers,
+    special: draw.special,
+    source: draw.source,
+  };
+}
+
 function getLiveWindow(game: GameId, now: Date) {
-  const reference = new Date(now.getTime() - 10 * 60_000);
+  const reference = new Date(now.getTime() - 30 * 60_000);
   const target = nextScheduledDraw(game, reference);
   const delta = target.getTime() - now.getTime();
-  return { target, delta, visible: delta <= 3 * 60_000 && delta >= -10 * 60_000 };
+  return { target, delta, visible: delta <= 3 * 60_000 && delta >= -30 * 60_000 };
 }
 
 function formatBeijingTime(date: Date) {
@@ -1366,6 +1525,18 @@ function formatDrawDate(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
   return new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date);
+}
+
+function formatSyncTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "刚刚";
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
 }
 
 function formatGeneratedTime(value: string) {
