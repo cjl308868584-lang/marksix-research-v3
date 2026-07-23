@@ -1,0 +1,4712 @@
+{
+  "hk": [
+    {
+      "game": "hk",
+      "issue": "2026078",
+      "drawAt": "2026-07-21T21:30:00+08:00",
+      "numbers": [
+        6,
+        47,
+        45,
+        1,
+        41,
+        37
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026077",
+      "drawAt": "2026-07-16T21:30:00+08:00",
+      "numbers": [
+        18,
+        30,
+        26,
+        21,
+        44,
+        32
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026076",
+      "drawAt": "2026-07-14T21:30:00+08:00",
+      "numbers": [
+        31,
+        44,
+        27,
+        10,
+        16,
+        19
+      ],
+      "special": 17,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026075",
+      "drawAt": "2026-07-11T21:30:00+08:00",
+      "numbers": [
+        5,
+        2,
+        7,
+        11,
+        41,
+        46
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026074",
+      "drawAt": "2026-07-09T21:30:00+08:00",
+      "numbers": [
+        21,
+        7,
+        38,
+        18,
+        1,
+        33
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026073",
+      "drawAt": "2026-07-07T21:30:00+08:00",
+      "numbers": [
+        37,
+        48,
+        34,
+        49,
+        5,
+        43
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026072",
+      "drawAt": "2026-07-05T21:30:00+08:00",
+      "numbers": [
+        14,
+        3,
+        19,
+        38,
+        20,
+        31
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026071",
+      "drawAt": "2026-07-02T21:30:00+08:00",
+      "numbers": [
+        34,
+        46,
+        17,
+        5,
+        31,
+        26
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026070",
+      "drawAt": "2026-06-30T21:30:00+08:00",
+      "numbers": [
+        18,
+        12,
+        22,
+        14,
+        17,
+        40
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026069",
+      "drawAt": "2026-06-28T21:30:00+08:00",
+      "numbers": [
+        37,
+        32,
+        7,
+        26,
+        5,
+        40
+      ],
+      "special": 35,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026068",
+      "drawAt": "2026-06-25T21:30:00+08:00",
+      "numbers": [
+        28,
+        12,
+        20,
+        30,
+        16,
+        19
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026067",
+      "drawAt": "2026-06-23T21:30:00+08:00",
+      "numbers": [
+        39,
+        41,
+        15,
+        34,
+        25,
+        2
+      ],
+      "special": 10,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026066",
+      "drawAt": "2026-06-20T21:30:00+08:00",
+      "numbers": [
+        16,
+        10,
+        7,
+        41,
+        15,
+        5
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026065",
+      "drawAt": "2026-06-18T21:30:00+08:00",
+      "numbers": [
+        26,
+        20,
+        47,
+        31,
+        34,
+        6
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026064",
+      "drawAt": "2026-06-14T21:30:00+08:00",
+      "numbers": [
+        32,
+        10,
+        29,
+        17,
+        12,
+        35
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026063",
+      "drawAt": "2026-06-11T21:30:00+08:00",
+      "numbers": [
+        6,
+        29,
+        28,
+        10,
+        3,
+        9
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026062",
+      "drawAt": "2026-06-09T21:30:00+08:00",
+      "numbers": [
+        40,
+        8,
+        11,
+        26,
+        14,
+        33
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026061",
+      "drawAt": "2026-06-06T21:30:00+08:00",
+      "numbers": [
+        19,
+        34,
+        5,
+        20,
+        12,
+        36
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026060",
+      "drawAt": "2026-06-04T21:30:00+08:00",
+      "numbers": [
+        4,
+        43,
+        47,
+        15,
+        7,
+        37
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026059",
+      "drawAt": "2026-06-02T21:30:00+08:00",
+      "numbers": [
+        14,
+        16,
+        45,
+        9,
+        35,
+        37
+      ],
+      "special": 20,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026058",
+      "drawAt": "2026-05-30T21:30:00+08:00",
+      "numbers": [
+        39,
+        40,
+        21,
+        1,
+        12,
+        41
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026057",
+      "drawAt": "2026-05-28T21:30:00+08:00",
+      "numbers": [
+        35,
+        7,
+        13,
+        40,
+        25,
+        43
+      ],
+      "special": 47,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026056",
+      "drawAt": "2026-05-26T21:30:00+08:00",
+      "numbers": [
+        32,
+        34,
+        10,
+        47,
+        18,
+        11
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026055",
+      "drawAt": "2026-05-23T21:30:00+08:00",
+      "numbers": [
+        20,
+        7,
+        2,
+        42,
+        49,
+        47
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026054",
+      "drawAt": "2026-05-21T21:30:00+08:00",
+      "numbers": [
+        7,
+        13,
+        15,
+        5,
+        31,
+        27
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026053",
+      "drawAt": "2026-05-19T21:30:00+08:00",
+      "numbers": [
+        2,
+        21,
+        27,
+        1,
+        20,
+        4
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026052",
+      "drawAt": "2026-05-16T21:30:00+08:00",
+      "numbers": [
+        25,
+        43,
+        41,
+        28,
+        11,
+        36
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026051",
+      "drawAt": "2026-05-14T21:30:00+08:00",
+      "numbers": [
+        47,
+        27,
+        23,
+        34,
+        30,
+        45
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026050",
+      "drawAt": "2026-05-12T21:30:00+08:00",
+      "numbers": [
+        4,
+        22,
+        16,
+        47,
+        25,
+        19
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026049",
+      "drawAt": "2026-05-10T21:30:00+08:00",
+      "numbers": [
+        17,
+        41,
+        26,
+        47,
+        9,
+        42
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026048",
+      "drawAt": "2026-05-07T21:30:00+08:00",
+      "numbers": [
+        23,
+        34,
+        28,
+        20,
+        14,
+        6
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026047",
+      "drawAt": "2026-04-30T21:30:00+08:00",
+      "numbers": [
+        47,
+        10,
+        7,
+        2,
+        18,
+        8
+      ],
+      "special": 4,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026046",
+      "drawAt": "2026-04-28T21:30:00+08:00",
+      "numbers": [
+        8,
+        28,
+        48,
+        30,
+        3,
+        2
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026045",
+      "drawAt": "2026-04-25T21:30:00+08:00",
+      "numbers": [
+        21,
+        42,
+        46,
+        36,
+        4,
+        16
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026044",
+      "drawAt": "2026-04-23T21:30:00+08:00",
+      "numbers": [
+        12,
+        38,
+        45,
+        23,
+        48,
+        37
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026043",
+      "drawAt": "2026-04-21T21:30:00+08:00",
+      "numbers": [
+        4,
+        11,
+        44,
+        10,
+        2,
+        26
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026042",
+      "drawAt": "2026-04-18T21:30:00+08:00",
+      "numbers": [
+        17,
+        39,
+        20,
+        46,
+        27,
+        32
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026041",
+      "drawAt": "2026-04-16T21:30:00+08:00",
+      "numbers": [
+        6,
+        28,
+        44,
+        46,
+        14,
+        12
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026040",
+      "drawAt": "2026-04-14T21:30:00+08:00",
+      "numbers": [
+        19,
+        44,
+        8,
+        46,
+        33,
+        22
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026039",
+      "drawAt": "2026-04-11T21:30:00+08:00",
+      "numbers": [
+        14,
+        42,
+        40,
+        11,
+        17,
+        28
+      ],
+      "special": 2,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026038",
+      "drawAt": "2026-04-09T21:30:00+08:00",
+      "numbers": [
+        24,
+        43,
+        45,
+        44,
+        13,
+        16
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026037",
+      "drawAt": "2026-04-07T21:30:00+08:00",
+      "numbers": [
+        33,
+        23,
+        25,
+        34,
+        29,
+        8
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026036",
+      "drawAt": "2026-04-04T21:30:00+08:00",
+      "numbers": [
+        32,
+        45,
+        40,
+        20,
+        35,
+        28
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026035",
+      "drawAt": "2026-03-31T21:30:00+08:00",
+      "numbers": [
+        20,
+        32,
+        28,
+        9,
+        19,
+        18
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026034",
+      "drawAt": "2026-03-28T21:30:00+08:00",
+      "numbers": [
+        42,
+        26,
+        27,
+        11,
+        21,
+        45
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026033",
+      "drawAt": "2026-03-26T21:30:00+08:00",
+      "numbers": [
+        27,
+        12,
+        23,
+        28,
+        37,
+        17
+      ],
+      "special": 3,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026032",
+      "drawAt": "2026-03-24T21:30:00+08:00",
+      "numbers": [
+        26,
+        6,
+        22,
+        44,
+        49,
+        9
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026031",
+      "drawAt": "2026-03-21T21:30:00+08:00",
+      "numbers": [
+        9,
+        47,
+        18,
+        11,
+        5,
+        23
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026030",
+      "drawAt": "2026-03-19T21:30:00+08:00",
+      "numbers": [
+        6,
+        8,
+        45,
+        2,
+        41,
+        33
+      ],
+      "special": 48,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026029",
+      "drawAt": "2026-03-17T21:30:00+08:00",
+      "numbers": [
+        22,
+        18,
+        45,
+        16,
+        28,
+        49
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026028",
+      "drawAt": "2026-03-12T21:30:00+08:00",
+      "numbers": [
+        7,
+        14,
+        26,
+        13,
+        16,
+        30
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026027",
+      "drawAt": "2026-03-10T21:30:00+08:00",
+      "numbers": [
+        34,
+        16,
+        25,
+        2,
+        35,
+        37
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026026",
+      "drawAt": "2026-03-07T21:30:00+08:00",
+      "numbers": [
+        18,
+        12,
+        22,
+        28,
+        15,
+        37
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026025",
+      "drawAt": "2026-03-05T21:30:00+08:00",
+      "numbers": [
+        4,
+        31,
+        24,
+        18,
+        46,
+        42
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026024",
+      "drawAt": "2026-03-03T21:30:00+08:00",
+      "numbers": [
+        20,
+        32,
+        31,
+        44,
+        13,
+        6
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026023",
+      "drawAt": "2026-02-28T21:30:00+08:00",
+      "numbers": [
+        47,
+        37,
+        15,
+        46,
+        39,
+        5
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026022",
+      "drawAt": "2026-02-26T21:30:00+08:00",
+      "numbers": [
+        6,
+        19,
+        38,
+        15,
+        42,
+        13
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026021",
+      "drawAt": "2026-02-24T21:30:00+08:00",
+      "numbers": [
+        10,
+        4,
+        3,
+        2,
+        23,
+        13
+      ],
+      "special": 12,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026020",
+      "drawAt": "2026-02-21T21:30:00+08:00",
+      "numbers": [
+        34,
+        18,
+        35,
+        37,
+        49,
+        2
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026019",
+      "drawAt": "2026-02-15T21:30:00+08:00",
+      "numbers": [
+        8,
+        28,
+        46,
+        37,
+        36,
+        33
+      ],
+      "special": 4,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026018",
+      "drawAt": "2026-02-12T21:30:00+08:00",
+      "numbers": [
+        3,
+        46,
+        37,
+        25,
+        2,
+        14
+      ],
+      "special": 10,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026017",
+      "drawAt": "2026-02-10T21:30:00+08:00",
+      "numbers": [
+        39,
+        4,
+        26,
+        3,
+        18,
+        14
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026016",
+      "drawAt": "2026-02-07T21:30:00+08:00",
+      "numbers": [
+        32,
+        12,
+        37,
+        22,
+        44,
+        28
+      ],
+      "special": 20,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026015",
+      "drawAt": "2026-02-05T21:30:00+08:00",
+      "numbers": [
+        35,
+        24,
+        36,
+        9,
+        1,
+        17
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026014",
+      "drawAt": "2026-02-03T21:30:00+08:00",
+      "numbers": [
+        42,
+        39,
+        23,
+        27,
+        12,
+        37
+      ],
+      "special": 5,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026013",
+      "drawAt": "2026-01-31T21:30:00+08:00",
+      "numbers": [
+        30,
+        35,
+        32,
+        36,
+        25,
+        47
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026012",
+      "drawAt": "2026-01-29T21:30:00+08:00",
+      "numbers": [
+        14,
+        44,
+        9,
+        6,
+        35,
+        12
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026011",
+      "drawAt": "2026-01-27T21:30:00+08:00",
+      "numbers": [
+        38,
+        47,
+        25,
+        12,
+        14,
+        7
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026010",
+      "drawAt": "2026-01-24T21:30:00+08:00",
+      "numbers": [
+        16,
+        17,
+        48,
+        22,
+        28,
+        6
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026009",
+      "drawAt": "2026-01-22T21:30:00+08:00",
+      "numbers": [
+        31,
+        4,
+        24,
+        27,
+        15,
+        9
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026008",
+      "drawAt": "2026-01-20T21:30:00+08:00",
+      "numbers": [
+        6,
+        46,
+        44,
+        9,
+        1,
+        4
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026007",
+      "drawAt": "2026-01-17T21:30:00+08:00",
+      "numbers": [
+        27,
+        12,
+        42,
+        5,
+        23,
+        15
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026006",
+      "drawAt": "2026-01-15T21:30:00+08:00",
+      "numbers": [
+        44,
+        6,
+        37,
+        3,
+        38,
+        39
+      ],
+      "special": 48,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026005",
+      "drawAt": "2026-01-13T21:30:00+08:00",
+      "numbers": [
+        38,
+        48,
+        14,
+        49,
+        24,
+        34
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026004",
+      "drawAt": "2026-01-10T21:30:00+08:00",
+      "numbers": [
+        37,
+        20,
+        22,
+        24,
+        16,
+        3
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026003",
+      "drawAt": "2026-01-08T21:30:00+08:00",
+      "numbers": [
+        45,
+        15,
+        46,
+        21,
+        24,
+        40
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026002",
+      "drawAt": "2026-01-06T21:30:00+08:00",
+      "numbers": [
+        12,
+        2,
+        8,
+        19,
+        28,
+        36
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2026001",
+      "drawAt": "2026-01-03T21:30:00+08:00",
+      "numbers": [
+        20,
+        16,
+        2,
+        21,
+        13,
+        10
+      ],
+      "special": 14,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025134",
+      "drawAt": "2025-12-28T21:30:00+08:00",
+      "numbers": [
+        7,
+        30,
+        19,
+        11,
+        25,
+        10
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025133",
+      "drawAt": "2025-12-25T21:30:00+08:00",
+      "numbers": [
+        1,
+        30,
+        41,
+        2,
+        4,
+        43
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025132",
+      "drawAt": "2025-12-21T21:30:00+08:00",
+      "numbers": [
+        34,
+        47,
+        39,
+        9,
+        17,
+        27
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025131",
+      "drawAt": "2025-12-18T21:30:00+08:00",
+      "numbers": [
+        23,
+        28,
+        34,
+        31,
+        33,
+        6
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025130",
+      "drawAt": "2025-12-16T21:30:00+08:00",
+      "numbers": [
+        38,
+        23,
+        3,
+        28,
+        12,
+        35
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025129",
+      "drawAt": "2025-12-13T21:30:00+08:00",
+      "numbers": [
+        49,
+        19,
+        28,
+        10,
+        17,
+        45
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025128",
+      "drawAt": "2025-12-11T21:30:00+08:00",
+      "numbers": [
+        1,
+        30,
+        25,
+        42,
+        6,
+        5
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025127",
+      "drawAt": "2025-12-06T21:30:00+08:00",
+      "numbers": [
+        6,
+        40,
+        4,
+        34,
+        26,
+        28
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025126",
+      "drawAt": "2025-12-02T21:30:00+08:00",
+      "numbers": [
+        18,
+        37,
+        38,
+        34,
+        6,
+        29
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025125",
+      "drawAt": "2025-11-25T21:30:00+08:00",
+      "numbers": [
+        17,
+        1,
+        48,
+        2,
+        37,
+        35
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025124",
+      "drawAt": "2025-11-20T21:30:00+08:00",
+      "numbers": [
+        36,
+        39,
+        26,
+        35,
+        33,
+        19
+      ],
+      "special": 5,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025123",
+      "drawAt": "2025-11-18T21:30:00+08:00",
+      "numbers": [
+        4,
+        28,
+        10,
+        36,
+        2,
+        26
+      ],
+      "special": 23,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025122",
+      "drawAt": "2025-11-16T21:30:00+08:00",
+      "numbers": [
+        47,
+        28,
+        38,
+        2,
+        11,
+        13
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025121",
+      "drawAt": "2025-11-13T21:30:00+08:00",
+      "numbers": [
+        28,
+        11,
+        37,
+        10,
+        39,
+        30
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025120",
+      "drawAt": "2025-11-11T21:30:00+08:00",
+      "numbers": [
+        37,
+        28,
+        20,
+        40,
+        38,
+        18
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025119",
+      "drawAt": "2025-11-08T21:30:00+08:00",
+      "numbers": [
+        16,
+        17,
+        9,
+        46,
+        7,
+        33
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025118",
+      "drawAt": "2025-11-06T21:30:00+08:00",
+      "numbers": [
+        41,
+        10,
+        17,
+        33,
+        22,
+        40
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "hk",
+      "issue": "2025117",
+      "drawAt": "2025-11-04T21:30:00+08:00",
+      "numbers": [
+        19,
+        26,
+        39,
+        28,
+        20,
+        44
+      ],
+      "special": 4,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    }
+  ],
+  "macau": [
+    {
+      "game": "macau",
+      "issue": "2026203",
+      "drawAt": "2026-07-22T22:32:32+08:00",
+      "numbers": [
+        22,
+        24,
+        48,
+        45,
+        31,
+        26
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026202",
+      "drawAt": "2026-07-21T22:32:32+08:00",
+      "numbers": [
+        13,
+        32,
+        24,
+        21,
+        39,
+        47
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026201",
+      "drawAt": "2026-07-20T22:32:32+08:00",
+      "numbers": [
+        19,
+        4,
+        32,
+        46,
+        29,
+        47
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026200",
+      "drawAt": "2026-07-19T22:32:32+08:00",
+      "numbers": [
+        31,
+        45,
+        22,
+        10,
+        34,
+        36
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026199",
+      "drawAt": "2026-07-18T22:32:32+08:00",
+      "numbers": [
+        25,
+        46,
+        2,
+        6,
+        15,
+        42
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026198",
+      "drawAt": "2026-07-17T22:32:32+08:00",
+      "numbers": [
+        40,
+        23,
+        7,
+        28,
+        48,
+        43
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026197",
+      "drawAt": "2026-07-16T22:32:32+08:00",
+      "numbers": [
+        10,
+        48,
+        40,
+        16,
+        1,
+        27
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026196",
+      "drawAt": "2026-07-15T22:32:32+08:00",
+      "numbers": [
+        46,
+        19,
+        48,
+        49,
+        17,
+        43
+      ],
+      "special": 12,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026195",
+      "drawAt": "2026-07-14T22:32:32+08:00",
+      "numbers": [
+        39,
+        6,
+        37,
+        11,
+        45,
+        42
+      ],
+      "special": 47,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026194",
+      "drawAt": "2026-07-13T22:32:32+08:00",
+      "numbers": [
+        31,
+        14,
+        35,
+        36,
+        16,
+        49
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026193",
+      "drawAt": "2026-07-12T22:32:32+08:00",
+      "numbers": [
+        39,
+        32,
+        21,
+        45,
+        15,
+        12
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026192",
+      "drawAt": "2026-07-11T22:32:32+08:00",
+      "numbers": [
+        27,
+        12,
+        38,
+        47,
+        37,
+        43
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026191",
+      "drawAt": "2026-07-10T22:32:32+08:00",
+      "numbers": [
+        24,
+        18,
+        7,
+        45,
+        6,
+        42
+      ],
+      "special": 3,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026190",
+      "drawAt": "2026-07-09T22:32:32+08:00",
+      "numbers": [
+        38,
+        44,
+        1,
+        42,
+        31,
+        16
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026189",
+      "drawAt": "2026-07-08T22:32:32+08:00",
+      "numbers": [
+        19,
+        32,
+        46,
+        15,
+        33,
+        7
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026188",
+      "drawAt": "2026-07-07T22:32:32+08:00",
+      "numbers": [
+        37,
+        4,
+        46,
+        45,
+        10,
+        26
+      ],
+      "special": 32,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026187",
+      "drawAt": "2026-07-06T22:32:32+08:00",
+      "numbers": [
+        43,
+        44,
+        48,
+        21,
+        2,
+        8
+      ],
+      "special": 32,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026186",
+      "drawAt": "2026-07-05T22:32:32+08:00",
+      "numbers": [
+        34,
+        47,
+        10,
+        49,
+        37,
+        15
+      ],
+      "special": 23,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026185",
+      "drawAt": "2026-07-04T22:32:32+08:00",
+      "numbers": [
+        44,
+        19,
+        26,
+        47,
+        3,
+        46
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026184",
+      "drawAt": "2026-07-03T22:32:32+08:00",
+      "numbers": [
+        9,
+        49,
+        22,
+        2,
+        47,
+        45
+      ],
+      "special": 37,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026183",
+      "drawAt": "2026-07-02T22:32:32+08:00",
+      "numbers": [
+        42,
+        30,
+        23,
+        44,
+        10,
+        4
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026182",
+      "drawAt": "2026-07-01T22:32:32+08:00",
+      "numbers": [
+        7,
+        16,
+        39,
+        20,
+        8,
+        49
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026181",
+      "drawAt": "2026-06-30T22:32:32+08:00",
+      "numbers": [
+        3,
+        48,
+        40,
+        38,
+        8,
+        18
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026180",
+      "drawAt": "2026-06-29T22:32:32+08:00",
+      "numbers": [
+        29,
+        13,
+        14,
+        42,
+        24,
+        3
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026179",
+      "drawAt": "2026-06-28T22:32:32+08:00",
+      "numbers": [
+        38,
+        29,
+        4,
+        39,
+        23,
+        11
+      ],
+      "special": 32,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026178",
+      "drawAt": "2026-06-27T22:32:32+08:00",
+      "numbers": [
+        27,
+        10,
+        47,
+        8,
+        48,
+        41
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026177",
+      "drawAt": "2026-06-26T22:32:32+08:00",
+      "numbers": [
+        32,
+        10,
+        41,
+        31,
+        38,
+        20
+      ],
+      "special": 36,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026176",
+      "drawAt": "2026-06-25T22:32:32+08:00",
+      "numbers": [
+        13,
+        44,
+        22,
+        24,
+        11,
+        15
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026175",
+      "drawAt": "2026-06-24T22:32:32+08:00",
+      "numbers": [
+        16,
+        12,
+        47,
+        6,
+        31,
+        20
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026174",
+      "drawAt": "2026-06-23T22:32:32+08:00",
+      "numbers": [
+        22,
+        39,
+        10,
+        19,
+        38,
+        47
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026173",
+      "drawAt": "2026-06-22T22:32:32+08:00",
+      "numbers": [
+        40,
+        47,
+        18,
+        49,
+        28,
+        29
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026172",
+      "drawAt": "2026-06-21T22:32:32+08:00",
+      "numbers": [
+        5,
+        29,
+        39,
+        1,
+        13,
+        32
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026171",
+      "drawAt": "2026-06-20T22:32:32+08:00",
+      "numbers": [
+        23,
+        25,
+        29,
+        46,
+        9,
+        6
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026170",
+      "drawAt": "2026-06-19T22:32:32+08:00",
+      "numbers": [
+        26,
+        19,
+        47,
+        17,
+        44,
+        29
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026169",
+      "drawAt": "2026-06-18T22:32:32+08:00",
+      "numbers": [
+        14,
+        20,
+        27,
+        33,
+        40,
+        26
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026168",
+      "drawAt": "2026-06-17T22:32:32+08:00",
+      "numbers": [
+        29,
+        26,
+        5,
+        30,
+        7,
+        32
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026167",
+      "drawAt": "2026-06-16T22:32:32+08:00",
+      "numbers": [
+        38,
+        43,
+        9,
+        47,
+        23,
+        20
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026166",
+      "drawAt": "2026-06-15T22:32:32+08:00",
+      "numbers": [
+        43,
+        30,
+        2,
+        13,
+        1,
+        16
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026165",
+      "drawAt": "2026-06-14T22:32:32+08:00",
+      "numbers": [
+        26,
+        35,
+        1,
+        7,
+        40,
+        37
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026164",
+      "drawAt": "2026-06-13T22:32:32+08:00",
+      "numbers": [
+        19,
+        15,
+        17,
+        46,
+        18,
+        36
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026163",
+      "drawAt": "2026-06-12T22:32:32+08:00",
+      "numbers": [
+        10,
+        12,
+        31,
+        46,
+        19,
+        26
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026162",
+      "drawAt": "2026-06-11T22:32:32+08:00",
+      "numbers": [
+        27,
+        21,
+        11,
+        39,
+        8,
+        5
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026161",
+      "drawAt": "2026-06-10T22:32:32+08:00",
+      "numbers": [
+        16,
+        15,
+        2,
+        36,
+        48,
+        1
+      ],
+      "special": 35,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026160",
+      "drawAt": "2026-06-09T22:32:32+08:00",
+      "numbers": [
+        27,
+        46,
+        41,
+        2,
+        19,
+        16
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026159",
+      "drawAt": "2026-06-08T22:32:32+08:00",
+      "numbers": [
+        35,
+        36,
+        41,
+        39,
+        37,
+        46
+      ],
+      "special": 12,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026158",
+      "drawAt": "2026-06-07T22:32:32+08:00",
+      "numbers": [
+        2,
+        16,
+        40,
+        22,
+        46,
+        11
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026157",
+      "drawAt": "2026-06-06T22:32:32+08:00",
+      "numbers": [
+        7,
+        15,
+        32,
+        23,
+        43,
+        18
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026156",
+      "drawAt": "2026-06-05T22:32:32+08:00",
+      "numbers": [
+        32,
+        1,
+        47,
+        34,
+        45,
+        9
+      ],
+      "special": 12,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026155",
+      "drawAt": "2026-06-04T22:32:32+08:00",
+      "numbers": [
+        44,
+        20,
+        36,
+        2,
+        9,
+        47
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026154",
+      "drawAt": "2026-06-03T22:32:32+08:00",
+      "numbers": [
+        11,
+        19,
+        27,
+        6,
+        46,
+        32
+      ],
+      "special": 21,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026153",
+      "drawAt": "2026-06-02T22:32:32+08:00",
+      "numbers": [
+        11,
+        9,
+        45,
+        14,
+        25,
+        39
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026152",
+      "drawAt": "2026-06-01T22:32:32+08:00",
+      "numbers": [
+        45,
+        22,
+        43,
+        27,
+        28,
+        5
+      ],
+      "special": 17,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026151",
+      "drawAt": "2026-05-31T22:32:32+08:00",
+      "numbers": [
+        46,
+        24,
+        9,
+        4,
+        39,
+        49
+      ],
+      "special": 48,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026150",
+      "drawAt": "2026-05-30T22:32:32+08:00",
+      "numbers": [
+        24,
+        22,
+        44,
+        18,
+        38,
+        11
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026149",
+      "drawAt": "2026-05-29T22:32:32+08:00",
+      "numbers": [
+        44,
+        36,
+        2,
+        10,
+        45,
+        9
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026148",
+      "drawAt": "2026-05-28T22:32:32+08:00",
+      "numbers": [
+        2,
+        46,
+        1,
+        9,
+        35,
+        3
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026147",
+      "drawAt": "2026-05-27T22:32:32+08:00",
+      "numbers": [
+        5,
+        31,
+        27,
+        3,
+        1,
+        21
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026146",
+      "drawAt": "2026-05-26T22:32:32+08:00",
+      "numbers": [
+        12,
+        34,
+        23,
+        13,
+        47,
+        40
+      ],
+      "special": 10,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026145",
+      "drawAt": "2026-05-25T22:32:32+08:00",
+      "numbers": [
+        37,
+        38,
+        43,
+        34,
+        24,
+        49
+      ],
+      "special": 23,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026144",
+      "drawAt": "2026-05-24T22:32:32+08:00",
+      "numbers": [
+        5,
+        16,
+        23,
+        9,
+        41,
+        14
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026143",
+      "drawAt": "2026-05-23T22:32:32+08:00",
+      "numbers": [
+        2,
+        17,
+        40,
+        24,
+        7,
+        19
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026142",
+      "drawAt": "2026-05-22T22:32:32+08:00",
+      "numbers": [
+        7,
+        48,
+        37,
+        14,
+        46,
+        40
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026141",
+      "drawAt": "2026-05-21T22:32:32+08:00",
+      "numbers": [
+        43,
+        22,
+        1,
+        12,
+        47,
+        21
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026140",
+      "drawAt": "2026-05-20T22:32:32+08:00",
+      "numbers": [
+        44,
+        16,
+        5,
+        46,
+        10,
+        49
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026139",
+      "drawAt": "2026-05-19T22:32:32+08:00",
+      "numbers": [
+        7,
+        39,
+        2,
+        21,
+        8,
+        6
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026138",
+      "drawAt": "2026-05-18T22:32:32+08:00",
+      "numbers": [
+        1,
+        31,
+        49,
+        35,
+        47,
+        22
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026137",
+      "drawAt": "2026-05-17T22:32:32+08:00",
+      "numbers": [
+        41,
+        1,
+        44,
+        32,
+        29,
+        28
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026136",
+      "drawAt": "2026-05-16T22:32:32+08:00",
+      "numbers": [
+        41,
+        5,
+        28,
+        36,
+        2,
+        3
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026135",
+      "drawAt": "2026-05-15T22:32:32+08:00",
+      "numbers": [
+        41,
+        18,
+        26,
+        31,
+        3,
+        35
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026134",
+      "drawAt": "2026-05-14T22:32:32+08:00",
+      "numbers": [
+        31,
+        28,
+        48,
+        29,
+        9,
+        23
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026133",
+      "drawAt": "2026-05-13T22:32:32+08:00",
+      "numbers": [
+        12,
+        45,
+        11,
+        32,
+        10,
+        2
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026132",
+      "drawAt": "2026-05-12T22:32:32+08:00",
+      "numbers": [
+        39,
+        20,
+        29,
+        2,
+        33,
+        25
+      ],
+      "special": 35,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026131",
+      "drawAt": "2026-05-11T22:32:32+08:00",
+      "numbers": [
+        22,
+        12,
+        39,
+        2,
+        47,
+        7
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026130",
+      "drawAt": "2026-05-10T22:32:32+08:00",
+      "numbers": [
+        15,
+        27,
+        43,
+        33,
+        4,
+        20
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026129",
+      "drawAt": "2026-05-09T22:32:32+08:00",
+      "numbers": [
+        35,
+        5,
+        41,
+        6,
+        11,
+        26
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026128",
+      "drawAt": "2026-05-08T22:32:32+08:00",
+      "numbers": [
+        49,
+        13,
+        15,
+        9,
+        30,
+        43
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026127",
+      "drawAt": "2026-05-07T22:32:32+08:00",
+      "numbers": [
+        27,
+        3,
+        49,
+        33,
+        41,
+        31
+      ],
+      "special": 10,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026126",
+      "drawAt": "2026-05-06T22:32:32+08:00",
+      "numbers": [
+        22,
+        21,
+        27,
+        2,
+        26,
+        30
+      ],
+      "special": 6,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026125",
+      "drawAt": "2026-05-05T22:32:32+08:00",
+      "numbers": [
+        21,
+        24,
+        3,
+        37,
+        15,
+        44
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026124",
+      "drawAt": "2026-05-04T22:32:32+08:00",
+      "numbers": [
+        41,
+        48,
+        45,
+        24,
+        39,
+        18
+      ],
+      "special": 38,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026123",
+      "drawAt": "2026-05-03T22:32:32+08:00",
+      "numbers": [
+        1,
+        36,
+        5,
+        31,
+        8,
+        23
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026122",
+      "drawAt": "2026-05-02T22:32:32+08:00",
+      "numbers": [
+        28,
+        19,
+        29,
+        26,
+        17,
+        27
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026121",
+      "drawAt": "2026-05-01T22:32:32+08:00",
+      "numbers": [
+        4,
+        5,
+        48,
+        12,
+        49,
+        17
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026120",
+      "drawAt": "2026-04-30T22:32:32+08:00",
+      "numbers": [
+        7,
+        46,
+        28,
+        4,
+        20,
+        29
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026119",
+      "drawAt": "2026-04-29T22:32:32+08:00",
+      "numbers": [
+        16,
+        46,
+        49,
+        37,
+        7,
+        8
+      ],
+      "special": 4,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026118",
+      "drawAt": "2026-04-28T22:32:32+08:00",
+      "numbers": [
+        2,
+        26,
+        43,
+        25,
+        40,
+        19
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026117",
+      "drawAt": "2026-04-27T22:32:32+08:00",
+      "numbers": [
+        39,
+        3,
+        13,
+        12,
+        43,
+        17
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026116",
+      "drawAt": "2026-04-26T22:32:32+08:00",
+      "numbers": [
+        29,
+        20,
+        45,
+        7,
+        21,
+        38
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026115",
+      "drawAt": "2026-04-25T22:32:32+08:00",
+      "numbers": [
+        30,
+        22,
+        35,
+        27,
+        15,
+        16
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026114",
+      "drawAt": "2026-04-24T22:32:32+08:00",
+      "numbers": [
+        34,
+        29,
+        49,
+        22,
+        45,
+        12
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026113",
+      "drawAt": "2026-04-23T22:32:32+08:00",
+      "numbers": [
+        49,
+        7,
+        25,
+        34,
+        9,
+        35
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026112",
+      "drawAt": "2026-04-22T22:32:32+08:00",
+      "numbers": [
+        6,
+        39,
+        30,
+        14,
+        2,
+        43
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026111",
+      "drawAt": "2026-04-21T22:32:32+08:00",
+      "numbers": [
+        20,
+        5,
+        3,
+        32,
+        1,
+        9
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026110",
+      "drawAt": "2026-04-20T22:32:32+08:00",
+      "numbers": [
+        15,
+        49,
+        31,
+        5,
+        30,
+        16
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026109",
+      "drawAt": "2026-04-19T22:32:32+08:00",
+      "numbers": [
+        47,
+        27,
+        34,
+        35,
+        8,
+        41
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026108",
+      "drawAt": "2026-04-18T22:32:32+08:00",
+      "numbers": [
+        33,
+        27,
+        8,
+        6,
+        41,
+        30
+      ],
+      "special": 34,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026107",
+      "drawAt": "2026-04-17T22:32:32+08:00",
+      "numbers": [
+        17,
+        13,
+        32,
+        16,
+        49,
+        41
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026106",
+      "drawAt": "2026-04-16T22:32:32+08:00",
+      "numbers": [
+        9,
+        7,
+        19,
+        22,
+        26,
+        4
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "macau",
+      "issue": "2026105",
+      "drawAt": "2026-04-15T22:32:32+08:00",
+      "numbers": [
+        1,
+        3,
+        19,
+        49,
+        45,
+        38
+      ],
+      "special": 20,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    }
+  ],
+  "new_macau": [
+    {
+      "game": "new_macau",
+      "issue": "2026203",
+      "drawAt": "2026-07-22T21:32:32+08:00",
+      "numbers": [
+        12,
+        11,
+        31,
+        3,
+        44,
+        37
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026202",
+      "drawAt": "2026-07-21T21:32:32+08:00",
+      "numbers": [
+        21,
+        15,
+        25,
+        47,
+        13,
+        45
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026201",
+      "drawAt": "2026-07-20T21:32:32+08:00",
+      "numbers": [
+        46,
+        28,
+        19,
+        38,
+        31,
+        25
+      ],
+      "special": 32,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026200",
+      "drawAt": "2026-07-19T21:32:32+08:00",
+      "numbers": [
+        43,
+        46,
+        5,
+        32,
+        35,
+        29
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026199",
+      "drawAt": "2026-07-18T21:32:32+08:00",
+      "numbers": [
+        17,
+        49,
+        42,
+        45,
+        5,
+        38
+      ],
+      "special": 36,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026198",
+      "drawAt": "2026-07-17T21:32:32+08:00",
+      "numbers": [
+        48,
+        35,
+        45,
+        21,
+        12,
+        24
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026197",
+      "drawAt": "2026-07-16T21:32:32+08:00",
+      "numbers": [
+        40,
+        19,
+        30,
+        48,
+        44,
+        28
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026196",
+      "drawAt": "2026-07-15T21:32:32+08:00",
+      "numbers": [
+        3,
+        37,
+        24,
+        10,
+        41,
+        19
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026195",
+      "drawAt": "2026-07-14T21:32:32+08:00",
+      "numbers": [
+        46,
+        23,
+        39,
+        4,
+        9,
+        19
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026194",
+      "drawAt": "2026-07-13T21:32:32+08:00",
+      "numbers": [
+        30,
+        21,
+        22,
+        15,
+        4,
+        34
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026193",
+      "drawAt": "2026-07-12T21:32:32+08:00",
+      "numbers": [
+        2,
+        49,
+        25,
+        11,
+        45,
+        29
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026192",
+      "drawAt": "2026-07-11T21:32:32+08:00",
+      "numbers": [
+        27,
+        30,
+        45,
+        8,
+        1,
+        37
+      ],
+      "special": 25,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026191",
+      "drawAt": "2026-07-10T21:32:32+08:00",
+      "numbers": [
+        19,
+        43,
+        39,
+        24,
+        16,
+        26
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026190",
+      "drawAt": "2026-07-09T21:32:32+08:00",
+      "numbers": [
+        46,
+        14,
+        19,
+        37,
+        48,
+        29
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026189",
+      "drawAt": "2026-07-08T21:32:32+08:00",
+      "numbers": [
+        45,
+        12,
+        37,
+        20,
+        38,
+        43
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026188",
+      "drawAt": "2026-07-07T21:32:32+08:00",
+      "numbers": [
+        38,
+        5,
+        19,
+        10,
+        14,
+        1
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026187",
+      "drawAt": "2026-07-06T21:32:32+08:00",
+      "numbers": [
+        23,
+        12,
+        36,
+        38,
+        27,
+        22
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026186",
+      "drawAt": "2026-07-05T21:32:32+08:00",
+      "numbers": [
+        17,
+        29,
+        22,
+        1,
+        5,
+        38
+      ],
+      "special": 23,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026185",
+      "drawAt": "2026-07-04T21:32:32+08:00",
+      "numbers": [
+        18,
+        35,
+        9,
+        41,
+        12,
+        30
+      ],
+      "special": 36,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026184",
+      "drawAt": "2026-07-03T21:32:32+08:00",
+      "numbers": [
+        44,
+        24,
+        11,
+        36,
+        25,
+        20
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026183",
+      "drawAt": "2026-07-02T21:32:32+08:00",
+      "numbers": [
+        23,
+        9,
+        46,
+        37,
+        42,
+        3
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026182",
+      "drawAt": "2026-07-01T21:32:32+08:00",
+      "numbers": [
+        15,
+        23,
+        9,
+        45,
+        24,
+        39
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026181",
+      "drawAt": "2026-06-30T21:32:32+08:00",
+      "numbers": [
+        17,
+        29,
+        6,
+        34,
+        47,
+        15
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026180",
+      "drawAt": "2026-06-29T21:32:32+08:00",
+      "numbers": [
+        14,
+        10,
+        37,
+        30,
+        49,
+        19
+      ],
+      "special": 21,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026179",
+      "drawAt": "2026-06-28T21:32:32+08:00",
+      "numbers": [
+        10,
+        11,
+        26,
+        6,
+        31,
+        9
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026178",
+      "drawAt": "2026-06-27T21:32:32+08:00",
+      "numbers": [
+        26,
+        46,
+        22,
+        44,
+        31,
+        17
+      ],
+      "special": 18,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026177",
+      "drawAt": "2026-06-26T21:32:32+08:00",
+      "numbers": [
+        19,
+        21,
+        5,
+        1,
+        2,
+        44
+      ],
+      "special": 14,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026176",
+      "drawAt": "2026-06-25T21:32:32+08:00",
+      "numbers": [
+        30,
+        31,
+        2,
+        36,
+        38,
+        15
+      ],
+      "special": 10,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026175",
+      "drawAt": "2026-06-24T21:32:32+08:00",
+      "numbers": [
+        7,
+        19,
+        30,
+        29,
+        28,
+        25
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026174",
+      "drawAt": "2026-06-23T21:32:32+08:00",
+      "numbers": [
+        15,
+        8,
+        34,
+        13,
+        28,
+        21
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026173",
+      "drawAt": "2026-06-22T21:32:32+08:00",
+      "numbers": [
+        39,
+        6,
+        16,
+        40,
+        13,
+        19
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026172",
+      "drawAt": "2026-06-21T21:32:32+08:00",
+      "numbers": [
+        28,
+        34,
+        42,
+        37,
+        45,
+        8
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026171",
+      "drawAt": "2026-06-20T21:32:32+08:00",
+      "numbers": [
+        24,
+        38,
+        40,
+        31,
+        42,
+        46
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026170",
+      "drawAt": "2026-06-19T21:32:32+08:00",
+      "numbers": [
+        27,
+        46,
+        6,
+        38,
+        20,
+        34
+      ],
+      "special": 3,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026169",
+      "drawAt": "2026-06-18T21:32:32+08:00",
+      "numbers": [
+        44,
+        37,
+        30,
+        8,
+        40,
+        22
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026168",
+      "drawAt": "2026-06-17T21:32:32+08:00",
+      "numbers": [
+        27,
+        11,
+        24,
+        5,
+        40,
+        33
+      ],
+      "special": 15,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026167",
+      "drawAt": "2026-06-16T21:32:32+08:00",
+      "numbers": [
+        23,
+        3,
+        40,
+        39,
+        7,
+        11
+      ],
+      "special": 19,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026166",
+      "drawAt": "2026-06-15T21:32:32+08:00",
+      "numbers": [
+        20,
+        15,
+        1,
+        4,
+        21,
+        28
+      ],
+      "special": 6,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026165",
+      "drawAt": "2026-06-14T21:32:32+08:00",
+      "numbers": [
+        11,
+        47,
+        9,
+        49,
+        2,
+        1
+      ],
+      "special": 3,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026164",
+      "drawAt": "2026-06-13T21:32:32+08:00",
+      "numbers": [
+        46,
+        4,
+        38,
+        12,
+        3,
+        2
+      ],
+      "special": 21,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026163",
+      "drawAt": "2026-06-12T21:32:32+08:00",
+      "numbers": [
+        39,
+        8,
+        10,
+        33,
+        7,
+        41
+      ],
+      "special": 37,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026162",
+      "drawAt": "2026-06-11T21:32:32+08:00",
+      "numbers": [
+        23,
+        41,
+        24,
+        26,
+        33,
+        7
+      ],
+      "special": 32,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026161",
+      "drawAt": "2026-06-10T21:32:32+08:00",
+      "numbers": [
+        36,
+        40,
+        42,
+        19,
+        34,
+        46
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026160",
+      "drawAt": "2026-06-09T21:32:32+08:00",
+      "numbers": [
+        8,
+        16,
+        26,
+        1,
+        29,
+        30
+      ],
+      "special": 2,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026159",
+      "drawAt": "2026-06-08T21:32:32+08:00",
+      "numbers": [
+        12,
+        4,
+        28,
+        17,
+        20,
+        46
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026158",
+      "drawAt": "2026-06-07T21:32:32+08:00",
+      "numbers": [
+        43,
+        48,
+        3,
+        1,
+        12,
+        23
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026157",
+      "drawAt": "2026-06-06T21:32:32+08:00",
+      "numbers": [
+        43,
+        25,
+        11,
+        31,
+        17,
+        10
+      ],
+      "special": 40,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026156",
+      "drawAt": "2026-06-05T21:32:32+08:00",
+      "numbers": [
+        31,
+        16,
+        11,
+        3,
+        37,
+        12
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026155",
+      "drawAt": "2026-06-04T21:32:32+08:00",
+      "numbers": [
+        21,
+        37,
+        46,
+        13,
+        40,
+        47
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026154",
+      "drawAt": "2026-06-03T21:32:32+08:00",
+      "numbers": [
+        46,
+        28,
+        42,
+        31,
+        23,
+        34
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026153",
+      "drawAt": "2026-06-02T21:32:32+08:00",
+      "numbers": [
+        1,
+        38,
+        33,
+        28,
+        6,
+        40
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026152",
+      "drawAt": "2026-06-01T21:32:32+08:00",
+      "numbers": [
+        34,
+        47,
+        16,
+        36,
+        44,
+        1
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026151",
+      "drawAt": "2026-05-31T21:32:32+08:00",
+      "numbers": [
+        27,
+        15,
+        29,
+        42,
+        20,
+        41
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026150",
+      "drawAt": "2026-05-30T21:32:32+08:00",
+      "numbers": [
+        11,
+        4,
+        22,
+        25,
+        44,
+        19
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026149",
+      "drawAt": "2026-05-29T21:32:32+08:00",
+      "numbers": [
+        28,
+        30,
+        44,
+        45,
+        4,
+        20
+      ],
+      "special": 27,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026148",
+      "drawAt": "2026-05-28T21:32:32+08:00",
+      "numbers": [
+        28,
+        24,
+        31,
+        23,
+        4,
+        27
+      ],
+      "special": 48,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026147",
+      "drawAt": "2026-05-27T21:32:32+08:00",
+      "numbers": [
+        29,
+        40,
+        6,
+        18,
+        31,
+        10
+      ],
+      "special": 13,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026146",
+      "drawAt": "2026-05-26T21:32:32+08:00",
+      "numbers": [
+        11,
+        30,
+        20,
+        19,
+        5,
+        16
+      ],
+      "special": 42,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026145",
+      "drawAt": "2026-05-25T21:32:32+08:00",
+      "numbers": [
+        36,
+        43,
+        25,
+        32,
+        37,
+        18
+      ],
+      "special": 5,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026144",
+      "drawAt": "2026-05-24T21:32:32+08:00",
+      "numbers": [
+        47,
+        31,
+        29,
+        33,
+        22,
+        26
+      ],
+      "special": 43,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026143",
+      "drawAt": "2026-05-23T21:32:32+08:00",
+      "numbers": [
+        13,
+        26,
+        18,
+        32,
+        2,
+        33
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026142",
+      "drawAt": "2026-05-22T21:32:32+08:00",
+      "numbers": [
+        45,
+        15,
+        26,
+        21,
+        18,
+        35
+      ],
+      "special": 23,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026141",
+      "drawAt": "2026-05-21T21:32:32+08:00",
+      "numbers": [
+        43,
+        8,
+        17,
+        2,
+        34,
+        32
+      ],
+      "special": 33,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026140",
+      "drawAt": "2026-05-20T21:32:32+08:00",
+      "numbers": [
+        13,
+        10,
+        42,
+        4,
+        46,
+        34
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026139",
+      "drawAt": "2026-05-19T21:32:32+08:00",
+      "numbers": [
+        41,
+        45,
+        48,
+        1,
+        36,
+        30
+      ],
+      "special": 24,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026138",
+      "drawAt": "2026-05-18T21:32:32+08:00",
+      "numbers": [
+        38,
+        22,
+        6,
+        24,
+        20,
+        46
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026137",
+      "drawAt": "2026-05-17T21:32:32+08:00",
+      "numbers": [
+        24,
+        20,
+        32,
+        5,
+        19,
+        7
+      ],
+      "special": 26,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026136",
+      "drawAt": "2026-05-16T21:32:32+08:00",
+      "numbers": [
+        1,
+        14,
+        24,
+        17,
+        15,
+        12
+      ],
+      "special": 48,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026135",
+      "drawAt": "2026-05-15T21:32:32+08:00",
+      "numbers": [
+        8,
+        35,
+        9,
+        20,
+        18,
+        47
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026134",
+      "drawAt": "2026-05-14T21:32:32+08:00",
+      "numbers": [
+        24,
+        46,
+        40,
+        44,
+        22,
+        49
+      ],
+      "special": 37,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026133",
+      "drawAt": "2026-05-13T21:32:32+08:00",
+      "numbers": [
+        38,
+        14,
+        23,
+        1,
+        26,
+        44
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026132",
+      "drawAt": "2026-05-12T21:32:32+08:00",
+      "numbers": [
+        48,
+        11,
+        20,
+        44,
+        39,
+        35
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026131",
+      "drawAt": "2026-05-11T21:32:32+08:00",
+      "numbers": [
+        12,
+        40,
+        21,
+        32,
+        1,
+        25
+      ],
+      "special": 7,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026130",
+      "drawAt": "2026-05-10T21:32:32+08:00",
+      "numbers": [
+        41,
+        26,
+        9,
+        11,
+        5,
+        25
+      ],
+      "special": 29,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026129",
+      "drawAt": "2026-05-09T21:32:32+08:00",
+      "numbers": [
+        34,
+        7,
+        40,
+        21,
+        17,
+        25
+      ],
+      "special": 41,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026128",
+      "drawAt": "2026-05-08T21:32:32+08:00",
+      "numbers": [
+        25,
+        46,
+        2,
+        7,
+        45,
+        42
+      ],
+      "special": 37,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026127",
+      "drawAt": "2026-05-07T21:32:32+08:00",
+      "numbers": [
+        14,
+        8,
+        27,
+        3,
+        7,
+        29
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026126",
+      "drawAt": "2026-05-06T21:32:32+08:00",
+      "numbers": [
+        15,
+        9,
+        5,
+        3,
+        1,
+        10
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026125",
+      "drawAt": "2026-05-05T21:32:32+08:00",
+      "numbers": [
+        16,
+        19,
+        7,
+        30,
+        38,
+        39
+      ],
+      "special": 31,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026124",
+      "drawAt": "2026-05-04T21:32:32+08:00",
+      "numbers": [
+        46,
+        5,
+        10,
+        17,
+        12,
+        22
+      ],
+      "special": 39,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026123",
+      "drawAt": "2026-05-03T21:32:32+08:00",
+      "numbers": [
+        39,
+        23,
+        49,
+        17,
+        42,
+        44
+      ],
+      "special": 46,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026122",
+      "drawAt": "2026-05-02T21:32:32+08:00",
+      "numbers": [
+        18,
+        23,
+        15,
+        22,
+        25,
+        45
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026121",
+      "drawAt": "2026-05-01T21:32:32+08:00",
+      "numbers": [
+        45,
+        21,
+        35,
+        48,
+        6,
+        20
+      ],
+      "special": 44,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026120",
+      "drawAt": "2026-04-30T21:32:32+08:00",
+      "numbers": [
+        18,
+        24,
+        7,
+        23,
+        48,
+        20
+      ],
+      "special": 6,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026119",
+      "drawAt": "2026-04-29T21:32:32+08:00",
+      "numbers": [
+        38,
+        18,
+        32,
+        22,
+        30,
+        40
+      ],
+      "special": 11,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026118",
+      "drawAt": "2026-04-28T21:32:32+08:00",
+      "numbers": [
+        38,
+        37,
+        22,
+        46,
+        49,
+        40
+      ],
+      "special": 8,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026117",
+      "drawAt": "2026-04-27T21:32:32+08:00",
+      "numbers": [
+        45,
+        2,
+        46,
+        33,
+        19,
+        7
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026116",
+      "drawAt": "2026-04-26T21:32:32+08:00",
+      "numbers": [
+        15,
+        46,
+        16,
+        10,
+        48,
+        33
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026115",
+      "drawAt": "2026-04-25T21:32:32+08:00",
+      "numbers": [
+        21,
+        16,
+        25,
+        29,
+        8,
+        7
+      ],
+      "special": 4,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026114",
+      "drawAt": "2026-04-24T21:32:32+08:00",
+      "numbers": [
+        45,
+        41,
+        10,
+        1,
+        36,
+        25
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026113",
+      "drawAt": "2026-04-23T21:32:32+08:00",
+      "numbers": [
+        42,
+        22,
+        15,
+        17,
+        32,
+        49
+      ],
+      "special": 2,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026112",
+      "drawAt": "2026-04-22T21:32:32+08:00",
+      "numbers": [
+        15,
+        19,
+        30,
+        7,
+        44,
+        10
+      ],
+      "special": 9,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026111",
+      "drawAt": "2026-04-21T21:32:32+08:00",
+      "numbers": [
+        24,
+        23,
+        21,
+        41,
+        38,
+        33
+      ],
+      "special": 1,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026110",
+      "drawAt": "2026-04-20T21:32:32+08:00",
+      "numbers": [
+        40,
+        3,
+        43,
+        29,
+        45,
+        19
+      ],
+      "special": 30,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026109",
+      "drawAt": "2026-04-19T21:32:32+08:00",
+      "numbers": [
+        38,
+        7,
+        19,
+        24,
+        43,
+        8
+      ],
+      "special": 16,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026108",
+      "drawAt": "2026-04-18T21:32:32+08:00",
+      "numbers": [
+        6,
+        30,
+        26,
+        14,
+        48,
+        40
+      ],
+      "special": 45,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026107",
+      "drawAt": "2026-04-17T21:32:32+08:00",
+      "numbers": [
+        35,
+        10,
+        41,
+        43,
+        34,
+        6
+      ],
+      "special": 49,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026106",
+      "drawAt": "2026-04-16T21:32:32+08:00",
+      "numbers": [
+        31,
+        48,
+        5,
+        11,
+        46,
+        40
+      ],
+      "special": 22,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    },
+    {
+      "game": "new_macau",
+      "issue": "2026105",
+      "drawAt": "2026-04-15T21:32:32+08:00",
+      "numbers": [
+        32,
+        44,
+        17,
+        19,
+        11,
+        36
+      ],
+      "special": 28,
+      "source": "168开奖 API 本地快照",
+      "verified": false
+    }
+  ]
+}

@@ -22,7 +22,8 @@ export async function POST(request: NextRequest) {
     draws?: Draw[];
     focus?: string;
   };
-  const game: GameId = body.game === "macau" ? "macau" : "hk";
+  const game: GameId =
+    body.game === "macau" || body.game === "new_macau" ? body.game : "hk";
   const draws = Array.isArray(body.draws) ? body.draws.slice(0, 120).filter(isValidDraw) : [];
   if (draws.length < 2) {
     return NextResponse.json({ error: "至少需要两期有效数据才能分析。" }, { status: 400 });

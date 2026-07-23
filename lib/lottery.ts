@@ -1,4 +1,8 @@
-export type GameId = "hk" | "macau";
+import lotteryHistory from "./lottery-history.json";
+
+export const GAME_IDS = ["hk", "macau", "new_macau"] as const;
+
+export type GameId = (typeof GAME_IDS)[number];
 
 export type Draw = {
   game: GameId;
@@ -60,7 +64,13 @@ export const GAME_META: Record<
     name: "澳门六合彩",
     shortName: "澳门",
     schedule: "每日 22:32",
-    sourceLabel: "澳门彩 API · 多源核验",
+    sourceLabel: "澳门彩 API · 近 100 期历史",
+  },
+  new_macau: {
+    name: "新澳门六合彩",
+    shortName: "新澳门",
+    schedule: "每日 21:32",
+    sourceLabel: "新澳门彩 API · 近 100 期历史",
   },
 };
 
@@ -81,35 +91,85 @@ export function getWave(number: number): Wave {
   return "green";
 }
 
-const ZODIAC_ORDER_2026 = ["马", "蛇", "龙", "兔", "虎", "牛", "鼠", "猪", "狗", "鸡", "猴", "羊"];
+const ZODIAC_CYCLE = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
+const LUNAR_NEW_YEAR: Record<number, string> = {
+  2020: "2020-01-25",
+  2021: "2021-02-12",
+  2022: "2022-02-01",
+  2023: "2023-01-22",
+  2024: "2024-02-10",
+  2025: "2025-01-29",
+  2026: "2026-02-17",
+  2027: "2027-02-06",
+  2028: "2028-01-26",
+  2029: "2029-02-13",
+  2030: "2030-02-03",
+};
 
-export function getZodiac(number: number): string {
-  return ZODIAC_ORDER_2026[(number - 1) % 12];
+export function getZodiac(number: number, drawAt?: string): string {
+  const dateKey = drawAt?.slice(0, 10) ?? beijingDateKey(new Date());
+  let zodiacYear = Number(dateKey.slice(0, 4)) || 2026;
+  const newYear = LUNAR_NEW_YEAR[zodiacYear];
+  if (newYear && dateKey < newYear) zodiacYear -= 1;
+  const yearAnimalIndex = ((zodiacYear - 2020) % 12 + 12) % 12;
+  const offset = (number - 1) % 12;
+  return ZODIAC_CYCLE[(yearAnimalIndex - offset + 12) % 12];
 }
 
 export function formatBall(number: number): string {
   return String(number).padStart(2, "0");
 }
 
-export const FALLBACK_DRAWS: Record<GameId, Draw[]> = {
+const SEED_DRAWS: Record<GameId, Draw[]> = {
   hk: [
     draw("hk", "2026078", "2026-07-21T21:32:32+08:00", [6, 47, 45, 1, 41, 37], 8),
     draw("hk", "2026077", "2026-07-16T21:32:32+08:00", [18, 30, 26, 21, 44, 32], 27),
     draw("hk", "2026076", "2026-07-14T21:32:32+08:00", [31, 44, 27, 10, 16, 19], 17),
   ],
   macau: [
-    draw("macau", "2026202", "2026-07-21T22:32:32+08:00", [10, 14, 28, 1, 43, 36], 29),
-    draw("macau", "2026201", "2026-07-20T22:32:32+08:00", [23, 43, 32, 40, 25, 22], 38),
-    draw("macau", "2026200", "2026-07-19T22:32:32+08:00", [30, 9, 44, 19, 31, 39], 45),
-    draw("macau", "2026199", "2026-07-18T22:32:32+08:00", [43, 15, 40, 21, 3, 20], 9),
-    draw("macau", "2026198", "2026-07-17T22:32:32+08:00", [18, 44, 28, 43, 20, 35], 7),
-    draw("macau", "2026197", "2026-07-16T22:32:32+08:00", [22, 36, 39, 42, 37, 14], 49),
-    draw("macau", "2026196", "2026-07-15T22:32:32+08:00", [38, 45, 15, 25, 43, 37], 27),
-    draw("macau", "2026195", "2026-07-14T22:32:32+08:00", [11, 47, 44, 41, 39, 1], 14),
-    draw("macau", "2026194", "2026-07-13T22:32:32+08:00", [47, 4, 33, 46, 8, 12], 5),
-    draw("macau", "2026193", "2026-07-12T22:32:32+08:00", [23, 38, 21, 31, 6, 44], 35),
+    draw("macau", "2026203", "2026-07-22T22:32:32+08:00", [22, 24, 48, 45, 31, 26], 9),
+    draw("macau", "2026202", "2026-07-21T22:32:32+08:00", [13, 32, 24, 21, 39, 47], 41),
+    draw("macau", "2026201", "2026-07-20T22:32:32+08:00", [19, 4, 32, 46, 29, 47], 45),
+    draw("macau", "2026200", "2026-07-19T22:32:32+08:00", [31, 45, 22, 10, 34, 36], 16),
+    draw("macau", "2026199", "2026-07-18T22:32:32+08:00", [25, 46, 2, 6, 15, 42], 22),
+    draw("macau", "2026198", "2026-07-17T22:32:32+08:00", [40, 23, 7, 28, 48, 43], 26),
+    draw("macau", "2026197", "2026-07-16T22:32:32+08:00", [10, 48, 40, 16, 1, 27], 29),
+    draw("macau", "2026196", "2026-07-15T22:32:32+08:00", [46, 19, 48, 49, 17, 43], 12),
+    draw("macau", "2026195", "2026-07-14T22:32:32+08:00", [39, 6, 37, 11, 45, 42], 47),
+    draw("macau", "2026194", "2026-07-13T22:32:32+08:00", [31, 14, 35, 36, 16, 49], 38),
+    draw("macau", "2026193", "2026-07-12T22:32:32+08:00", [39, 32, 21, 45, 15, 12], 40),
+    draw("macau", "2026192", "2026-07-11T22:32:32+08:00", [27, 12, 38, 47, 37, 43], 22),
+  ],
+  new_macau: [
+    draw("new_macau", "2026203", "2026-07-22T21:32:32+08:00", [12, 11, 31, 3, 44, 37], 25),
+    draw("new_macau", "2026202", "2026-07-21T21:32:32+08:00", [21, 15, 25, 47, 13, 45], 40),
+    draw("new_macau", "2026201", "2026-07-20T21:32:32+08:00", [46, 28, 19, 38, 31, 25], 32),
+    draw("new_macau", "2026200", "2026-07-19T21:32:32+08:00", [43, 46, 5, 32, 35, 29], 39),
+    draw("new_macau", "2026199", "2026-07-18T21:32:32+08:00", [17, 49, 42, 45, 5, 38], 36),
+    draw("new_macau", "2026198", "2026-07-17T21:32:32+08:00", [48, 35, 45, 21, 12, 24], 7),
+    draw("new_macau", "2026197", "2026-07-16T21:32:32+08:00", [40, 19, 30, 48, 44, 28], 8),
+    draw("new_macau", "2026196", "2026-07-15T21:32:32+08:00", [3, 37, 24, 10, 41, 19], 39),
+    draw("new_macau", "2026195", "2026-07-14T21:32:32+08:00", [46, 23, 39, 4, 9, 19], 25),
+    draw("new_macau", "2026194", "2026-07-13T21:32:32+08:00", [30, 21, 22, 15, 4, 34], 26),
+    draw("new_macau", "2026193", "2026-07-12T21:32:32+08:00", [2, 49, 25, 11, 45, 29], 9),
+    draw("new_macau", "2026192", "2026-07-11T21:32:32+08:00", [27, 30, 45, 8, 1, 37], 25),
   ],
 };
+
+const HISTORY_SNAPSHOT = lotteryHistory as unknown as Record<GameId, Draw[]>;
+
+export const FALLBACK_DRAWS = Object.fromEntries(
+  GAME_IDS.map((game) => {
+    const snapshot = Array.isArray(HISTORY_SNAPSHOT[game]) ? HISTORY_SNAPSHOT[game] : [];
+    const merged = [...SEED_DRAWS[game], ...snapshot].map((item) => ({ ...item, game }));
+    const unique = [
+      ...new Map(merged.map((item) => [`${item.game}:${item.issue}`, item])).values(),
+    ]
+      .filter(isValidDraw)
+      .sort((a, b) => b.issue.localeCompare(a.issue, "en", { numeric: true }));
+    return [game, unique];
+  }),
+) as Record<GameId, Draw[]>;
 
 function draw(
   game: GameId,
@@ -144,7 +204,8 @@ export function buildAnalysis(draws: Draw[]): Analysis {
     all.forEach((number) => {
       frequency[number] += 1;
       waves[getWave(number)] += 1;
-      zodiacMap.set(getZodiac(number), (zodiacMap.get(getZodiac(number)) ?? 0) + 1);
+      const zodiac = getZodiac(number, item.drawAt);
+      zodiacMap.set(zodiac, (zodiacMap.get(zodiac) ?? 0) + 1);
       if (number % 2) odd += 1;
       else even += 1;
       if (number >= 25) big += 1;
@@ -292,9 +353,10 @@ export function isValidDraw(draw: Draw): boolean {
 
 export function nextScheduledDraw(game: GameId, from = new Date()): Date {
   const beijing = partsInBeijing(from);
-  if (game === "macau") {
-    const today = beijingDate(beijing.year, beijing.month, beijing.day, 22, 32);
-    return today.getTime() > from.getTime() ? today : addBeijingDays(today, 1, 22, 32);
+  if (game === "macau" || game === "new_macau") {
+    const hour = game === "macau" ? 22 : 21;
+    const today = beijingDate(beijing.year, beijing.month, beijing.day, hour, 32);
+    return today.getTime() > from.getTime() ? today : addBeijingDays(today, 1, hour, 32);
   }
 
   for (let offset = 0; offset < 8; offset += 1) {
@@ -323,6 +385,11 @@ function partsInBeijing(date: Date) {
   }).formatToParts(date);
   const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
   return { year: get("year"), month: get("month"), day: get("day") };
+}
+
+function beijingDateKey(date: Date) {
+  const { year, month, day } = partsInBeijing(date);
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function beijingDate(year: number, month: number, day: number, hour: number, minute: number) {

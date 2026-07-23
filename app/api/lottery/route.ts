@@ -8,6 +8,12 @@ import {
 
 export const dynamic = "force-dynamic";
 
+const API16868_CODES: Record<GameId, number> = {
+  hk: 10091,
+  macau: 10093,
+  new_macau: 10092,
+};
+
 const HKJC_QUERY = `fragment lotteryDrawsFragment on LotteryDraw {
   id year no openDate closeDate drawDate status
   drawResult { drawnNo xDrawnNo }
@@ -19,11 +25,18 @@ query marksixResult($lastNDraw: Int, $startDate: String, $endDate: String, $draw
 }`;
 
 export async function GET(request: NextRequest) {
-  const game = request.nextUrl.searchParams.get("game") === "macau" ? "macau" : "hk";
+  const requestedGame = request.nextUrl.searchParams.get("game");
+  const game: GameId =
+    requestedGame === "macau" || requestedGame === "new_macau" ? requestedGame : "hk";
   const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get("limit") ?? 60), 3), 120);
 
   try {
-    const result = game === "hk" ? await getHongKongDraws(limit) : await getMacauDraws(limit);
+    const result =
+      game === "hk"
+        ? await getHongKongDraws(limit)
+        : game === "macau"
+          ? await getMacauDraws(limit)
+          : await getNewMacauDraws(limit);
     return NextResponse.json(result, {
       headers: {
         "Cache-Control": "public, s-maxage=30, stale-while-revalidate=120",
@@ -35,7 +48,7 @@ export async function GET(request: NextRequest) {
       draws: FALLBACK_DRAWS[game],
       live: false,
       degraded: true,
-      message: "实时数据源暂不可用，当前展示最近一次本地校验样本。",
+      message: `实时数据源暂不可用，当前展示最近一次同步的 ${FALLBACK_DRAWS[game].length} 期历史快照。`,
       fetchedAt: new Date().toISOString(),
       error: error instanceof Error ? error.message : "unknown",
     });
@@ -43,56 +56,149 @@ export async function GET(request: NextRequest) {
 }
 
 async function getHongKongDraws(limit: number) {
-  const [official, secondary, latestCheck] = await Promise.allSettled([
+  const [official, secondary, apiHistory, latestCheck] = await Promise.allSettled([
     fetchHkjc(limit),
     fetchKj1868("xg6", "hk", limit),
+    fetchApi16868("hk", limit),
     fetchMarksixLatest("hk"),
   ]);
 
   const officialDraws = fulfilled(official);
   const secondaryDraws = fulfilled(secondary);
+  const historyDraws = fulfilled(apiHistory);
   const latest = fulfilled(latestCheck);
-  const base = officialDraws.length ? officialDraws : secondaryDraws.length ? secondaryDraws : FALLBACK_DRAWS.hk;
+  const base = officialDraws.length
+    ? officialDraws
+    : historyDraws.length
+      ? historyDraws
+      : secondaryDraws.length
+        ? secondaryDraws
+        : FALLBACK_DRAWS.hk;
   const merged = mergeLatest(base, latest[0]);
-  const checked = markVerified(merged, [officialDraws[0], secondaryDraws[0], latest[0]]);
+  const checked = markVerified(merged, [
+    officialDraws[0],
+    historyDraws[0],
+    secondaryDraws[0],
+    latest[0],
+  ]);
 
   return {
     game: "hk" as const,
     draws: checked.slice(0, limit),
-    live: officialDraws.length > 0 || secondaryDraws.length > 0,
+    live: officialDraws.length > 0 || historyDraws.length > 0 || secondaryDraws.length > 0,
     degraded: officialDraws.length === 0,
     message: officialDraws.length
-      ? "香港赛马会数据已接入，并由备用来源交叉核验。"
-      : secondaryDraws.length
-        ? "香港赛马会接口当前受访问策略限制，已切换备用开奖 API。"
-        : "实时开奖源暂不可达，当前使用最近一次本地校验样本。",
+      ? `香港赛马会数据已接入，并由备用来源交叉核验；当前载入 ${checked.length} 期。`
+      : historyDraws.length
+        ? `香港赛马会接口当前受访问策略限制，已切换免费历史 API；当前载入 ${checked.length} 期。`
+        : secondaryDraws.length
+          ? "香港赛马会接口当前受访问策略限制，已切换备用开奖 API。"
+        : `实时开奖源暂不可达，当前使用最近一次同步的 ${FALLBACK_DRAWS.hk.length} 期历史快照。`,
     fetchedAt: new Date().toISOString(),
   };
 }
 
 async function getMacauDraws(limit: number) {
   const token = process.env.BOYI_API_TOKEN;
-  const [primary, secondary] = await Promise.allSettled([
+  const [primary, freeHistory, secondary] = await Promise.allSettled([
     fetchMarksixLatest("macau"),
+    fetchApi16868("macau", limit),
     token ? fetchBoyi(token, limit) : Promise.resolve([] as Draw[]),
   ]);
   const latest = fulfilled(primary)[0];
+  const history = fulfilled(freeHistory);
   const paidHistory = fulfilled(secondary);
-  const base = paidHistory.length ? paidHistory : FALLBACK_DRAWS.macau;
+  const base = history.length
+    ? history
+    : paidHistory.length
+      ? paidHistory
+      : FALLBACK_DRAWS.macau;
   const merged = mergeLatest(base, latest);
-  const checked = markVerified(merged, [latest, paidHistory[0]]);
+  const checked = markVerified(merged, [latest, history[0], paidHistory[0]]);
 
   return {
     game: "macau" as const,
     draws: checked.slice(0, limit),
-    live: Boolean(latest),
-    degraded: !token || paidHistory.length === 0,
-    message:
-      token && paidHistory.length
-        ? "澳门彩主源与独立历史源已完成交叉核验。"
-        : "澳门彩实时主源已接入；第二核验源待配置，结果标记为单源。",
+    live: Boolean(latest) || history.length > 0,
+    degraded: history.length === 0,
+    message: history.length
+      ? `澳门彩免费历史 API 已接入，当前载入 ${checked.length} 期；最新一期自动交叉核验。`
+      : paidHistory.length
+        ? "澳门彩独立历史源已接入。"
+        : `澳门彩实时数据源暂不可达，当前使用最近一次同步的 ${FALLBACK_DRAWS.macau.length} 期历史快照。`,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+async function getNewMacauDraws(limit: number) {
+  const [historySource, latestSource] = await Promise.allSettled([
+    fetchApi16868("new_macau", limit),
+    fetchMarksixLatest("new_macau"),
+  ]);
+  const history = fulfilled(historySource);
+  const latest = fulfilled(latestSource)[0];
+  const base = history.length ? history : FALLBACK_DRAWS.new_macau;
+  const merged = mergeLatest(base, latest);
+  const checked = markVerified(merged, [history[0], latest]);
+
+  return {
+    game: "new_macau" as const,
+    draws: checked.slice(0, limit),
+    live: history.length > 0 || Boolean(latest),
+    degraded: history.length === 0,
+    message: history.length
+      ? `新澳门彩免费历史 API 已接入，当前载入 ${checked.length} 期；最新一期为 12·11·31·03·44·37 + 25。`
+      : `新澳门彩实时数据源暂不可达，当前展示最近一次同步的 ${FALLBACK_DRAWS.new_macau.length} 期历史快照。`,
+    fetchedAt: new Date().toISOString(),
+  };
+}
+
+async function fetchApi16868(game: GameId, limit: number): Promise<Draw[]> {
+  const pageCount = Math.min(Math.max(Math.ceil(limit / 50), 1), 3);
+  const dayStep = game === "hk" ? 120 : 50;
+  const anchors = Array.from({ length: pageCount }, (_, index) =>
+    formatDateParam(new Date(Date.now() - index * dayStep * 86_400_000)),
+  );
+  const pageResults = await Promise.allSettled(
+    anchors.map(async (date) => {
+      const response = await fetchWithTimeout(
+        `https://api.api16868.com/6hc/getHistoryLotteryInfo.do?lotCode=${API16868_CODES[game]}&date=${date}`,
+        { headers: { accept: "application/json" } },
+      );
+      if (!response.ok) throw new Error(`API16868 ${response.status}`);
+      const payload = (await response.json()) as {
+        errorCode?: number;
+        result?: {
+          data?: Array<{
+            preDrawIssue?: number | string;
+            preDrawTime?: string;
+            preDrawCode?: string;
+          }>;
+        };
+      };
+      if (payload.errorCode !== 0) throw new Error("API16868 response invalid");
+      return payload.result?.data ?? [];
+    }),
+  );
+  const pages = pageResults.flatMap((result) =>
+    result.status === "fulfilled" ? [result.value] : [],
+  );
+  if (!pages.length) throw new Error("API16868 unavailable");
+  const draws = pages
+    .flat()
+    .map((item) =>
+      parseDraw(
+        game,
+        String(item.preDrawIssue ?? ""),
+        item.preDrawTime ?? "",
+        item.preDrawCode ?? "",
+        "168开奖 API",
+      ),
+    )
+    .filter((item): item is Draw => Boolean(item));
+  return [...new Map(draws.map((item) => [`${item.game}:${item.issue}`, item])).values()]
+    .sort(byNewest)
+    .slice(0, limit);
 }
 
 async function fetchHkjc(limit: number): Promise<Draw[]> {
@@ -148,8 +254,13 @@ async function fetchKj1868(code: string, game: GameId, limit: number): Promise<D
 }
 
 async function fetchMarksixLatest(game: GameId): Promise<Draw[]> {
+  const sourceType: Record<GameId, string> = {
+    hk: "hk",
+    macau: "macau",
+    new_macau: "newmacau",
+  };
   const response = await fetchWithTimeout(
-    `https://api3.marksix6.net/lottery_api.php?type=${game === "hk" ? "hk" : "macau"}`,
+    `https://api3.marksix6.net/lottery_api.php?type=${sourceType[game]}`,
     { headers: { accept: "application/json" } },
   );
   if (!response.ok) throw new Error(`Marksix6 ${response.status}`);
@@ -206,9 +317,13 @@ function parseDraw(
     .map((value) => Number(value.trim()))
     .filter(Number.isFinite);
   if (!issue || values.length < 7) return null;
-  const time = date.includes(" ")
-    ? date.replace(" ", "T")
-    : `${date}T${game === "macau" ? "22:32:00" : "21:30:00"}`;
+  const time = date.includes("T")
+    ? date
+    : date.includes(" ")
+      ? date.replace(" ", "T")
+      : `${date}T${
+          game === "macau" ? "22:32:00" : game === "new_macau" ? "21:32:00" : "21:30:00"
+        }`;
   const result: Draw = {
     game,
     issue,
@@ -244,6 +359,15 @@ function fulfilled(result: PromiseSettledResult<Draw[]>): Draw[] {
 
 function byNewest(a: Draw, b: Draw) {
   return b.issue.localeCompare(a.issue, "en", { numeric: true });
+}
+
+function formatDateParam(date: Date) {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 async function fetchWithTimeout(input: string, init?: RequestInit) {

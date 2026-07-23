@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   FALLBACK_DRAWS,
+  GAME_IDS,
   GAME_META,
   WAVE_LABEL,
   buildAnalysis,
@@ -36,29 +37,55 @@ const FOCUS_OPTIONS = ["综合", "号码", "生肖", "波色", "遗漏", "形态
 
 export function LotteryDashboard() {
   const [draws, setDraws] = useState<Record<GameId, Draw[]>>(FALLBACK_DRAWS);
-  const [status, setStatus] = useState<Record<GameId, ApiPayload | null>>({ hk: null, macau: null });
+  const [status, setStatus] = useState<Record<GameId, ApiPayload | null>>({
+    hk: null,
+    macau: null,
+    new_macau: null,
+  });
   const [selectedGame, setSelectedGame] = useState<GameId>("hk");
   const [windowSize, setWindowSize] = useState(30);
+  const [historyVisible, setHistoryVisible] = useState(20);
   const [focus, setFocus] = useState<(typeof FOCUS_OPTIONS)[number]>("综合");
   const [now, setNow] = useState(() => new Date());
   const [demo, setDemo] = useState(false);
   const [demoSeconds, setDemoSeconds] = useState(3);
   const [revealed, setRevealed] = useState(0);
-  const [realRevealed, setRealRevealed] = useState(0);
+  const [realReveal, setRealReveal] = useState({ key: "", count: 0 });
   const [aiNarrative, setAiNarrative] = useState<AiNarrative | null>(null);
   const [aiMode, setAiMode] = useState<"idle" | "loading" | "ai" | "statistical">("idle");
 
+  const resetAi = useCallback(() => {
+    setAiNarrative(null);
+    setAiMode("idle");
+  }, []);
+
+  const chooseGame = useCallback((game: GameId) => {
+    setSelectedGame(game);
+    setHistoryVisible(20);
+    resetAi();
+  }, [resetAi]);
+
+  const chooseWindow = useCallback((size: number) => {
+    setWindowSize(size);
+    resetAi();
+  }, [resetAi]);
+
+  const chooseFocus = useCallback((item: (typeof FOCUS_OPTIONS)[number]) => {
+    setFocus(item);
+    resetAi();
+  }, [resetAi]);
+
   const refresh = useCallback(async () => {
     const results = await Promise.allSettled(
-      (["hk", "macau"] as GameId[]).map(async (game) => {
+      GAME_IDS.map(async (game) => {
         const response = await fetch(`/api/lottery?game=${game}&limit=100`, { cache: "no-store" });
         if (!response.ok) throw new Error(`lottery ${response.status}`);
         return (await response.json()) as ApiPayload;
       }),
     );
-    results.forEach((result, index) => {
+    results.forEach((result) => {
       if (result.status !== "fulfilled") return;
-      const game: GameId = index === 0 ? "hk" : "macau";
+      const game = result.value.game;
       if (result.value.draws?.length) {
         setDraws((current) => ({ ...current, [game]: result.value.draws }));
       }
@@ -121,26 +148,18 @@ export function LotteryDashboard() {
     liveWindow.visible &&
     liveWindow.delta <= 0 &&
     Math.abs(new Date(latest.drawAt).getTime() - targetTime) < 4 * 3_600_000;
+  const realRevealKey = `${selectedGame}:${latest.issue}:${targetTime}`;
 
   useEffect(() => {
-    if (!isCurrentResult) {
-      if (liveWindow.delta > 0) setRealRevealed(0);
-      return;
-    }
-    setRealRevealed(0);
+    if (!isCurrentResult) return;
     let count = 0;
     const interval = window.setInterval(() => {
       count += 1;
-      setRealRevealed(count);
+      setRealReveal({ key: realRevealKey, count });
       if (count >= 7) window.clearInterval(interval);
     }, 620);
     return () => window.clearInterval(interval);
-  }, [isCurrentResult, latest.issue, liveWindow.delta > 0, targetTime]);
-
-  useEffect(() => {
-    setAiNarrative(null);
-    setAiMode("idle");
-  }, [selectedGame, windowSize, focus]);
+  }, [isCurrentResult, realRevealKey]);
 
   const requestAi = useCallback(async () => {
     setAiMode("loading");
@@ -163,7 +182,7 @@ export function LotteryDashboard() {
 
   const liveDraw = latest;
   const stageVisible = demo || liveWindow.visible;
-  const stageReveal = demo ? revealed : realRevealed;
+  const stageReveal = demo ? revealed : realReveal.key === realRevealKey ? realReveal.count : 0;
 
   return (
     <div className="site-shell">
@@ -192,7 +211,7 @@ export function LotteryDashboard() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · AI RESEARCH</div>
             <h1>让每一期数据<br />都有可解释的结论</h1>
-            <p>港澳开奖实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，形成清晰而克制的 AI 研究报告。</p>
+            <p>香港、澳门与新澳门三类开奖数据实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，形成清晰而克制的 AI 研究报告。</p>
             <div className="hero-actions">
               <a className="primary-action" href="#lab">进入 AI 实验室 <span>→</span></a>
               <button className="ghost-action" type="button" onClick={() => { setDemo(false); window.setTimeout(() => setDemo(true), 0); }}>
@@ -212,11 +231,11 @@ export function LotteryDashboard() {
               <span>开奖前 3 分钟自动开启开奖台</span>
             </div>
             <div className="schedule-switch" role="group" aria-label="选择彩种">
-              {(["hk", "macau"] as GameId[]).map((game) => (
+              {GAME_IDS.map((game) => (
                 <button
                   type="button"
                   className={selectedGame === game ? "active" : ""}
-                  onClick={() => setSelectedGame(game)}
+                  onClick={() => chooseGame(game)}
                   key={game}
                 >
                   {GAME_META[game].shortName}
@@ -239,13 +258,13 @@ export function LotteryDashboard() {
         )}
 
         <section className="draw-grid" aria-label="最新开奖结果">
-          {(["hk", "macau"] as GameId[]).map((game) => (
+          {GAME_IDS.map((game) => (
             <DrawCard
               key={game}
               game={game}
               draw={draws[game][0]}
               selected={selectedGame === game}
-              onSelect={() => setSelectedGame(game)}
+              onSelect={() => chooseGame(game)}
               message={status[game]?.message}
             />
           ))}
@@ -261,8 +280,8 @@ export function LotteryDashboard() {
             game={selectedGame}
             windowSize={windowSize}
             available={draws[selectedGame].length}
-            onGame={setSelectedGame}
-            onWindow={setWindowSize}
+            onGame={chooseGame}
+            onWindow={chooseWindow}
           />
           <div className="analysis-grid">
             <NumberHeatmap analysis={analysis} />
@@ -285,7 +304,7 @@ export function LotteryDashboard() {
                   role="tab"
                   aria-selected={focus === item}
                   className={focus === item ? "active" : ""}
-                  onClick={() => setFocus(item)}
+                  onClick={() => chooseFocus(item)}
                   key={item}
                 >
                   {item}
@@ -319,14 +338,14 @@ export function LotteryDashboard() {
                 <div className="strategy-tags">
                   <span>{candidate.numbers.filter((number) => number % 2).length} 奇</span>
                   <span>{candidate.numbers.filter((number) => number >= 25).length} 大</span>
-                  <span>{new Set(candidate.numbers.map(getZodiac)).size} 肖</span>
+                  <span>{new Set(candidate.numbers.map((number) => getZodiac(number))).size} 肖</span>
                 </div>
               </article>
             ))}
           </div>
           <div className="responsible-note">
             <span>!</span>
-            <p><strong>理性提示</strong>　候选组合来自历史统计演示。彩票结果具有随机性，过去数据无法保证未来结果，本网站不提供投注或收益承诺。</p>
+            <p><strong>理性提示</strong>　候选组合来自第三方历史数据的统计演示。彩票结果具有随机性，过去数据无法保证未来结果；本站不是官方彩票网站，不提供投注或收益承诺。</p>
           </div>
         </section>
 
@@ -334,17 +353,33 @@ export function LotteryDashboard() {
           <SectionHeading
             eyebrow="DRAW ARCHIVE"
             title="历史开奖记录"
-            description={`当前展示 ${GAME_META[selectedGame].name} 最近 ${Math.min(draws[selectedGame].length, 10)} 期，北京时间口径。`}
+            description={`已载入 ${GAME_META[selectedGame].name} ${draws[selectedGame].length} 期，当前显示最近 ${Math.min(draws[selectedGame].length, historyVisible)} 期，北京时间口径。`}
           />
-          <HistoryTable draws={draws[selectedGame].slice(0, 10)} />
+          <HistoryTable draws={draws[selectedGame].slice(0, historyVisible)} />
+          {historyVisible < draws[selectedGame].length && (
+            <button
+              className="history-more"
+              type="button"
+              onClick={() => setHistoryVisible((current) => Math.min(current + 20, draws[selectedGame].length))}
+            >
+              再加载 {Math.min(20, draws[selectedGame].length - historyVisible)} 期
+              <span>{historyVisible} / {draws[selectedGame].length}</span>
+            </button>
+          )}
         </section>
       </main>
 
       <footer>
         <div className="footer-brand">六合智研 <span>MARK SIX INTELLIGENCE</span></div>
-        <p>数据研究与娱乐参考工具 · 不销售彩票 · 不构成投注建议</p>
+        <p>第三方数据研究工具 · 非官方彩票服务 · 不销售彩票 · 不构成投注建议</p>
         <div className="footer-links"><a href="#analysis">方法说明</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
+      <nav className="mobile-nav" aria-label="手机端快捷导航">
+        <a href="#draws"><span>01</span>开奖</a>
+        <a href="#analysis"><span>02</span>统计</a>
+        <a href="#lab"><span>03</span>AI</a>
+        <a href="#history"><span>04</span>历史</a>
+      </nav>
     </div>
   );
 }
@@ -384,7 +419,14 @@ function LiveStage({
             <span className={`ball stage-ball ${revealed > index ? `wave-${getWave(number)} revealed` : "pending"}`}>
               {revealed > index ? formatBall(number) : String(index + 1).padStart(2, "0")}
             </span>
-            <small>{revealed > index ? `${getZodiac(number)} · ${WAVE_LABEL[getWave(number)]}` : index === 6 ? "特码" : "待开"}</small>
+            <small>
+              {revealed > index ? (
+                <>
+                  <strong>{getZodiac(number, draw.drawAt)}肖</strong>
+                  <span>{WAVE_LABEL[getWave(number)]}</span>
+                </>
+              ) : index === 6 ? "特码" : "待开"}
+            </small>
           </div>
         ))}
       </div>
@@ -400,28 +442,39 @@ function DrawCard({ game, draw, selected, onSelect, message }: { game: GameId; d
         <button type="button" onClick={onSelect}>{selected ? "分析中" : "切换分析"}</button>
       </div>
       <div className="issue-line">第 <strong>{draw.issue}</strong> 期 <span>{formatDrawDate(draw.drawAt)}</span></div>
-      <BallRow numbers={draw.numbers} special={draw.special} />
+      <BallRow numbers={draw.numbers} special={draw.special} drawAt={draw.drawAt} />
       <div className="draw-card-foot">
-        <span className={draw.verified ? "verified" : "single-source"}><i /> {draw.verified ? "双源已核验" : "单源待复核"}</span>
-        <span>特码 {formatBall(draw.special)} · {getZodiac(draw.special)} · {WAVE_LABEL[getWave(draw.special)]}</span>
+        <span className={draw.verified ? "verified" : "single-source"}><i /> {draw.verified ? "双源结果一致" : "第三方单源"}</span>
+        <span>特码 {formatBall(draw.special)} · {getZodiac(draw.special, draw.drawAt)} · {WAVE_LABEL[getWave(draw.special)]}</span>
       </div>
       <p className="source-message">{message ?? GAME_META[game].sourceLabel}</p>
     </article>
   );
 }
 
-function BallRow({ numbers, special, compact = false }: { numbers: number[]; special: number; compact?: boolean }) {
+function BallRow({ numbers, special, compact = false, drawAt }: { numbers: number[]; special: number; compact?: boolean; drawAt?: string }) {
   return (
     <div className={`ball-row ${compact ? "compact" : ""}`}>
-      {numbers.map((number, index) => <Ball number={number} key={`${number}-${index}`} />)}
+      {numbers.map((number, index) => <Ball number={number} drawAt={drawAt} key={`${number}-${index}`} />)}
       <span className="ball-plus">+</span>
-      <Ball number={special} special />
+      <Ball number={special} special drawAt={drawAt} />
     </div>
   );
 }
 
-function Ball({ number, special = false }: { number: number; special?: boolean }) {
-  return <span className={`ball wave-${getWave(number)} ${special ? "special" : ""}`} title={`${formatBall(number)} ${getZodiac(number)} ${WAVE_LABEL[getWave(number)]}`}>{formatBall(number)}</span>;
+function Ball({ number, special = false, drawAt }: { number: number; special?: boolean; drawAt?: string }) {
+  const zodiac = getZodiac(number, drawAt);
+  return (
+    <span
+      className={`ball-item ${special ? "special-item" : ""}`}
+      aria-label={`${special ? "特码" : "号码"} ${formatBall(number)}，${zodiac}肖，${WAVE_LABEL[getWave(number)]}`}
+    >
+      <span className={`ball wave-${getWave(number)} ${special ? "special" : ""}`}>
+        {formatBall(number)}
+      </span>
+      <span className="ball-zodiac">{zodiac}肖</span>
+    </span>
+  );
 }
 
 function SectionHeading({ eyebrow, title, description }: { eyebrow: string; title: string; description: string }) {
@@ -432,7 +485,7 @@ function AnalysisToolbar({ game, windowSize, available, onGame, onWindow }: { ga
   return (
     <div className="analysis-toolbar">
       <div className="segmented" role="group" aria-label="彩种">
-        {(["hk", "macau"] as GameId[]).map((item) => <button type="button" className={game === item ? "active" : ""} onClick={() => onGame(item)} key={item}>{GAME_META[item].shortName}</button>)}
+        {GAME_IDS.map((item) => <button type="button" className={game === item ? "active" : ""} onClick={() => onGame(item)} key={item}>{GAME_META[item].shortName}</button>)}
       </div>
       <div className="window-controls"><span>统计窗口</span>{[10, 30, 50, 100].map((size) => <button type="button" disabled={available < size && size !== 10} className={windowSize === size ? "active" : ""} onClick={() => onWindow(size)} key={size}>近 {size} 期</button>)}</div>
       <span className="sample-count">有效样本 {Math.min(windowSize, available)} 期</span>
@@ -452,7 +505,7 @@ function NumberHeatmap({ analysis }: { analysis: Analysis }) {
           const info = scoreMap.get(number);
           const hot = analysis.hot.some((item) => item.number === number);
           const overdue = analysis.overdue.some((item) => item.number === number);
-          return <div className={`number-cell ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} key={number}><strong>{formatBall(number)}</strong><small>{info ? `${info.frequency}次 · 遗${info.omission}` : "—"}</small></div>;
+          return <div className={`number-cell ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} key={number}><strong>{formatBall(number)}</strong><span>{getZodiac(number)}肖</span><small>{info ? `${info.frequency}次 · 遗${info.omission}` : "—"}</small></div>;
         })}
       </div>
     </article>
@@ -487,11 +540,11 @@ function ZodiacPanel({ analysis }: { analysis: Analysis }) {
   const max = Math.max(...analysis.zodiacs.map((item) => item.count), 1);
   return (
     <article className="data-panel zodiac-panel">
-      <div className="data-panel-head"><div><span>ZODIAC MATRIX · 2026 马年</span><h3>生肖热度排行</h3></div></div>
+      <div className="data-panel-head"><div><span>ZODIAC MATRIX · 按期开奖年份</span><h3>生肖热度排行</h3></div></div>
       <div className="zodiac-list">
         {analysis.zodiacs.map((item, index) => <div className="zodiac-row" key={item.name}><span className={index < 3 ? "ranked" : ""}>{item.name}</span><div><i style={{ width: `${(item.count / max) * 100}%` }} /></div><strong>{item.count}</strong></div>)}
       </div>
-      <p className="panel-note">生肖映射按 2026 丙午马年口径；跨年数据会在正式历史层按开奖年份换算。</p>
+      <p className="panel-note">生肖映射按开奖日期换算，并在农历新年边界自动切换对应生肖年。</p>
     </article>
   );
 }
@@ -516,15 +569,35 @@ function AiReport({ analysis, narrative, mode, focus, game }: { analysis: Analys
 
 function HistoryTable({ draws }: { draws: Draw[] }) {
   return (
-    <div className="history-table-wrap">
-      <table className="history-table">
-        <thead><tr><th>彩种 / 期号</th><th>开奖时间（北京）</th><th>开奖号码</th><th>结构摘要</th><th>状态</th></tr></thead>
-        <tbody>{draws.map((draw) => {
+    <>
+      <div className="history-table-wrap">
+        <table className="history-table">
+          <thead><tr><th>彩种 / 期号</th><th>开奖时间（北京）</th><th>开奖号码与生肖</th><th>结构摘要</th><th>状态</th></tr></thead>
+          <tbody>{draws.map((draw) => {
+            const all = [...draw.numbers, draw.special];
+            return <tr key={`${draw.game}-${draw.issue}`}><td><strong>{GAME_META[draw.game].shortName}</strong> {draw.issue}</td><td>{formatDrawDate(draw.drawAt)}</td><td><BallRow numbers={draw.numbers} special={draw.special} compact drawAt={draw.drawAt} /></td><td>{all.filter((number) => number % 2).length}奇 · {new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}肖 · 和值{all.reduce((a, b) => a + b, 0)}</td><td><span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "双源一致" : "第三方数据"}</span></td></tr>;
+          })}</tbody>
+        </table>
+      </div>
+      <div className="history-mobile-list">
+        {draws.map((draw) => {
           const all = [...draw.numbers, draw.special];
-          return <tr key={`${draw.game}-${draw.issue}`}><td><strong>{GAME_META[draw.game].shortName}</strong> {draw.issue}</td><td>{formatDrawDate(draw.drawAt)}</td><td><BallRow numbers={draw.numbers} special={draw.special} compact /></td><td>{all.filter((number) => number % 2).length}奇 · {new Set(all.map(getZodiac)).size}肖 · 和值{all.reduce((a, b) => a + b, 0)}</td><td><span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "已核验" : "待复核"}</span></td></tr>;
-        })}</tbody>
-      </table>
-    </div>
+          return (
+            <article className="history-mobile-card" key={`mobile-${draw.game}-${draw.issue}`}>
+              <div className="history-mobile-head">
+                <div><strong>{GAME_META[draw.game].shortName}</strong><span>第 {draw.issue} 期</span></div>
+                <time>{formatDrawDate(draw.drawAt)}</time>
+              </div>
+              <BallRow numbers={draw.numbers} special={draw.special} compact drawAt={draw.drawAt} />
+              <div className="history-mobile-foot">
+                <span>{all.filter((number) => number % 2).length}奇 · {new Set(all.map((number) => getZodiac(number, draw.drawAt))).size}肖 · 和值{all.reduce((a, b) => a + b, 0)}</span>
+                <span className={draw.verified ? "verified" : "single-source"}><i />{draw.verified ? "双源一致" : "第三方数据"}</span>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </>
   );
 }
 

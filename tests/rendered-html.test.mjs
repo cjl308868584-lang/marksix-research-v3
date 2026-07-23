@@ -31,11 +31,15 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>六合智研｜港澳开奖与 AI 多维分析<\/title>/i);
+  assert.match(html, /<title>六合智研｜港澳三彩开奖与 AI 多维分析<\/title>/i);
   assert.match(html, /让每一期数据/);
   assert.match(html, /北京时间/);
   assert.match(html, /香港六合彩/);
   assert.match(html, /澳门六合彩/);
+  assert.match(html, /新澳门六合彩/);
+  assert.match(html, /羊肖/);
+  assert.match(html, /号码 12，羊肖，红波/);
+  assert.match(html, /特码 25，马肖，蓝波/);
   assert.match(html, /六维研判实验室/);
   assert.match(html, /历史开奖记录/);
   assert.match(html, /不构成投注建议/);
@@ -43,11 +47,13 @@ test("server-renders the finished lottery research dashboard", async () => {
 });
 
 test("keeps the product implementation free of starter preview artifacts", async () => {
-  const [page, layout, dashboard, packageJson, lotteryRoute, analyzeRoute] = await Promise.all([
+  const [page, layout, dashboard, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/LotteryDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../lib/lottery.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/lottery/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8"),
   ]);
@@ -56,12 +62,21 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(layout, /lang="zh-CN"/);
   assert.match(dashboard, /开奖前 3 分钟自动开启开奖台/);
   assert.match(dashboard, /FOCUS_OPTIONS/);
+  assert.match(dashboard, /ball-zodiac/);
+  assert.match(dashboard, /historyVisible/);
+  assert.match(dashboard, /再加载/);
+  assert.match(styles, /history-mobile-list/);
+  assert.match(styles, /max-width: 370px/);
+  assert.match(lotteryLib, /new_macau/);
+  assert.match(lotteryLib, /\[12, 11, 31, 3, 44, 37\], 25/);
   assert.match(lotteryRoute, /info\.cld\.hkjc\.com/);
   assert.match(lotteryRoute, /api3\.marksix6\.net/);
+  assert.match(lotteryRoute, /api\.api16868\.com/);
+  assert.match(lotteryRoute, /10092/);
   assert.match(analyzeRoute, /AI_API_KEY/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
   await assert.rejects(access(new URL("../app/_sites-preview", import.meta.url)));
-  await access(new URL("../public/og.png", import.meta.url));
+  await access(new URL("../public/og-v2.png", import.meta.url));
   await access(new URL("../lib/lottery.ts", import.meta.url));
   await access(templateRoot);
 });
