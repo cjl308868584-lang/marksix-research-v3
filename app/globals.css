@@ -1590,6 +1590,87 @@ footer {
   justify-content: space-between;
 }
 
+.strategy-zodiac-track {
+  margin-top: 16px;
+  padding: 10px 11px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  border: 1px solid rgba(210, 179, 109, 0.2);
+  border-radius: 6px;
+  background: rgba(210, 179, 109, 0.04);
+}
+
+.strategy-zodiac-track span {
+  color: var(--gold);
+  font-size: 8px;
+}
+
+.strategy-zodiac-track strong {
+  color: #e8d8ad;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-align: right;
+}
+
+.strategy-review-result {
+  margin-top: 10px;
+  padding: 10px 11px;
+  display: grid;
+  gap: 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.strategy-review-result > span {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.strategy-review-status {
+  margin-bottom: 2px;
+  padding-bottom: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: 8px;
+}
+
+.strategy-review-status span {
+  color: var(--gold);
+}
+
+.strategy-review-status strong {
+  font-size: 8px;
+  font-weight: 600;
+}
+
+.strategy-review-status .verified {
+  color: var(--success);
+}
+
+.strategy-review-status .pending {
+  color: #d6b86d;
+}
+
+.strategy-review-result strong {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.strategy-review-result .hit strong {
+  color: var(--success);
+}
+
 .strategy-tags {
   margin-top: 18px;
   padding-top: 15px;
@@ -1640,6 +1721,34 @@ footer {
   display: flex;
   align-items: center;
   cursor: pointer;
+}
+
+.strategy-review-rule {
+  margin-top: 14px;
+  padding: 13px 16px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  border: 1px solid rgba(101, 199, 162, 0.2);
+  border-radius: 7px;
+  background: rgba(101, 199, 162, 0.035);
+}
+
+.strategy-review-rule > span {
+  color: var(--success);
+  font-size: 9px;
+}
+
+.strategy-review-rule p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.strategy-review-rule strong {
+  color: #cadbd4;
 }
 
 .responsible-note {
@@ -2102,8 +2211,24 @@ footer p {
     scroll-snap-type: x proximity;
   }
   .ai-context-bar > div { scroll-snap-align: start; }
-  .strategy-grid { grid-template-columns: 1fr; }
-  .strategy-card:not(.active) { display: none; }
+  .strategy-grid {
+    margin-inline: -15px;
+    padding: 0 15px 6px;
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-padding-inline: 15px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+  .strategy-card,
+  .strategy-card:not(.active) {
+    display: block;
+    flex: 0 0 min(86vw, 420px);
+    scroll-snap-align: center;
+  }
+  .strategy-grid::-webkit-scrollbar { display: none; }
   .strategy-card .ball-row { justify-content: flex-start; }
   .evidence-layout { grid-template-columns: 1fr; }
   .backtest-panel { position: static; }
@@ -3091,17 +3216,31 @@ footer p {
   }
 
   .strategy-grid {
-    margin-top: 9px;
-    grid-template-columns: 1fr;
+    margin: 9px -12px 0;
+    padding: 0 12px 6px;
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scroll-padding-inline: 12px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
   }
 
   .strategy-card:not(.active) {
-    display: none;
+    display: block;
   }
 
   .strategy-card {
+    flex: 0 0 min(86vw, 380px);
+    max-width: 380px;
     padding: 17px 14px;
+    scroll-snap-align: center;
     border-radius: 11px;
+  }
+
+  .strategy-grid::-webkit-scrollbar {
+    display: none;
   }
 
   .strategy-card h3 {
@@ -3123,6 +3262,41 @@ footer p {
   .strategy-tags span {
     padding: 6px 8px;
     font-size: 9px;
+  }
+
+  .strategy-zodiac-track {
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+
+  .strategy-zodiac-track span,
+  .strategy-review-result > span,
+  .strategy-review-rule > span {
+    font-size: 10px;
+  }
+
+  .strategy-zodiac-track strong {
+    font-size: 13px;
+    text-align: left;
+  }
+
+  .strategy-review-result strong {
+    font-size: 10px;
+  }
+
+  .strategy-review-status,
+  .strategy-review-status strong {
+    font-size: 9px;
+  }
+
+  .strategy-review-rule {
+    padding: 13px;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .strategy-review-rule p {
+    font-size: 11px;
   }
 
   .responsible-note {

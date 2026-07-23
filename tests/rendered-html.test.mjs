@@ -45,6 +45,8 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
   assert.match(html, /AI 多策略预测实验室/);
+  assert.match(html, /三路候选策略/);
+  assert.match(html, /生肖方向命中/);
   assert.match(html, /九维证据/);
   assert.match(html, /滚动回测/);
   assert.match(html, /历史开奖记录/);
@@ -83,6 +85,10 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /AI_FOCUS_OPTIONS/);
   assert.match(dashboard, /AiEvidenceSection/);
   assert.match(dashboard, /ai-recommendation-balls/);
+  assert.match(dashboard, /strategy-review-result/);
+  assert.match(dashboard, /特码号码/);
+  assert.match(dashboard, /特码生肖/);
+  assert.match(dashboard, /结果已返回 · 待交叉核验/);
   assert.match(dashboard, /aria-current=/);
   assert.match(dashboard, /ball-zodiac/);
   assert.match(dashboard, /historyVisible/);
@@ -93,6 +99,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /env\(safe-area-inset-top\)/);
   assert.match(styles, /width: min\(76vw, 240px\)/);
   assert.match(styles, /\.ai-processing p[\s\S]*transform: none/);
+  assert.match(styles, /\.strategy-card:not\(\.active\)[\s\S]*display: block/);
+  assert.match(styles, /\.strategy-grid[\s\S]*scroll-snap-type: x mandatory/);
   assert.match(styles, /\.topbar[\s\S]*position: sticky/);
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
   assert.match(styles, /max-width: 370px/);

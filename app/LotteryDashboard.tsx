@@ -412,6 +412,7 @@ export function LotteryDashboard() {
         <StrategySection
           analysis={analysis}
           report={aiReport}
+          latest={latest}
           activeScenario={activeScenario}
           onScenario={setActiveScenario}
         />
@@ -1027,14 +1028,17 @@ function AiReport({
 function StrategySection({
   analysis,
   report,
+  latest,
   activeScenario,
   onScenario,
 }: {
   analysis: Analysis;
   report: AiAnalysisResponse | null;
+  latest: Draw;
   activeScenario: AiScenario["id"];
   onScenario: (scenario: AiScenario["id"]) => void;
 }) {
+  const strategyGridRef = useRef<HTMLDivElement | null>(null);
   const scenarios: AiScenario[] = report?.candidateSets ?? analysis.candidates.map((candidate) => {
     const all = [...candidate.numbers, candidate.special];
     const waves = all.reduce<Record<Wave, number>>(
@@ -1065,12 +1069,25 @@ function StrategySection({
     };
   });
   const recommendedId = report?.synthesis.recommendedScenarioId;
+  const reviewDraw = report?.target.issue === latest.issue ? latest : null;
+  const selectScenario = (scenario: AiScenario["id"]) => {
+    onScenario(scenario);
+    window.requestAnimationFrame(() => {
+      strategyGridRef.current
+        ?.querySelector<HTMLElement>(`[data-scenario="${scenario}"]`)
+        ?.scrollIntoView({
+          behavior: "smooth",
+          block: "nearest",
+          inline: "center",
+        });
+    });
+  };
   return (
     <section className="strategy-section section-block">
       <SectionHeading
-        eyebrow="SCENARIO FORECAST"
-        title="三路候选场景"
-        description="同一历史窗口分别观察均衡共识、趋势延续和逆向遗漏。AI 只从服务端生成的候选中推荐，不会凭空编造号码。"
+        eyebrow="WALK-FORWARD VIEW"
+        title="三路候选策略"
+        description="同一批历史数据用三种权重观察，保留冷热平衡、趋势延续和逆向遗漏三路结果，避免单一算法放大某一类历史特征。"
       />
       <div className="scenario-switch" role="group" aria-label="切换候选场景">
         {scenarios.map((scenario) => (
@@ -1078,7 +1095,8 @@ function StrategySection({
             type="button"
             className={activeScenario === scenario.id ? "active" : ""}
             aria-pressed={activeScenario === scenario.id}
-            onClick={() => onScenario(scenario.id)}
+            aria-controls={`strategy-${scenario.id}`}
+            onClick={() => selectScenario(scenario.id)}
             key={scenario.id}
           >
             {scenario.name}
@@ -1086,42 +1104,102 @@ function StrategySection({
           </button>
         ))}
       </div>
-      <div className="strategy-grid">
-        {scenarios.map((scenario, index) => (
-          <article
-            className={`strategy-card ${activeScenario === scenario.id ? "active" : ""} ${recommendedId === scenario.id ? "recommended" : ""}`}
-            key={scenario.id}
-          >
-            <div className="strategy-topline">
-              <span>0{index + 1}</span>
-              <span>{report ? `证据指数 ${scenario.evidenceScore}` : "本地预研"}</span>
-            </div>
-            <h3>{scenario.name}{recommendedId === scenario.id && <small>AI PICK</small>}</h3>
-            <p>{scenario.description}</p>
-            <BallRow
-              numbers={scenario.numbers}
-              special={scenario.special}
-              compact
-              drawAt={report?.target.expectedDrawAt}
-            />
-            <div className="strategy-tags">
-              <span>{scenario.structure.odd} 奇</span>
-              <span>{scenario.structure.big} 大</span>
-              <span>生肖 {scenario.structure.zodiacCount} 类</span>
-              <span>{scenario.structure.tails.length} 尾</span>
-            </div>
-            {report && (
-              <div className="strategy-evidence">
-                <span>入选依据</span>
-                <ul>{scenario.supportingEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
-                <details>
-                  <summary>查看反方证据</summary>
-                  <ul>{scenario.counterEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
-                </details>
+      <div ref={strategyGridRef} className="strategy-grid" aria-label="三路候选策略卡片">
+        {scenarios.map((scenario, index) => {
+          const mainExact = reviewDraw
+            ? scenario.numbers.filter((number) => reviewDraw.numbers.includes(number))
+            : [];
+          const specialExact = reviewDraw ? scenario.special === reviewDraw.special : false;
+          const predictedSpecialZodiac = getZodiac(
+            scenario.special,
+            report?.target.expectedDrawAt,
+          );
+          const actualSpecialZodiac = reviewDraw
+            ? getZodiac(reviewDraw.special, reviewDraw.drawAt)
+            : null;
+          const zodiacDirections = [
+            ...new Set(
+              [...scenario.numbers, scenario.special].map((number) =>
+                getZodiac(number, report?.target.expectedDrawAt),
+              ),
+            ),
+          ];
+          return (
+            <article
+              id={`strategy-${scenario.id}`}
+              data-scenario={scenario.id}
+              className={`strategy-card ${activeScenario === scenario.id ? "active" : ""} ${recommendedId === scenario.id ? "recommended" : ""}`}
+              key={scenario.id}
+            >
+              <div className="strategy-topline">
+                <span>0{index + 1}</span>
+                <span>{report ? `证据指数 ${scenario.evidenceScore}` : "本地预研"}</span>
               </div>
-            )}
-          </article>
-        ))}
+              <h3>{scenario.name}{recommendedId === scenario.id && <small>AI PICK</small>}</h3>
+              <p>{scenario.description}</p>
+              <BallRow
+                numbers={scenario.numbers}
+                special={scenario.special}
+                compact
+                drawAt={report?.target.expectedDrawAt}
+              />
+              <div className="strategy-zodiac-track">
+                <span>生肖方向</span>
+                <strong>{zodiacDirections.join(" · ")}</strong>
+              </div>
+              {reviewDraw && (
+                <div className="strategy-review-result" aria-label={`${scenario.name}赛后复盘`}>
+                  <div className="strategy-review-status">
+                    <span>第 {reviewDraw.issue} 期复盘</span>
+                    <strong className={reviewDraw.verified ? "verified" : "pending"}>
+                      {reviewDraw.verified ? "结果已核验" : "结果已返回 · 待交叉核验"}
+                    </strong>
+                  </div>
+                  <span>
+                    正码号码
+                    <strong>{mainExact.length}/6</strong>
+                  </span>
+                  <span className={specialExact ? "hit" : ""}>
+                    特码号码
+                    <strong>
+                      {specialExact
+                        ? `命中 ${formatBall(reviewDraw.special)}`
+                        : `未中 ${formatBall(scenario.special)} → ${formatBall(reviewDraw.special)}`}
+                    </strong>
+                  </span>
+                  <span className={predictedSpecialZodiac === actualSpecialZodiac ? "hit" : ""}>
+                    特码生肖
+                    <strong>
+                      {predictedSpecialZodiac === actualSpecialZodiac
+                        ? `方向命中 ${actualSpecialZodiac}`
+                        : `${predictedSpecialZodiac} → ${actualSpecialZodiac}`}
+                    </strong>
+                  </span>
+                </div>
+              )}
+              <div className="strategy-tags">
+                <span>{scenario.structure.odd} 奇</span>
+                <span>{scenario.structure.big} 大</span>
+                <span>生肖 {scenario.structure.zodiacCount} 类</span>
+                <span>{scenario.structure.tails.length} 尾</span>
+              </div>
+              {report && (
+                <div className="strategy-evidence">
+                  <span>入选依据</span>
+                  <ul>{scenario.supportingEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
+                  <details>
+                    <summary>查看反方证据</summary>
+                    <ul>{scenario.counterEvidence.map((item) => <li key={item}>{item}</li>)}</ul>
+                  </details>
+                </div>
+              )}
+            </article>
+          );
+        })}
+      </div>
+      <div className="strategy-review-rule">
+        <span>复盘口径</span>
+        <p><strong>生肖方向命中</strong>与<strong>具体号码命中</strong>分开记录：同生肖但不同号码，只计生肖方向命中，不计号码命中。报告目标期结果返回后自动显示；单源结果会明确标记为待交叉核验。</p>
       </div>
       <div className="responsible-note">
         <span>!</span>
