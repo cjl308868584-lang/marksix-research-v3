@@ -82,6 +82,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /mergeLiveProgress/);
   assert.match(dashboard, /Number\(incoming\.special !== null\)/);
   assert.match(dashboard, /drawToLiveProgress/);
+  assert.match(dashboard, /number-wave-\$\{wave\}/);
+  assert.match(dashboard, /WAVE_LABEL\[wave\]/);
   assert.match(dashboard, /progress=\{selectedProgress\}/);
   assert.match(dashboard, /高频检测每 3 秒/);
   assert.match(dashboard, /const orderedGames = \[/);
@@ -111,6 +113,9 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.draw-card > \.ball-row \.special-item \.ball[\s\S]*width: 58px/);
   assert.match(styles, /\.strategy-card > \.ball-row\.compact \.ball[\s\S]*width: min\(46px, 100%\)/);
   assert.match(styles, /\.scratch-reward \.stage-ball[\s\S]*width: 72px/);
+  assert.match(styles, /\.number-cell\.number-wave-red[\s\S]*--number-wave: var\(--red\)/);
+  assert.match(styles, /\.number-cell\.number-wave-blue[\s\S]*--number-wave: var\(--blue\)/);
+  assert.match(styles, /\.number-cell\.number-wave-green[\s\S]*--number-wave: var\(--green\)/);
   assert.match(styles, /\.ai-processing p[\s\S]*transform: none/);
   assert.match(styles, /\.strategy-card:not\(\.active\)[\s\S]*display: block/);
   assert.match(styles, /\.strategy-grid[\s\S]*scroll-snap-type: x mandatory/);

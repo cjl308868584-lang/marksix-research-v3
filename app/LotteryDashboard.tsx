@@ -923,14 +923,28 @@ function NumberHeatmap({ analysis }: { analysis: Analysis }) {
   const scoreMap = new Map([...analysis.hot, ...analysis.cold, ...analysis.overdue].map((item) => [item.number, item]));
   return (
     <article className="data-panel heatmap-panel">
-      <div className="data-panel-head"><div><span>NUMBER FIELD</span><h3>号码热力与遗漏</h3></div><div className="legend"><i className="hot" />频率高 <i className="cold" />遗漏长</div></div>
+      <div className="data-panel-head">
+        <div><span>NUMBER FIELD</span><h3>号码热力与遗漏</h3></div>
+        <div className="legend" aria-label="热力图图例">
+          <span><i className="hot" />频率高</span>
+          <span><i className="cold" />遗漏长</span>
+          <span className="wave-legend">
+            <b><i className="wave-red" />红波</b>
+            <b><i className="wave-blue" />蓝波</b>
+            <b><i className="wave-green" />绿波</b>
+          </span>
+        </div>
+      </div>
       <div className="number-grid">
         {Array.from({ length: 49 }, (_, index) => {
           const number = index + 1;
           const info = scoreMap.get(number);
           const hot = analysis.hot.some((item) => item.number === number);
           const overdue = analysis.overdue.some((item) => item.number === number);
-          return <div className={`number-cell ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} key={number}><strong>{formatBall(number)}</strong><span>{getZodiac(number)}</span><small>{info ? `${info.frequency}次 · 遗${info.omission}` : "—"}</small></div>;
+          const wave = getWave(number);
+          const zodiac = getZodiac(number);
+          const detail = info ? `${info.frequency}次，遗漏${info.omission}期` : "暂无统计";
+          return <div className={`number-cell number-wave-${wave} ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} title={`${formatBall(number)} · ${WAVE_LABEL[wave]} · ${zodiac}`} aria-label={`${formatBall(number)}，${WAVE_LABEL[wave]}，${zodiac}，${detail}`} key={number}><strong>{formatBall(number)}</strong><span>{zodiac}</span><small>{info ? <><span>{info.frequency}次</span><span>遗漏{info.omission}</span></> : "—"}</small></div>;
         })}
       </div>
     </article>

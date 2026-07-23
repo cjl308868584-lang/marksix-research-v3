@@ -960,14 +960,34 @@ footer {
 .legend {
   display: flex;
   align-items: center;
-  gap: 7px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 7px 10px;
   color: var(--dim);
   font-size: 9px;
+}
+
+.legend > span,
+.legend .wave-legend,
+.legend .wave-legend b {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.legend .wave-legend {
+  gap: 8px;
+}
+
+.legend .wave-legend b {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 .legend i {
   width: 6px;
   height: 6px;
+  flex: 0 0 auto;
   border-radius: 50%;
 }
 
@@ -981,6 +1001,10 @@ footer {
 }
 
 .number-cell {
+  --number-wave: #788184;
+  --number-wave-rgb: 120, 129, 132;
+  --number-wave-fill: #4d5558;
+  --number-wave-fill-deep: #343a3c;
   min-height: 49px;
   padding: 8px 6px;
   display: grid;
@@ -990,11 +1014,48 @@ footer {
   border-radius: 5px;
   background: rgba(255, 255, 255, calc(var(--heat) * 0.012));
   position: relative;
+  overflow: hidden;
+}
+
+.number-cell::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  height: 2px;
+  background: var(--number-wave);
+  opacity: 0.72;
+}
+
+.number-cell.number-wave-red {
+  --number-wave: var(--red);
+  --number-wave-rgb: 217, 83, 85;
+  --number-wave-fill: #9f2f3d;
+  --number-wave-fill-deep: #75202c;
+}
+
+.number-cell.number-wave-blue {
+  --number-wave: var(--blue);
+  --number-wave-rgb: 77, 127, 214;
+  --number-wave-fill: #315b9f;
+  --number-wave-fill-deep: #234473;
+}
+
+.number-cell.number-wave-green {
+  --number-wave: var(--green);
+  --number-wave-rgb: 49, 153, 120;
+  --number-wave-fill: #216c57;
+  --number-wave-fill-deep: #174b3d;
 }
 
 .number-cell.hot {
   border-color: rgba(210, 179, 109, calc(var(--heat) * 0.7));
   background: rgba(210, 179, 109, calc(var(--heat) * 0.14));
+}
+
+.number-cell.hot::before {
+  height: 3px;
+  opacity: 1;
+  box-shadow: 0 0 10px rgba(var(--number-wave-rgb), 0.5);
 }
 
 .number-cell.overdue::after {
@@ -1009,8 +1070,26 @@ footer {
 }
 
 .number-cell strong {
+  width: 27px;
+  height: 27px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(var(--number-wave-rgb), 0.95);
+  border-radius: 50%;
+  background: linear-gradient(
+    145deg,
+    var(--number-wave-fill),
+    var(--number-wave-fill-deep)
+  );
+  color: #fff;
   font-family: var(--font-mono);
   font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.2),
+    0 3px 8px rgba(var(--number-wave-rgb), 0.16);
 }
 
 .number-cell > span {
@@ -1030,8 +1109,16 @@ footer {
 
 .number-cell small {
   margin-top: 3px;
-  color: var(--dim);
-  font-size: 7px;
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.05;
+}
+
+.number-cell small span {
+  white-space: nowrap;
 }
 
 .wave-bars {
@@ -2451,7 +2538,7 @@ footer p {
   .number-grid { gap: 4px; }
   .number-cell { min-height: 55px; padding: 6px 2px; }
   .number-cell > span { padding-inline: 4px; font-size: 9px; }
-  .number-cell small { font-size: 8px; }
+  .number-cell small { font-size: 9px; }
   .zodiac-list { grid-template-columns: 1fr; }
   .ai-context-bar {
     margin-inline: -1px;
@@ -3167,7 +3254,7 @@ footer p {
   }
 
   .number-cell small {
-    font-size: 9px;
+    font-size: 10px;
   }
 
   .zodiac-list {
