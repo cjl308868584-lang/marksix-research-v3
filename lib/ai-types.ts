@@ -46,6 +46,12 @@ export type AiScenario = {
   numbers: number[];
   special: number;
   evidenceScore: number;
+  diversity: {
+    uniqueMainNumbers: number;
+    maxMainOverlap: number;
+    averageJaccard: number;
+    score: number;
+  };
   structure: {
     zodiacCount: number;
     waves: Record<Wave, number>;
@@ -59,20 +65,65 @@ export type AiScenario = {
   counterEvidence: string[];
 };
 
+export type AiConfidenceInterval = {
+  low: number;
+  high: number;
+  level: 95;
+  method: "wilson" | "bootstrap_percentile";
+};
+
 export type AiBacktestStrategy = {
   id: AiScenarioId;
   name: string;
+  sampleSize: number;
+  totalMainOverlap: number;
   averageMainOverlap: number;
+  averageMainOverlapCI: AiConfidenceInterval;
+  averageMainLift: number;
+  anyMainOverlapCount: number;
   anyMainOverlapRate: number;
+  anyMainOverlapCI: AiConfidenceInterval;
+  specialExactCount: number;
   specialExactRate: number;
+  specialExactCI: AiConfidenceInterval;
+  specialZodiacCount: number;
+  specialZodiacRate: number;
+  specialZodiacCI: AiConfidenceInterval;
+  specialZodiacBaseline: number;
   stabilityScore: number;
+  randomPValue: number;
+  evidenceScore: number;
+};
+
+export type AiBacktestStatus =
+  | "insufficient"
+  | "no_advantage"
+  | "observed_advantage";
+
+export type AiBacktestSegment = {
+  role: "selection" | "holdout";
+  startIssue: string | null;
+  endIssue: string | null;
+  testCount: number;
+  strategies: AiBacktestStrategy[];
 };
 
 export type AiBacktest = {
-  method: "walk_forward";
+  method: "nested_holdout_walk_forward";
   trainWindow: number;
+  evaluationHistorySize: number;
+  selectionCount: number;
+  holdoutCount: number;
   testCount: number;
   noLookahead: true;
+  multipleComparisonCount: number;
+  validationAlpha: number;
+  correction: "bonferroni";
+  status: AiBacktestStatus;
+  decision: "abstain" | "recommend";
+  selectedStrategyId: AiScenarioId | null;
+  selection: AiBacktestSegment;
+  holdout: AiBacktestSegment;
   strategies: AiBacktestStrategy[];
   baseline: {
     averageMainOverlap: number;
@@ -92,7 +143,7 @@ export type AiDimensionInsight = {
 export type AiSynthesis = {
   headline: string;
   executiveSummary: string;
-  recommendedScenarioId: AiScenarioId;
+  recommendedScenarioId: AiScenarioId | null;
   recommendationReason: string;
   uncertainty: string;
   strongestSignals: string[];
@@ -109,7 +160,7 @@ export type AiFallbackReason =
   | "refusal";
 
 export type AiAnalysisResponse = {
-  schemaVersion: "2";
+  schemaVersion: "3";
   requestId: string;
   mode: "ai" | "statistical";
   status: "ok" | "degraded";

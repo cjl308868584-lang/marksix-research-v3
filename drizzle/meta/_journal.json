@@ -8,6 +8,13 @@
       "when": 1784809673430,
       "tag": "0000_boring_ironclad",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1784844414752,
+      "tag": "0001_sweet_epoch",
+      "breakpoints": true
     }
   ]
 }

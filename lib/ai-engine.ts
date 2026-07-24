@@ -5,6 +5,7 @@ import {
   formatBall,
   getWave,
   getZodiac,
+  isValidDraw,
   type Analysis,
   type CandidateSet,
   type Draw,
@@ -15,7 +16,9 @@ import {
   AI_FOCUS_OPTIONS,
   type AiAnalysisResponse,
   type AiBacktest,
+  type AiBacktestSegment,
   type AiBacktestStrategy,
+  type AiConfidenceInterval,
   type AiDimensionEvidence,
   type AiDimensionId,
   type AiFocus,
@@ -42,12 +45,22 @@ export function buildForecastPack(
   draws: Draw[],
   focus: AiFocus,
   expectedDrawAt: string,
+  evaluationHistory: Draw[] = draws,
 ): ForecastPack {
-  const analysis = buildAnalysis(draws);
-  const dimensions = buildDimensions(draws, analysis);
-  const backtest = buildWalkForwardBacktest(draws, focus);
+  const normalizedDraws = normalizeHistory(draws);
+  const cutoff = normalizedDraws[0] ? drawTimeValue(normalizedDraws[0]) : Infinity;
+  const normalizedEvaluationHistory = normalizeHistory(evaluationHistory).filter(
+    (draw) => drawTimeValue(draw) <= cutoff,
+  );
+  const analysis = buildAnalysis(normalizedDraws);
+  const dimensions = buildDimensions(normalizedDraws, analysis);
+  const backtest = buildWalkForwardBacktest(
+    normalizedEvaluationHistory,
+    focus,
+    normalizedDraws.length,
+  );
   const focusedCandidates = buildFocusedCandidates(
-    draws,
+    normalizedDraws,
     analysis,
     focus,
     expectedDrawAt,
@@ -58,11 +71,15 @@ export function buildForecastPack(
     expectedDrawAt,
     dimensions,
   );
-  const evidenceStrength = buildEvidenceStrength(dimensions, backtest, draws.length);
+  const evidenceStrength = buildEvidenceStrength(
+    dimensions,
+    backtest,
+    normalizedDraws.length,
+  );
   const draft = {
     game,
     focus,
-    draws,
+    draws: normalizedDraws,
     analysis,
     dimensions,
     candidateSets,
@@ -109,12 +126,89 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
   const zoneTotal = analysis.zones.reduce((sum, value) => sum + value, 0);
   const zoneSpread =
     (Math.max(...analysis.zones) - Math.min(...analysis.zones)) / Math.max(zoneTotal, 1);
+  const topZodiacName = topZodiac[0]?.name ?? "";
+  const zodiacBaseline = topZodiacName
+    ? average(
+      draws.map(
+        (draw) =>
+          countNumbers((number) => getZodiac(number, draw.drawAt) === topZodiacName) / 49,
+      ),
+    )
+    : 1 / 12;
+  const leadingWave = waveEntries[0][0];
+  const waveBaseline = countNumbers((number) => getWave(number) === leadingWave) / 49;
+  const leadingTail = tailCounts[0].tail;
+  const tailBaseline = countNumbers((number) => number % 10 === leadingTail) / 49;
+  const topZone = analysis.zones.indexOf(Math.max(...analysis.zones));
+  const zoneBaseline = [16 / 49, 17 / 49, 16 / 49][topZone] ?? 1 / 3;
+  const repeatCount = countRepeatEvents(draws);
+  const consecutiveCount = countConsecutiveEvents(draws);
+  const numberEvidenceScore = confidenceScoreFromBinomial(
+    topHot[0]?.frequency ?? 0,
+    draws.length,
+    7 / 49,
+    { multiplicity: 49 },
+  );
+  const zodiacEvidenceScore = confidenceScoreFromBinomial(
+    topZodiac[0]?.count ?? 0,
+    total,
+    zodiacBaseline,
+    { multiplicity: 12 },
+  );
+  const waveEvidenceScore = confidenceScoreFromBinomial(
+    waveEntries[0][1],
+    total,
+    waveBaseline,
+    { multiplicity: 3 },
+  );
+  const parityEvidenceScore = confidenceScoreFromBinomial(
+    analysis.odd,
+    total,
+    25 / 49,
+    { twoSided: true },
+  );
+  const sizeEvidenceScore = confidenceScoreFromBinomial(
+    analysis.big,
+    total,
+    25 / 49,
+    { twoSided: true },
+  );
+  const tailEvidenceScore = confidenceScoreFromBinomial(
+    tailCounts[0].count,
+    total,
+    tailBaseline,
+    { multiplicity: 10 },
+  );
+  const omissionEvidenceScore = confidenceScoreFromPValue(
+    Math.min(1, 49 * Math.pow(42 / 49, maxOmission)),
+  );
+  const repeatPValue = exactBinomialTwoSidedPValue(
+    repeatCount,
+    Math.max(draws.length - 1, 0),
+    randomRepeatRate(),
+  );
+  const consecutivePValue = exactBinomialTwoSidedPValue(
+    consecutiveCount,
+    draws.length,
+    randomConsecutiveRate(),
+  );
+  const zonePValue = adjustedPValue(
+    exactBinomialUpperTailPValue(
+      analysis.zones[topZone] ?? 0,
+      total,
+      zoneBaseline,
+    ),
+    3,
+  );
+  const shapeEvidenceScore = confidenceScoreFromPValue(
+    adjustedPValue(Math.min(repeatPValue, consecutivePValue, zonePValue), 3),
+  );
 
   return [
     dimension(
       "numbers",
       "号码",
-      scoreFromDeviation(hotDeviation, 0.06),
+      numberEvidenceScore,
       `热码带集中在 ${topHot.slice(0, 3).map((item) => formatBall(item.number)).join("、")}`,
       topHot.map((item) => formatBall(item.number)),
       [
@@ -141,7 +235,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "zodiac",
       "生肖",
-      scoreFromDeviation(zodiacShare - 1 / 12, 0.035),
+      zodiacEvidenceScore,
       `${topZodiac[0]?.name ?? "—"}为样本第一，前列为 ${topZodiac.map((item) => item.name).join("、")}`,
       topZodiac.map((item) => item.name),
       [
@@ -149,7 +243,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           "zodiac.top_share",
           "第一生肖占比",
           percent(topZodiac[0]?.count ?? 0, total),
-          "均匀基准 8.3%",
+          `号码池基准 ${percent(zodiacBaseline, 1)}`,
           zodiacShare > 0.11 ? "up" : "flat",
           draws.length,
         ),
@@ -168,7 +262,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "wave",
       "波色",
-      scoreFromDeviation(waveShare - 1 / 3, 0.045),
+      waveEvidenceScore,
       `${WAVE_LABEL[waveEntries[0][0]]}占比最高，为 ${percent(waveEntries[0][1], total)}`,
       waveEntries.map(([wave]) => WAVE_LABEL[wave]),
       waveEntries.map(([wave, count], index) =>
@@ -176,7 +270,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           `wave.${wave}`,
           WAVE_LABEL[wave],
           percent(count, total),
-          "参考基准约 33.3%",
+          `号码池基准 ${percent(countNumbers((number) => getWave(number) === wave) / 49, 1)}`,
           index === 0 && waveShare > 0.37 ? "up" : "flat",
           draws.length,
         ),
@@ -187,7 +281,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "parity",
       "奇偶",
-      scoreFromDeviation(Math.abs(oddShare - 0.5), 0.045),
+      parityEvidenceScore,
       `奇偶比 ${analysis.odd}:${analysis.even}，${oddShare >= 0.5 ? "奇数" : "偶数"}略多`,
       [oddShare >= 0.5 ? "奇数" : "偶数"],
       [
@@ -195,7 +289,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           "parity.odd_share",
           "奇数占比",
           percent(analysis.odd, total),
-          "均匀基准约 50%",
+          "号码池基准 51.0%",
           oddShare > 0.54 ? "up" : oddShare < 0.46 ? "down" : "flat",
           draws.length,
         ),
@@ -214,7 +308,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "size",
       "大小",
-      scoreFromDeviation(Math.abs(bigShare - 25 / 49), 0.045),
+      sizeEvidenceScore,
       `大小比 ${analysis.big}:${analysis.small}，${bigShare >= 25 / 49 ? "大数" : "小数"}略多`,
       [bigShare >= 25 / 49 ? "25–49" : "01–24"],
       [
@@ -241,7 +335,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "tail",
       "尾数",
-      scoreFromDeviation(topTailShare - 0.1, 0.035),
+      tailEvidenceScore,
       `${tailCounts[0].tail} 尾最活跃，前三为 ${tailCounts.slice(0, 3).map((item) => `${item.tail}尾`).join("、")}`,
       tailCounts.slice(0, 4).map((item) => `${item.tail}尾`),
       [
@@ -249,7 +343,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           "tail.top_share",
           "第一尾数占比",
           percent(tailCounts[0].count, total),
-          "参考基准约 10%",
+          `号码池基准 ${percent(tailBaseline, 1)}`,
           topTailShare > 0.14 ? "up" : "flat",
           draws.length,
         ),
@@ -268,7 +362,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "hot_cold",
       "冷热",
-      scoreFromDeviation(hotDeviation, 0.05),
+      numberEvidenceScore,
       `热端 ${topHot.slice(0, 3).map((item) => formatBall(item.number)).join("、")}；冷端 ${analysis.cold.slice(0, 3).map((item) => formatBall(item.number)).join("、")}`,
       [...topHot.slice(0, 3), ...analysis.cold.slice(0, 3)].map((item) => formatBall(item.number)),
       [
@@ -295,7 +389,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "omission",
       "遗漏",
-      scoreFromDeviation(maxOmission / Math.max(draws.length, 1), 0.18),
+      omissionEvidenceScore,
       `${formatBall(topOverdue[0]?.number ?? 0)} 当前遗漏 ${maxOmission} 期`,
       topOverdue.map((item) => formatBall(item.number)),
       [
@@ -322,7 +416,7 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
     dimension(
       "shape",
       "形态",
-      scoreFromDeviation(Math.max(zoneSpread, Math.abs(analysis.repeatRate - 50) / 100), 0.1),
+      shapeEvidenceScore,
       `重号率 ${analysis.repeatRate}%，连号率 ${analysis.consecutiveRate}%，三区 ${analysis.zones.join(":")}`,
       ["三区分布", "重号", "连号"],
       [
@@ -330,16 +424,16 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
           "shape.repeat",
           "相邻期重号率",
           `${analysis.repeatRate}%`,
-          "至少出现一个重号",
-          analysis.repeatRate > 55 ? "up" : analysis.repeatRate < 35 ? "down" : "flat",
+          `随机基准 ${percent(randomRepeatRate(), 1)}`,
+          analysis.repeatRate > randomRepeatRate() * 100 ? "up" : "down",
           draws.length,
         ),
         metric(
           "shape.consecutive",
           "正码连号率",
           `${analysis.consecutiveRate}%`,
-          "每期是否含连号",
-          analysis.consecutiveRate > 45 ? "up" : "flat",
+          `随机基准 ${percent(randomConsecutiveRate(), 1)}`,
+          analysis.consecutiveRate > randomConsecutiveRate() * 100 ? "up" : "down",
           draws.length,
         ),
         metric(
@@ -435,11 +529,29 @@ function buildFocusedCandidates(
     };
   });
 
-  return (["balanced", "momentum", "contrarian"] as AiScenarioId[]).map((id) => {
-    const ranked = [...profiles].sort(
-      (a, b) => b[id] - a[id] || b.specialScore - a.specialScore || a.number - b.number,
+  const results: CandidateSet[] = [];
+  const priorMainSets: number[][] = [];
+  for (const id of ["balanced", "momentum", "contrarian"] as AiScenarioId[]) {
+    const ranked = [...profiles].sort((a, b) => {
+      const aReuse = priorMainSets.reduce(
+        (count, values) => count + Number(values.includes(a.number)),
+        0,
+      );
+      const bReuse = priorMainSets.reduce(
+        (count, values) => count + Number(values.includes(b.number)),
+        0,
+      );
+      const diversityPenalty = id === "balanced" ? 0 : id === "momentum" ? 0.2 : 0.16;
+      const aScore = a[id] - aReuse * diversityPenalty;
+      const bScore = b[id] - bReuse * diversityPenalty;
+      return bScore - aScore || b.specialScore - a.specialScore || a.number - b.number;
+    });
+    const main = pickStructuredNumbers(
+      ranked,
+      focus,
+      targetDrawAt,
+      priorMainSets,
     );
-    const main = pickStructuredNumbers(ranked, focus, targetDrawAt);
     const special =
       [...profiles]
         .filter((item) => !main.includes(item.number))
@@ -449,7 +561,7 @@ function buildFocusedCandidates(
             a.number - b.number,
         )[0]?.number ?? ranked.find((item) => !main.includes(item.number))?.number ?? 1;
     const selected = [...main, special];
-    return {
+    results.push({
       id,
       name: scenarioName(id),
       description: `${scenarioDescription(id)} · ${focusLabel}主研`,
@@ -463,8 +575,10 @@ function buildFocusedCandidates(
           }),
         ),
       ),
-    };
-  });
+    });
+    priorMainSets.push(main);
+  }
+  return results;
 }
 
 function focusedBonus({
@@ -528,6 +642,7 @@ function pickStructuredNumbers(
   }>,
   focus: AiFocus,
   targetDrawAt: string,
+  avoidSets: number[][] = [],
 ) {
   const picked: number[] = [];
   for (const item of ranked) {
@@ -542,6 +657,12 @@ function pickStructuredNumbers(
       (value) => getZodiac(value, targetDrawAt) === getZodiac(number, targetDrawAt),
     ).length;
     const tailCount = picked.filter((value) => value % 10 === number % 10).length;
+    const exceedsDiversityCap = avoidSets.some(
+      (values) =>
+        picked.filter((value) => values.includes(value)).length +
+          Number(values.includes(number)) >
+        2,
+    );
     const parityCap = focus === "parity" ? 5 : 4;
     const waveCap = focus === "wave" ? 5 : 4;
     const zodiacCap = focus === "zodiac" ? 3 : 2;
@@ -550,7 +671,8 @@ function pickStructuredNumbers(
       parityCount >= parityCap ||
       waveCount >= waveCap ||
       zodiacCount >= zodiacCap ||
-      tailCount >= 2
+      tailCount >= 2 ||
+      exceedsDiversityCap
     ) {
       continue;
     }
@@ -559,49 +681,154 @@ function pickStructuredNumbers(
   }
   for (const item of ranked) {
     if (picked.length >= 6) break;
+    const exceedsDiversityCap = avoidSets.some(
+      (values) =>
+        picked.filter((value) => values.includes(value)).length +
+          Number(values.includes(item.number)) >
+        2,
+    );
+    if (!picked.includes(item.number) && !exceedsDiversityCap) {
+      picked.push(item.number);
+    }
+  }
+  for (const item of ranked) {
+    if (picked.length >= 6) break;
     if (!picked.includes(item.number)) picked.push(item.number);
   }
   return picked;
 }
 
-function buildWalkForwardBacktest(draws: Draw[], focus: AiFocus): AiBacktest {
+type BacktestBucket = {
+  overlaps: number[];
+  any: number;
+  special: number;
+  specialZodiac: number;
+  specialZodiacBaselines: number[];
+  stability: number[];
+  previous: number[] | null;
+};
+
+const MIN_BACKTEST_SEGMENT = 20;
+const SUPPORTED_WINDOW_COUNT = 4;
+const MULTIPLE_COMPARISON_COUNT =
+  AI_FOCUS_OPTIONS.length * SUPPORTED_WINDOW_COUNT;
+const FAMILY_WISE_ALPHA = 0.05;
+const VALIDATION_ALPHA =
+  FAMILY_WISE_ALPHA / MULTIPLE_COMPARISON_COUNT;
+
+function buildWalkForwardBacktest(
+  draws: Draw[],
+  focus: AiFocus,
+  trainWindow: number,
+): AiBacktest {
   const chronological = [...draws].reverse();
-  if (chronological.length < 10) {
-    return {
-      method: "walk_forward",
-      trainWindow: 0,
-      testCount: 0,
-      noLookahead: true,
-      strategies: ["balanced", "momentum", "contrarian"].map((id) => ({
-        id: id as AiScenarioId,
-        name: scenarioName(id as AiScenarioId),
-        averageMainOverlap: 0,
-        anyMainOverlapRate: 0,
-        specialExactRate: 0,
-        stabilityScore: 0,
-      })),
-      baseline: randomBaseline(),
-      conclusion: "有效样本不足，暂不能运行时间顺序回测。",
-    };
-  }
-
-  const trainWindow = Math.min(30, Math.max(8, Math.floor(chronological.length * 0.65)));
-  const testStart = Math.max(trainWindow, chronological.length - 24);
-  const buckets = new Map<AiScenarioId, {
-    overlaps: number[];
-    any: number;
-    special: number;
-    stability: number[];
-    previous: number[] | null;
-  }>();
-  (["balanced", "momentum", "contrarian"] as AiScenarioId[]).forEach((id) =>
-    buckets.set(id, { overlaps: [], any: 0, special: 0, stability: [], previous: null }),
+  const availableTargets = Math.max(chronological.length - trainWindow, 0);
+  const selectionCount = Math.floor(availableTargets / 2);
+  const selection = evaluateBacktestSegment({
+    chronological,
+    focus,
+    trainWindow,
+    start: trainWindow,
+    end: trainWindow + selectionCount,
+    role: "selection",
+  });
+  const holdout = evaluateBacktestSegment({
+    chronological,
+    focus,
+    trainWindow,
+    start: trainWindow + selectionCount,
+    end: chronological.length,
+    role: "holdout",
+  });
+  const baseline = randomBaseline();
+  const sufficient =
+    trainWindow >= 8 &&
+    selection.testCount >= MIN_BACKTEST_SEGMENT &&
+    holdout.testCount >= MIN_BACKTEST_SEGMENT;
+  const selectedFromSelection = sufficient
+    ? [...selection.strategies].sort(compareSelectionStrategies)[0] ?? null
+    : null;
+  const selectedStrategyId = selectedFromSelection?.id ?? null;
+  const selectedHoldout = selectedStrategyId
+    ? holdout.strategies.find((strategy) => strategy.id === selectedStrategyId) ?? null
+    : null;
+  const observedAdvantage = Boolean(
+    sufficient &&
+      selectedHoldout &&
+      selectedHoldout.averageMainOverlapCI.low > baseline.averageMainOverlap &&
+      selectedHoldout.randomPValue < VALIDATION_ALPHA,
   );
+  const status: AiBacktest["status"] = !sufficient
+    ? "insufficient"
+    : observedAdvantage
+      ? "observed_advantage"
+      : "no_advantage";
+  const decision: AiBacktest["decision"] =
+    status === "observed_advantage" ? "recommend" : "abstain";
+  const conclusion =
+    status === "insufficient"
+      ? `评估历史需至少包含 ${trainWindow + MIN_BACKTEST_SEGMENT * 2} 期，当前独立选择段 ${selection.testCount} 期、留出段 ${holdout.testCount} 期，不生成优势推荐。`
+      : status === "observed_advantage" && selectedHoldout
+        ? `${selectedHoldout.name}由选择段预先确定，并在 ${holdout.testCount} 期独立留出段通过多配置校正门槛；该结果仍需前瞻样本复核。`
+        : `${selectedFromSelection?.name ?? "预选策略"}在 ${holdout.testCount} 期独立留出段未通过多窗口与维度尝试校正，本期保持弃权。`;
 
-  for (let index = testStart; index < chronological.length; index += 1) {
+  return {
+    method: "nested_holdout_walk_forward",
+    trainWindow,
+    evaluationHistorySize: chronological.length,
+    selectionCount: selection.testCount,
+    holdoutCount: holdout.testCount,
+    testCount: holdout.testCount,
+    noLookahead: true,
+    multipleComparisonCount: MULTIPLE_COMPARISON_COUNT,
+    validationAlpha: round6(VALIDATION_ALPHA),
+    correction: "bonferroni",
+    status,
+    decision,
+    selectedStrategyId,
+    selection,
+    holdout,
+    strategies: holdout.strategies,
+    baseline,
+    conclusion,
+  };
+}
+
+function evaluateBacktestSegment({
+  chronological,
+  focus,
+  trainWindow,
+  start,
+  end,
+  role,
+}: {
+  chronological: Draw[];
+  focus: AiFocus;
+  trainWindow: number;
+  start: number;
+  end: number;
+  role: AiBacktestSegment["role"];
+}): AiBacktestSegment {
+  const buckets = new Map<AiScenarioId, BacktestBucket>();
+  (["balanced", "momentum", "contrarian"] as AiScenarioId[]).forEach((id) =>
+    buckets.set(id, {
+      overlaps: [],
+      any: 0,
+      special: 0,
+      specialZodiac: 0,
+      specialZodiacBaselines: [],
+      stability: [],
+      previous: null,
+    }),
+  );
+  const safeStart = Math.max(start, trainWindow);
+  const safeEnd = Math.min(Math.max(end, safeStart), chronological.length);
+
+  for (let index = safeStart; index < safeEnd; index += 1) {
     const training = chronological
-      .slice(Math.max(0, index - trainWindow), index)
+      .slice(index - trainWindow, index)
       .reverse();
+    if (training.length !== trainWindow) continue;
     const actual = chronological[index];
     const actualMain = new Set(actual.numbers);
     const forecast = buildAnalysis(training);
@@ -610,51 +837,85 @@ function buildWalkForwardBacktest(draws: Draw[], focus: AiFocus): AiBacktest {
       const bucket = buckets.get(candidate.id);
       if (!bucket) return;
       const overlap = candidate.numbers.filter((number) => actualMain.has(number)).length;
+      const predictedZodiac = getZodiac(candidate.special, actual.drawAt);
       bucket.overlaps.push(overlap);
       if (overlap > 0) bucket.any += 1;
       if (candidate.special === actual.special) bucket.special += 1;
-      if (bucket.previous) bucket.stability.push(jaccard(bucket.previous, candidate.numbers));
+      if (predictedZodiac === getZodiac(actual.special, actual.drawAt)) {
+        bucket.specialZodiac += 1;
+      }
+      bucket.specialZodiacBaselines.push(
+        countNumbers((number) => getZodiac(number, actual.drawAt) === predictedZodiac) /
+          49,
+      );
+      if (bucket.previous) {
+        bucket.stability.push(jaccard(bucket.previous, candidate.numbers));
+      }
       bucket.previous = candidate.numbers;
     });
   }
 
-  const testCount = Math.max(chronological.length - testStart, 0);
-  const strategies = (["balanced", "momentum", "contrarian"] as AiScenarioId[]).map((id) => {
-    const bucket = buckets.get(id)!;
-    return {
-      id,
-      name: scenarioName(id),
-      averageMainOverlap: round(average(bucket.overlaps)),
-      anyMainOverlapRate: round((bucket.any / Math.max(testCount, 1)) * 100),
-      specialExactRate: round((bucket.special / Math.max(testCount, 1)) * 100),
-      stabilityScore: round(average(bucket.stability) * 100),
-    } satisfies AiBacktestStrategy;
-  });
-  const baseline = randomBaseline();
-  const best = [...strategies].sort(
-    (a, b) =>
-      b.averageMainOverlap - a.averageMainOverlap ||
-      b.anyMainOverlapRate - a.anyMainOverlapRate,
-  )[0];
-  const delta = best.averageMainOverlap - baseline.averageMainOverlap;
-  const conclusion =
-    testCount < 6
-      ? `仅完成 ${testCount} 期回测，样本不足，结果只作流程校验。`
-      : delta > 0.2
-        ? `${best.name}在 ${testCount} 期滚动回测中的平均正码覆盖暂高于随机期望 ${round(delta)} 个，但样本仍不足以证明未来优势。`
-        : delta < -0.2
-          ? `三路策略在 ${testCount} 期回测中未超过随机基准，不应把当前信号解释为预测优势。`
-          : `三路策略在 ${testCount} 期回测中整体接近随机基准，当前更适合用于结构研究。`;
-
+  const targetDraws = chronological.slice(safeStart, safeEnd);
   return {
-    method: "walk_forward",
-    trainWindow,
-    testCount,
-    noLookahead: true,
-    strategies,
-    baseline,
-    conclusion,
+    role,
+    startIssue: targetDraws[0]?.issue ?? null,
+    endIssue: targetDraws.at(-1)?.issue ?? null,
+    testCount: targetDraws.length,
+    strategies: (["balanced", "momentum", "contrarian"] as AiScenarioId[]).map(
+      (id) => buildBacktestStrategy(id, buckets.get(id)!),
+    ),
   };
+}
+
+function buildBacktestStrategy(
+  id: AiScenarioId,
+  bucket: BacktestBucket,
+): AiBacktestStrategy {
+  const sampleSize = bucket.overlaps.length;
+  const totalMainOverlap = bucket.overlaps.reduce((sum, value) => sum + value, 0);
+  const averageMainOverlap = average(bucket.overlaps);
+  const baseline = randomBaseline();
+  const randomPValue = exactMainOverlapUpperTailPValue(
+    sampleSize,
+    totalMainOverlap,
+  );
+  return {
+    id,
+    name: scenarioName(id),
+    sampleSize,
+    totalMainOverlap,
+    averageMainOverlap: round4(averageMainOverlap),
+    averageMainOverlapCI: bootstrapMeanInterval(
+      bucket.overlaps,
+      `${id}:${bucket.overlaps.join(",")}`,
+    ),
+    averageMainLift: round4(averageMainOverlap - baseline.averageMainOverlap),
+    anyMainOverlapCount: bucket.any,
+    anyMainOverlapRate: rate(bucket.any, sampleSize),
+    anyMainOverlapCI: wilsonInterval(bucket.any, sampleSize),
+    specialExactCount: bucket.special,
+    specialExactRate: rate(bucket.special, sampleSize),
+    specialExactCI: wilsonInterval(bucket.special, sampleSize),
+    specialZodiacCount: bucket.specialZodiac,
+    specialZodiacRate: rate(bucket.specialZodiac, sampleSize),
+    specialZodiacCI: wilsonInterval(bucket.specialZodiac, sampleSize),
+    specialZodiacBaseline: round4(average(bucket.specialZodiacBaselines) * 100),
+    stabilityScore: round4(average(bucket.stability) * 100),
+    randomPValue: round6(randomPValue),
+    evidenceScore: sampleSize ? Math.round((1 - randomPValue) * 100) : 0,
+  };
+}
+
+function compareSelectionStrategies(
+  left: AiBacktestStrategy,
+  right: AiBacktestStrategy,
+) {
+  return (
+    right.totalMainOverlap - left.totalMainOverlap ||
+    right.anyMainOverlapCount - left.anyMainOverlapCount ||
+    right.specialExactCount - left.specialExactCount ||
+    left.id.localeCompare(right.id)
+  );
 }
 
 function buildScenarios(
@@ -676,18 +937,26 @@ function buildScenarios(
       { red: 0, blue: 0, green: 0 },
     );
     const backtestResult = backtest.strategies.find((item) => item.id === candidate.id);
-    const baselineDelta =
-      (backtestResult?.averageMainOverlap ?? 0) - backtest.baseline.averageMainOverlap;
-    const evidenceScore = clamp(
-      Math.round(
-        42 +
-        candidate.score * 0.7 +
-        baselineDelta * 12 +
-        Math.min((backtestResult?.stabilityScore ?? 0) / 8, 10),
-      ),
-      28,
-      76,
+    const otherCandidates = candidates.filter((item) => item.id !== candidate.id);
+    const pairwiseOverlaps = otherCandidates.map(
+      (item) =>
+        candidate.numbers.filter((number) => item.numbers.includes(number)).length,
     );
+    const pairwiseJaccards = otherCandidates.map((item) =>
+      jaccard(candidate.numbers, item.numbers),
+    );
+    const uniqueMainNumbers = candidate.numbers.filter((number) =>
+      otherCandidates.every((item) => !item.numbers.includes(number)),
+    ).length;
+    const confirmedScenario =
+      backtest.decision === "recommend" &&
+      backtest.selectedStrategyId === candidate.id;
+    const evidenceScore =
+      backtest.status === "insufficient"
+        ? 0
+        : confirmedScenario
+          ? backtestResult?.evidenceScore ?? 0
+          : Math.min(backtestResult?.evidenceScore ?? 0, 49);
     return {
       id: candidate.id,
       name: candidate.name,
@@ -695,6 +964,12 @@ function buildScenarios(
       numbers: candidate.numbers,
       special: candidate.special,
       evidenceScore,
+      diversity: {
+        uniqueMainNumbers,
+        maxMainOverlap: Math.max(...pairwiseOverlaps, 0),
+        averageJaccard: round4(average(pairwiseJaccards)),
+        score: Math.round((1 - average(pairwiseJaccards)) * 100),
+      },
       structure: {
         zodiacCount: new Set(all.map((number) => getZodiac(number, expectedDrawAt))).size,
         waves,
@@ -707,8 +982,9 @@ function buildScenarios(
       supportingEvidence: [
         ...dimensionLeaders.slice(0, 2).map((item) => `${item.label}：${item.direction}`),
         backtestResult
-          ? `滚动回测平均覆盖 ${backtestResult.averageMainOverlap} 个正码`
+          ? `独立留出段平均覆盖 ${backtestResult.averageMainOverlap} 个正码`
           : "等待回测数据",
+        `与其余场景最大重合 ${Math.max(...pairwiseOverlaps, 0)} 个主号`,
       ],
       counterEvidence: [
         candidate.id === "momentum"
@@ -716,6 +992,9 @@ function buildScenarios(
           : candidate.id === "contrarian"
             ? "遗漏不构成号码必须回补的义务。"
             : "结构均衡不改变每个组合的理论机会。",
+        backtest.decision === "abstain"
+          ? "独立留出回测未达到优势推荐门槛。"
+          : "留出优势仍需持续前瞻验证。",
         backtest.conclusion,
       ],
     };
@@ -727,19 +1006,42 @@ function buildEvidenceStrength(
   backtest: AiBacktest,
   sampleSize: number,
 ): AiAnalysisResponse["evidenceStrength"] {
-  const leaders = [...dimensions].sort((a, b) => b.evidenceScore - a.evidenceScore).slice(0, 4);
-  const dimensionAverage = average(leaders.map((item) => item.evidenceScore));
-  const sampleFactor = Math.min(sampleSize / 100, 1) * 15;
-  const bestBacktest = Math.max(...backtest.strategies.map((item) => item.averageMainOverlap), 0);
-  const backtestDelta = bestBacktest - backtest.baseline.averageMainOverlap;
-  const score = clamp(Math.round(dimensionAverage * 0.65 + sampleFactor + backtestDelta * 12), 18, 72);
+  const leaders = [...dimensions]
+    .sort((a, b) => b.evidenceScore - a.evidenceScore)
+    .slice(0, 3);
+  const selected = backtest.selectedStrategyId
+    ? backtest.holdout.strategies.find(
+      (item) => item.id === backtest.selectedStrategyId,
+    ) ?? null
+    : null;
+  const score =
+    backtest.status === "observed_advantage" && selected
+      ? selected.evidenceScore
+      : backtest.status === "no_advantage" && selected
+        ? Math.min(selected.evidenceScore, 49)
+        : 0;
   return {
     kind: "evidence_strength_not_win_probability",
     score,
-    label: score >= 62 ? "中等" : score >= 42 ? "有限" : "低",
-    drivers: leaders.slice(0, 3).map((item) => `${item.label}证据指数 ${item.evidenceScore}`),
+    label:
+      backtest.status === "observed_advantage"
+        ? "中等"
+        : backtest.status === "no_advantage"
+          ? "有限"
+          : "低",
+    drivers: selected
+      ? [
+        `选择段预选 ${selected.name}`,
+        `独立留出 ${backtest.holdoutCount} 期`,
+        ...leaders.map((item) => `${item.label}校准证据 ${item.evidenceScore}`),
+      ].slice(0, 3)
+      : leaders.map((item) => `${item.label}校准证据 ${item.evidenceScore}`),
     penalties: [
-      backtest.testCount < 10 ? "滚动回测期数偏少" : "历史回测不能外推为未来命中率",
+      backtest.status === "insufficient"
+        ? `训练 ${sampleSize} 期之外缺少独立选择段与留出段`
+        : backtest.status === "no_advantage"
+          ? "独立留出段未观察到高于随机的可靠优势"
+          : "历史留出优势仍不能替代前瞻验证",
       "开奖结果为独立随机事件",
     ],
   };
@@ -756,13 +1058,20 @@ function buildLocalSynthesis(pack: Omit<ForecastPack, "localSynthesis">): AiSynt
       ? rankedDimensions[0]
       : pack.dimensions.find((item) => item.id === pack.focus) ?? rankedDimensions[0];
   const recommended =
-    [...pack.candidateSets].sort((a, b) => b.evidenceScore - a.evidenceScore)[0] ??
-    pack.candidateSets[0];
+    pack.backtest.decision === "recommend" && pack.backtest.selectedStrategyId
+      ? pack.candidateSets.find(
+        (item) => item.id === pack.backtest.selectedStrategyId,
+      ) ?? null
+      : null;
   return {
     headline: `${GAME_META[pack.game].shortName} · ${focusLabel}多策略研判`,
-    executiveSummary: `当前最值得观察的是${preferredDimension.label}维度：${preferredDimension.direction}。三路场景中，${recommended.name}的样本内证据相对更完整，但这只是历史结构排序。`,
-    recommendedScenarioId: recommended.id,
-    recommendationReason: `${recommended.name}同时覆盖 ${recommended.supportingEvidence.slice(0, 2).join("；")}，证据指数 ${recommended.evidenceScore}。`,
+    executiveSummary: recommended
+      ? `当前最值得观察的是${preferredDimension.label}维度：${preferredDimension.direction}。${recommended.name}由选择段预先确定，并通过独立留出门槛；仍需前瞻样本复核。`
+      : `当前最值得观察的是${preferredDimension.label}维度：${preferredDimension.direction}。独立留出回测尚未证明三路场景优于随机基准，本期不作优势推荐。`,
+    recommendedScenarioId: recommended?.id ?? null,
+    recommendationReason: recommended
+      ? `${recommended.name}通过独立留出门槛，校准证据 ${recommended.evidenceScore}。`
+      : "选择段与留出段相互独立；当前留出结果不足以支持优势推荐，系统保持弃权。",
     uncertainty: "所有候选都处在高不确定性环境。证据指数反映样本内一致性，不是中奖概率，也不意味着下一期更容易出现。",
     strongestSignals: rankedDimensions
       .slice(0, 3)
@@ -814,22 +1123,18 @@ function metric(
   return { id, label, value, baseline, trend, window };
 }
 
-function scoreFromDeviation(value: number, reference: number): number {
-  return clamp(Math.round(30 + (Math.abs(value) / Math.max(reference, 0.001)) * 22), 28, 78);
-}
-
 function level(score: number): AiSignalLevel {
-  if (score >= 62) return "moderate";
-  if (score >= 42) return "weak";
+  if (score >= 95) return "moderate";
+  if (score >= 80) return "weak";
   return "neutral";
 }
 
-function randomBaseline() {
+export function randomBaseline() {
   const noOverlap = combinationRatio(43, 6, 49, 6);
   return {
-    averageMainOverlap: round((6 * 6) / 49),
-    anyMainOverlapRate: round((1 - noOverlap) * 100),
-    specialExactRate: round((1 / 49) * 100),
+    averageMainOverlap: round6((6 * 6) / 49),
+    anyMainOverlapRate: round6((1 - noOverlap) * 100),
+    specialExactRate: round6((1 / 49) * 100),
   };
 }
 
@@ -850,6 +1155,274 @@ function jaccard(a: number[], b: number[]) {
   const right = new Set(b);
   const intersection = [...left].filter((value) => right.has(value)).length;
   return intersection / Math.max(new Set([...left, ...right]).size, 1);
+}
+
+function normalizeHistory(draws: Draw[]) {
+  const sorted = draws
+    .filter(isValidDraw)
+    .map((draw) => ({ ...draw, numbers: [...draw.numbers] }))
+    .sort(
+      (a, b) =>
+        drawTimeValue(b) - drawTimeValue(a) ||
+        b.issue.localeCompare(a.issue, "en", { numeric: true }) ||
+        [...a.numbers, a.special].join(",").localeCompare(
+          [...b.numbers, b.special].join(","),
+        ),
+    );
+  const seen = new Set<string>();
+  return sorted.filter((draw) => {
+    const key = `${draw.game}:${draw.issue}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function drawTimeValue(draw: Draw) {
+  const value = Date.parse(draw.drawAt);
+  return Number.isFinite(value) ? value : 0;
+}
+
+function countNumbers(predicate: (number: number) => boolean) {
+  let count = 0;
+  for (let number = 1; number <= 49; number += 1) {
+    if (predicate(number)) count += 1;
+  }
+  return count;
+}
+
+function countRepeatEvents(draws: Draw[]) {
+  let count = 0;
+  for (let index = 0; index < draws.length - 1; index += 1) {
+    const current = new Set([...draws[index].numbers, draws[index].special]);
+    const previous = [...draws[index + 1].numbers, draws[index + 1].special];
+    if (previous.some((number) => current.has(number))) count += 1;
+  }
+  return count;
+}
+
+function countConsecutiveEvents(draws: Draw[]) {
+  return draws.filter((draw) => {
+    const sorted = [...draw.numbers].sort((a, b) => a - b);
+    return sorted.some(
+      (number, index) => index > 0 && number - sorted[index - 1] === 1,
+    );
+  }).length;
+}
+
+function randomRepeatRate() {
+  return 1 - combination(42, 7) / combination(49, 7);
+}
+
+function randomConsecutiveRate() {
+  return 1 - combination(44, 6) / combination(49, 6);
+}
+
+function confidenceScoreFromBinomial(
+  observed: number,
+  trials: number,
+  probability: number,
+  {
+    twoSided = false,
+    multiplicity = 1,
+  }: { twoSided?: boolean; multiplicity?: number } = {},
+) {
+  const rawPValue = twoSided
+    ? exactBinomialTwoSidedPValue(observed, trials, probability)
+    : exactBinomialUpperTailPValue(observed, trials, probability);
+  return confidenceScoreFromPValue(adjustedPValue(rawPValue, multiplicity));
+}
+
+function confidenceScoreFromPValue(pValue: number) {
+  return clamp(Math.round((1 - clamp(pValue, 0, 1)) * 100), 0, 99);
+}
+
+function adjustedPValue(pValue: number, multiplicity: number) {
+  return Math.min(1, Math.max(0, pValue) * Math.max(multiplicity, 1));
+}
+
+function exactBinomialTwoSidedPValue(
+  observed: number,
+  trials: number,
+  probability: number,
+) {
+  if (trials <= 0) return 1;
+  const upper = exactBinomialUpperTailPValue(observed, trials, probability);
+  const lower = exactBinomialLowerTailPValue(observed, trials, probability);
+  return Math.min(1, 2 * Math.min(upper, lower));
+}
+
+function exactBinomialUpperTailPValue(
+  observed: number,
+  trials: number,
+  probability: number,
+) {
+  if (trials <= 0) return 1;
+  if (observed <= 0) return 1;
+  if (observed > trials) return 0;
+  let total = 0;
+  for (let value = observed; value <= trials; value += 1) {
+    total += binomialProbability(trials, value, probability);
+  }
+  return clamp(total, 0, 1);
+}
+
+function exactBinomialLowerTailPValue(
+  observed: number,
+  trials: number,
+  probability: number,
+) {
+  if (trials <= 0) return 1;
+  if (observed < 0) return 0;
+  if (observed >= trials) return 1;
+  let total = 0;
+  for (let value = 0; value <= observed; value += 1) {
+    total += binomialProbability(trials, value, probability);
+  }
+  return clamp(total, 0, 1);
+}
+
+function binomialProbability(trials: number, successes: number, probability: number) {
+  if (probability <= 0) return successes === 0 ? 1 : 0;
+  if (probability >= 1) return successes === trials ? 1 : 0;
+  let logCombination = 0;
+  const k = Math.min(successes, trials - successes);
+  for (let index = 1; index <= k; index += 1) {
+    logCombination +=
+      Math.log(trials - k + index) -
+      Math.log(index);
+  }
+  return Math.exp(
+    logCombination +
+      successes * Math.log(probability) +
+      (trials - successes) * Math.log1p(-probability),
+  );
+}
+
+const mainOverlapDistributionCache = new Map<number, number[]>();
+
+function exactMainOverlapUpperTailPValue(
+  sampleSize: number,
+  observedTotal: number,
+) {
+  if (sampleSize <= 0) return 1;
+  const distribution = mainOverlapDistribution(sampleSize);
+  return clamp(
+    distribution
+      .slice(Math.max(observedTotal, 0))
+      .reduce((sum, probability) => sum + probability, 0),
+    0,
+    1,
+  );
+}
+
+function mainOverlapDistribution(sampleSize: number) {
+  const cached = mainOverlapDistributionCache.get(sampleSize);
+  if (cached) return cached;
+  const single = Array.from(
+    { length: 7 },
+    (_, overlap) =>
+      (combination(6, overlap) * combination(43, 6 - overlap)) /
+      combination(49, 6),
+  );
+  let distribution = [1];
+  for (let drawIndex = 0; drawIndex < sampleSize; drawIndex += 1) {
+    const next = Array(distribution.length + 6).fill(0) as number[];
+    distribution.forEach((currentProbability, total) => {
+      single.forEach((probability, overlap) => {
+        next[total + overlap] += currentProbability * probability;
+      });
+    });
+    distribution = next;
+  }
+  mainOverlapDistributionCache.set(sampleSize, distribution);
+  return distribution;
+}
+
+export function wilsonInterval(
+  successes: number,
+  trials: number,
+): AiConfidenceInterval {
+  if (trials <= 0) {
+    return { low: 0, high: 0, level: 95, method: "wilson" };
+  }
+  const z = 1.959963984540054;
+  const proportion = successes / trials;
+  const denominator = 1 + (z * z) / trials;
+  const center = (proportion + (z * z) / (2 * trials)) / denominator;
+  const margin =
+    (z / denominator) *
+    Math.sqrt(
+      (proportion * (1 - proportion)) / trials +
+        (z * z) / (4 * trials * trials),
+    );
+  return {
+    low: round4(Math.max(0, center - margin) * 100),
+    high: round4(Math.min(1, center + margin) * 100),
+    level: 95,
+    method: "wilson",
+  };
+}
+
+function bootstrapMeanInterval(
+  values: number[],
+  seed: string,
+): AiConfidenceInterval {
+  if (!values.length) {
+    return { low: 0, high: 0, level: 95, method: "bootstrap_percentile" };
+  }
+  if (values.length === 1) {
+    return {
+      low: values[0],
+      high: values[0],
+      level: 95,
+      method: "bootstrap_percentile",
+    };
+  }
+  const random = seededRandom(seed);
+  const samples = Array.from({ length: 2_000 }, () => {
+    let total = 0;
+    for (let index = 0; index < values.length; index += 1) {
+      total += values[Math.floor(random() * values.length)];
+    }
+    return total / values.length;
+  }).sort((a, b) => a - b);
+  return {
+    low: round4(percentile(samples, 0.025)),
+    high: round4(percentile(samples, 0.975)),
+    level: 95,
+    method: "bootstrap_percentile",
+  };
+}
+
+function percentile(sortedValues: number[], quantile: number) {
+  const position = (sortedValues.length - 1) * quantile;
+  const lowerIndex = Math.floor(position);
+  const upperIndex = Math.ceil(position);
+  const fraction = position - lowerIndex;
+  return (
+    sortedValues[lowerIndex] * (1 - fraction) +
+    sortedValues[upperIndex] * fraction
+  );
+}
+
+function seededRandom(seed: string) {
+  let state = 2166136261;
+  for (let index = 0; index < seed.length; index += 1) {
+    state ^= seed.charCodeAt(index);
+    state = Math.imul(state, 16777619);
+  }
+  return () => {
+    state += 0x6d2b79f5;
+    let value = state;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4_294_967_296;
+  };
+}
+
+function rate(count: number, total: number) {
+  return round4((count / Math.max(total, 1)) * 100);
 }
 
 function scenarioName(id: AiScenarioId) {
@@ -878,4 +1451,12 @@ function clamp(value: number, min: number, max: number) {
 
 function round(value: number) {
   return Math.round(value * 10) / 10;
+}
+
+function round4(value: number) {
+  return Math.round(value * 10_000) / 10_000;
+}
+
+function round6(value: number) {
+  return Math.round(value * 1_000_000) / 1_000_000;
 }

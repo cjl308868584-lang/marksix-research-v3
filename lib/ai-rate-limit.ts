@@ -60,6 +60,13 @@ export async function consumeAiRateLimit(identifier: string): Promise<AiRateResu
     );
     if (globalCount === null) return denied(dayExpires, now);
   } catch {
+    if (process.env.NODE_ENV === "development") {
+      return consumeFallback([
+        [minuteKey, MINUTE_LIMIT, minuteExpires],
+        [dayKey, DAILY_LIMIT, dayExpires],
+        [globalKey, GLOBAL_DAILY_LIMIT, dayExpires],
+      ], now);
+    }
     return denied(now + 60_000, now);
   }
 

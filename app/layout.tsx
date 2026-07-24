@@ -15,13 +15,13 @@ export async function generateMetadata(): Promise<Metadata> {
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
   const title = "六合智研｜港澳三彩开奖与 AI 预测研究";
-  const description = "香港、澳门与新澳门开奖数据：九维证据、三路候选、GPT‑5.6 深度总结与随机基准滚动回测。";
+  const description = "香港、澳门与新澳门开奖数据：九维证据、三路候选、AI 证据归纳、独立留出回测与前瞻冻结台账。";
 
   return {
     metadataBase: new URL(origin),
     title: { default: title, template: "%s｜六合智研" },
     description:
-      "香港六合彩、澳门六合彩与新澳门六合彩当期开奖、历史记录、九维统计、滚动回测与 GPT‑5.6 AI 预测研究。北京时间口径。",
+      "香港六合彩、澳门六合彩与新澳门六合彩当期开奖、历史记录、九维统计、独立留出回测与 AI 预测研究。北京时间口径。",
     keywords: ["香港六合彩", "澳门六合彩", "新澳门六合彩", "开奖记录", "生肖", "历史统计", "AI预测研究"],
     openGraph: {
       title,

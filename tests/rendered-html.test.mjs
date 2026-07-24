@@ -45,8 +45,12 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
   assert.match(html, /AI 多策略预测实验室/);
+  assert.match(html, /嵌套走步与独立留出验证/);
+  assert.match(html, /主动弃权机制/);
   assert.match(html, /三路候选策略/);
-  assert.match(html, /生肖方向命中/);
+  assert.match(html, /组合生肖覆盖/);
+  assert.match(html, /预测特码生肖/);
+  assert.match(html, /正码命中/);
   assert.match(html, /九维证据/);
   assert.match(html, /滚动回测/);
   assert.match(html, /历史开奖记录/);
@@ -96,7 +100,35 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /tabIndex=\{complete \? -1 : 0\}/);
   assert.match(dashboard, /AI_FOCUS_OPTIONS/);
   assert.match(dashboard, /AiEvidenceSection/);
+  assert.match(dashboard, /scientific-verdict/);
+  assert.match(dashboard, /科学结论/);
+  assert.match(dashboard, /暂无可验证优势/);
+  assert.match(dashboard, /report\.backtest\.decision === "recommend"/);
+  assert.match(dashboard, /scientificReport\.decision\.kind === "observe"/);
+  assert.match(dashboard, /ledgerStatusLabel/);
+  assert.match(dashboard, /已锁定 · 不可篡改/);
+  assert.match(dashboard, /全量前瞻复核/);
+  assert.match(dashboard, /系统不会只挑命中期展示/);
+  assert.match(dashboard, /String\(payload\.schemaVersion\) !== "3"/);
+  assert.match(dashboard, /嵌套走步 · 独立留出验证/);
+  assert.match(dashboard, /selectionCount/);
+  assert.match(dashboard, /holdoutCount/);
+  assert.match(dashboard, /multipleComparisonCount/);
+  assert.match(dashboard, /Bonferroni/);
+  assert.match(dashboard, /averageMainOverlapCI/);
+  assert.match(dashboard, /anyMainOverlapCount/);
+  assert.match(dashboard, /specialExactCount/);
+  assert.match(dashboard, /specialExactCI/);
+  assert.match(dashboard, /specialZodiacCI/);
+  assert.match(dashboard, /specialZodiacBaseline/);
+  assert.match(dashboard, /dataQuality\.verifiedRatio/);
+  assert.match(dashboard, /report\.model\.name/);
+  assert.doesNotMatch(dashboard, /GPT‑5\.6/);
   assert.match(dashboard, /ai-recommendation-balls/);
+  assert.match(dashboard, /diversity-strip/);
+  assert.match(dashboard, /uniqueMainNumbers/);
+  assert.match(dashboard, /maxMainOverlap/);
+  assert.match(dashboard, /averageJaccard/);
   assert.match(dashboard, /strategy-review-result/);
   assert.match(dashboard, /特码号码/);
   assert.match(dashboard, /特码生肖/);
@@ -117,6 +149,13 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.number-cell\.number-wave-blue[\s\S]*--number-wave: var\(--blue\)/);
   assert.match(styles, /\.number-cell\.number-wave-green[\s\S]*--number-wave: var\(--green\)/);
   assert.match(styles, /\.ai-processing p[\s\S]*transform: none/);
+  assert.match(styles, /\.scientific-calibration/);
+  assert.match(styles, /\.scientific-verdict/);
+  assert.match(styles, /\.forward-ledger-summary/);
+  assert.match(styles, /\.calibration-metrics/);
+  assert.match(styles, /\.diversity-strip/);
+  assert.match(styles, /\.backtest-strategy-list/);
+  assert.match(styles, /\.calibration-metrics span,[\s\S]*font-size: 11px/);
   assert.match(styles, /\.strategy-card:not\(\.active\)[\s\S]*display: block/);
   assert.match(styles, /\.strategy-grid[\s\S]*scroll-snap-type: x mandatory/);
   assert.match(styles, /\.topbar[\s\S]*position: sticky/);
@@ -152,6 +191,11 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.doesNotMatch(analyzeRoute, /request\.headers\.get\("user-agent"\)/);
   assert.match(aiEngine, /buildWalkForwardBacktest/);
   assert.match(aiEngine, /noLookahead: true/);
+  assert.match(aiTypes, /schemaVersion: "3"/);
+  assert.match(aiTypes, /nested_holdout_walk_forward/);
+  assert.match(aiTypes, /correction: "bonferroni"/);
+  assert.match(aiTypes, /averageMainOverlapCI/);
+  assert.match(aiTypes, /specialZodiacBaseline/);
   assert.match(aiTypes, /evidence_strength_not_win_probability/);
   assert.match(aiRateLimit, /limitReached\(db, globalKey/);
   assert.match(aiRateLimit, /WHERE ai_rate_limits\.count < \?/);
@@ -181,4 +225,165 @@ test("AI endpoint rejects client-supplied history data", async () => {
   assert.equal(response.status, 400);
   const payload = await response.json();
   assert.match(payload.error, /不受支持的字段/);
+});
+
+test("AI endpoint returns a server-locked scientific abstention on stale snapshot data", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalApiKey = process.env.AI_API_KEY;
+  delete process.env.AI_API_KEY;
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (
+      url.startsWith("https://api.api16868.com/") ||
+      url.startsWith("https://api3.marksix6.net/")
+    ) {
+      return new Response("upstream unavailable", { status: 503 });
+    }
+    return originalFetch(input, init);
+  };
+
+  try {
+    const response = await fetchWorker("/api/analyze", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({
+        game: "new_macau",
+        window: 30,
+        focus: "comprehensive",
+        depth: "standard",
+      }),
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "private, no-store");
+    const payload = await response.json();
+    assert.equal(payload.schemaVersion, "3");
+    assert.equal(payload.dataQuality.sourceMode, "snapshot");
+    assert.equal(payload.decision.kind, "abstain");
+    assert.equal(payload.decision.scenarioId, null);
+    assert.equal(payload.synthesis.recommendedScenarioId, null);
+    assert.equal(payload.backtest.method, "nested_holdout_walk_forward");
+    assert.equal(payload.backtest.correction, "bonferroni");
+    assert.equal(payload.backtest.multipleComparisonCount, 40);
+    assert.ok(payload.backtest.selectionCount >= 20);
+    assert.ok(payload.backtest.holdoutCount >= 20);
+    assert.equal(payload.ledger.state, "skipped");
+    assert.equal(payload.ledger.reason, "target_unconfirmed");
+    assert.equal(payload.candidateSets.length, 3);
+    for (const candidate of payload.candidateSets) {
+      assert.equal(candidate.numbers.length, 6);
+      assert.equal(new Set(candidate.numbers).size, 6);
+      assert.ok(!candidate.numbers.includes(candidate.special));
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalApiKey === undefined) delete process.env.AI_API_KEY;
+    else process.env.AI_API_KEY = originalApiKey;
+  }
+});
+
+test("model output cannot override the server abstention decision", async () => {
+  const originalFetch = globalThis.fetch;
+  const originalEnvironment = {
+    AI_API_KEY: process.env.AI_API_KEY,
+    AI_BASE_URL: process.env.AI_BASE_URL,
+    AI_MODEL: process.env.AI_MODEL,
+  };
+  process.env.AI_API_KEY = "test-only-key";
+  process.env.AI_BASE_URL = "https://mock.openai.test/v1";
+  process.env.AI_MODEL = "mock-override-attempt";
+  globalThis.fetch = async (input, init) => {
+    const url =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.href
+          : input.url;
+    if (
+      url.startsWith("https://api.api16868.com/") ||
+      url.startsWith("https://api3.marksix6.net/")
+    ) {
+      return new Response("upstream unavailable", { status: 503 });
+    }
+    if (url === "https://mock.openai.test/v1/responses") {
+      const requestBody = JSON.parse(String(init?.body ?? "{}"));
+      const analysisPack = JSON.parse(requestBody.input);
+      const attemptedOverride = {
+        headline: "证据归纳完成",
+        executiveSummary: "当前证据不足，但模型试图改写服务器决定。",
+        recommendedScenarioId: "balanced",
+        recommendationReason: "模型自行选择场景。",
+        uncertainty: "随机性仍是主导，历史结构不能决定未来结果。",
+        strongestSignals: [
+          "样本结构存在局部集中",
+          "不同维度方向并不完全一致",
+          "留出结果未支持优势结论",
+        ],
+        conflictingSignals: [
+          "历史波动可能来自随机噪声",
+          "数据来源仍需持续核验",
+        ],
+        dimensionInsights: analysisPack.dimensions.map((dimension) => ({
+          id: dimension.id,
+          summary: "该维度存在样本波动。",
+          counterpoint: "波动不足以构成预测保证。",
+          evidenceIds: [dimension.metrics[0].id],
+        })),
+      };
+      return Response.json({
+        id: "mock-response",
+        model: "mock-override-attempt",
+        status: "completed",
+        output: [
+          {
+            type: "message",
+            content: [
+              {
+                type: "output_text",
+                text: JSON.stringify(attemptedOverride),
+              },
+            ],
+          },
+        ],
+      });
+    }
+    return originalFetch(input, init);
+  };
+
+  try {
+    const response = await fetchWorker("/api/analyze", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "sec-fetch-site": "same-origin",
+      },
+      body: JSON.stringify({
+        game: "new_macau",
+        window: 30,
+        focus: "comprehensive",
+        depth: "standard",
+      }),
+    });
+    assert.equal(response.status, 200);
+    const payload = await response.json();
+    assert.equal(payload.decision.kind, "abstain");
+    assert.equal(payload.decision.scenarioId, null);
+    assert.equal(payload.synthesis.recommendedScenarioId, null);
+    assert.equal(payload.mode, "statistical");
+    assert.equal(payload.fallbackReason, "invalid_output");
+    assert.equal(payload.candidateSets.length, 3);
+  } finally {
+    globalThis.fetch = originalFetch;
+    for (const [key, value] of Object.entries(originalEnvironment)) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
 });
