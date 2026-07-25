@@ -10,11 +10,18 @@ import {
   lockCanonicalZodiacObservation,
   lockForecastSnapshot,
   readForecastLedgerSummary,
+  readForecastSnapshot,
+  readLatestRestorableForecast,
   skippedForecastLedger,
   settleForecastLedger,
   type ForecastLedgerStatus,
 } from "../../../lib/ai-forecast-ledger";
 import { consumeAiRateLimit } from "../../../lib/ai-rate-limit";
+import {
+  buildOnlineLearningProfile,
+  readSettledForecastLearningState,
+  type OnlineLearningProfile,
+} from "../../../lib/ai-online-learning";
 import {
   AI_FOCUS_OPTIONS,
   type AiAnalysisResponse,
@@ -41,8 +48,8 @@ const CACHE_TTL_MS = 30 * 60_000;
 const MAX_HISTORY_DRAWS = 160;
 const SOURCE_GRACE_MS = 20 * 60_000;
 const API_SCHEMA_VERSION = "4";
-const ALGORITHM_VERSION = "forecast-engine-v4.0";
-const PROMPT_VERSION = "evidence-synthesis-v4";
+const ALGORITHM_VERSION = "forecast-engine-v5.0";
+const PROMPT_VERSION = "evidence-synthesis-v5";
 
 type CacheEntry = {
   expiresAt: number;
@@ -58,6 +65,14 @@ type ServerDecision = {
 
 type AnalysisBase = AiAnalysisResponse & {
   decision: ServerDecision;
+  learning?: OnlineLearningProfile;
+  learningReview?: {
+    currentLearning: OnlineLearningProfile;
+    appliesTo: "next_report";
+    settledTargetIssue: string;
+    reviewedAt: string;
+    notice: string;
+  };
 };
 
 type AnalysisEnvelope = AnalysisBase & {
@@ -92,6 +107,168 @@ class ProviderFailure extends Error {
   }
 }
 
+export async function GET(request: NextRequest) {
+  const fetchSite = request.headers.get("sec-fetch-site");
+  if (fetchSite && fetchSite !== "same-origin") {
+    return NextResponse.json({ error: "仅接受站内恢复请求。" }, { status: 403 });
+  }
+  const allowedKeys = new Set(["game", "window", "focus", "depth"]);
+  if (
+    [...request.nextUrl.searchParams.keys()].some(
+      (key) => !allowedKeys.has(key),
+    )
+  ) {
+    return NextResponse.json(
+      { error: "请求包含不受支持的参数。" },
+      { status: 400 },
+    );
+  }
+  const requestedGame = request.nextUrl.searchParams.get("game");
+  const game = GAME_IDS.includes(requestedGame as GameId)
+    ? requestedGame as GameId
+    : null;
+  if (!game) {
+    return NextResponse.json({ error: "彩种无效。" }, { status: 400 });
+  }
+  const rawWindow = request.nextUrl.searchParams.get("window");
+  const windowSize = rawWindow === null ? null : Number(rawWindow);
+  const rawFocus = request.nextUrl.searchParams.get("focus");
+  const focus =
+    rawFocus === null
+      ? null
+      : ALLOWED_FOCUS.has(rawFocus as AiFocus)
+        ? rawFocus
+        : null;
+  const rawDepth = request.nextUrl.searchParams.get("depth");
+  const depth =
+    rawDepth === null
+      ? "standard"
+      : rawDepth === "deep" || rawDepth === "standard"
+        ? rawDepth
+        : null;
+  if (
+    (rawWindow !== null && !ALLOWED_WINDOWS.has(windowSize as number)) ||
+    (rawFocus !== null && focus === null) ||
+    (rawDepth !== null && depth === null)
+  ) {
+    return NextResponse.json(
+      { error: "窗口、分析维度或深度无效。" },
+      { status: 400 },
+    );
+  }
+  const restoreDepth = depth ?? "standard";
+
+  const asOf = new Date();
+  const asOfAt = asOf.toISOString();
+  const history = await loadServerDraws(
+    game,
+    MAX_HISTORY_DRAWS,
+    asOf,
+  );
+  const settlementStatus = await settleForecastLedger(
+    game,
+    history.draws,
+    asOfAt,
+  );
+  if (history.draws.length === 0) return noRestoredReport();
+  const learningState = await readSettledForecastLearningState(
+    game,
+    asOfAt,
+  );
+  const currentLearningInput = {
+    asOf: asOfAt,
+    samples: learningState.samples,
+    sourceStatus: learningState.sourceStatus,
+  };
+  if (settlementStatus !== "ok") {
+    currentLearningInput.sourceStatus = "unavailable";
+  }
+  const currentLearning = buildOnlineLearningProfile(
+    game,
+    currentLearningInput,
+  );
+
+  const model = process.env.AI_MODEL || "gpt-5.6-sol";
+  const reasoning =
+    restoreDepth === "deep"
+      ? normalizeReasoning(process.env.AI_REASONING_EFFORT ?? "medium")
+      : "low";
+  const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
+  const targetIssue = resolveTargetIssue(
+    game,
+    history.draws[0],
+    expectedDrawAt,
+  );
+
+  if (targetIssue) {
+    const pending = await readLatestRestorableForecast<unknown>({
+      state: "pending",
+      game,
+      targetIssue,
+      expectedDrawAt,
+      asOfAt,
+      algorithmVersion: ALGORITHM_VERSION,
+      promptVersion: PROMPT_VERSION,
+      schemaVersion: API_SCHEMA_VERSION,
+      model,
+      reasoning,
+      windowSize,
+      focus,
+      depth: restoreDepth,
+    });
+    if (pending) {
+      const response = await hydrateRestoredReport({
+        restored: pending,
+        requestId: crypto.randomUUID(),
+        game,
+        targetIssue,
+        expectedDrawAt,
+        asOf,
+      });
+      if (response) return json(response);
+    }
+  }
+
+  // Once a verified result has settled the just-finished forecast, keep that
+  // exact target available for a post-draw review. An exact issue match avoids
+  // surfacing an older report as if it belonged to the current result.
+  const latestVerified = history.draws[0]?.verified
+    ? history.draws[0]
+    : null;
+  if (!latestVerified) return noRestoredReport();
+  const settled = await readLatestRestorableForecast<unknown>({
+    state: "settled",
+    game,
+    targetIssue: latestVerified.issue,
+    asOfAt,
+    algorithmVersion: ALGORITHM_VERSION,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: API_SCHEMA_VERSION,
+    model,
+    reasoning,
+    windowSize,
+    focus,
+    depth: restoreDepth,
+  });
+  if (!settled) return noRestoredReport();
+  const response = await hydrateRestoredReport({
+    restored: settled,
+    requestId: crypto.randomUUID(),
+    game,
+    targetIssue: latestVerified.issue,
+    expectedDrawAt: settled.expectedDrawAt,
+    asOf,
+    learningReview: {
+      currentLearning,
+      appliesTo: "next_report",
+      settledTargetIssue: latestVerified.issue,
+      reviewedAt: asOfAt,
+      notice: "本栏为开奖后复盘状态，仅用于下一份报告；不会改写本期冻结预测。",
+    },
+  });
+  return response ? json(response) : noRestoredReport();
+}
+
 export async function POST(request: NextRequest) {
   if (request.headers.get("sec-fetch-site") !== "same-origin") {
     return NextResponse.json({ error: "仅接受站内分析请求。" }, { status: 403 });
@@ -123,15 +300,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "彩种、窗口或分析维度无效。" }, { status: 400 });
   }
 
-  const safetyIdentifier = await buildSafetyIdentifier(request);
-  const rate = await consumeAiRateLimit(safetyIdentifier);
-  if (!rate.allowed) {
-    return NextResponse.json(
-      { error: "分析请求较频繁，请稍后再试。" },
-      { status: 429, headers: { "Retry-After": String(rate.retryAfter) } },
-    );
-  }
-
   const analysisCutoff = new Date();
   // The official observation is evaluated against one fixed history horizon.
   // Switching the UI display window must not silently change its direction.
@@ -140,7 +308,23 @@ export async function POST(request: NextRequest) {
     MAX_HISTORY_DRAWS,
     analysisCutoff,
   );
-  await settleForecastLedger(game, history.draws, analysisCutoff.toISOString());
+  const settlementStatus = await settleForecastLedger(
+    game,
+    history.draws,
+    analysisCutoff.toISOString(),
+  );
+  const learningState = await readSettledForecastLearningState(
+    game,
+    analysisCutoff.toISOString(),
+  );
+  const onlineLearningInput = {
+    asOf: analysisCutoff.toISOString(),
+    samples: learningState.samples,
+    sourceStatus: learningState.sourceStatus,
+  };
+  if (settlementStatus !== "ok") {
+    onlineLearningInput.sourceStatus = "unavailable";
+  }
   const draws = history.draws.slice(0, windowSize);
   if (draws.length < 8) {
     return NextResponse.json({ error: "有效历史样本不足，暂时无法形成分析。" }, { status: 422 });
@@ -163,7 +347,99 @@ export async function POST(request: NextRequest) {
     focus,
     expectedDrawAt,
     history.draws,
+    onlineLearningInput,
   );
+  const model = process.env.AI_MODEL || "gpt-5.6-sol";
+  const reasoning =
+    depth === "deep"
+      ? normalizeReasoning(process.env.AI_REASONING_EFFORT ?? "medium")
+      : "low";
+  const [fingerprint, learningStateFingerprint] = await Promise.all([
+    buildHistoryFingerprint(history.draws),
+    buildLearningStateFingerprint(pack.learning),
+  ]);
+  const cacheKey = await sha256(
+    [
+      API_SCHEMA_VERSION,
+      ALGORITHM_VERSION,
+      PROMPT_VERSION,
+      game,
+      windowSize,
+      focus,
+      depth,
+      model,
+      reasoning,
+      targetIssue,
+      expectedDrawAt,
+      fingerprint,
+      learningStateFingerprint,
+    ].join("|"),
+  );
+  const cached = responseCache.get(cacheKey);
+  if (
+    cached &&
+    cached.expiresAt > Date.now() &&
+    isCacheableAiReport(cached.response)
+  ) {
+    return json({
+      ...cached.response,
+      requestId: crypto.randomUUID(),
+      cached: true,
+    });
+  }
+  if (cached) responseCache.delete(cacheKey);
+
+  const requestId = crypto.randomUUID();
+  const activeReport = inflightReports.get(cacheKey);
+  if (activeReport) {
+    const shared = await activeReport;
+    return json({ ...shared, requestId, cached: true });
+  }
+  const forecastIdentity = {
+    game,
+    targetIssue,
+    expectedDrawAt,
+    analysisCutoffAt: analysisCutoff.toISOString(),
+    windowSize,
+    focus,
+    depth,
+    dataFingerprint: fingerprint,
+    algorithmVersion: ALGORITHM_VERSION,
+    promptVersion: PROMPT_VERSION,
+    schemaVersion: API_SCHEMA_VERSION,
+    model,
+    reasoning,
+  };
+  // A previously successful immutable report remains valid even if the
+  // current upstream refresh is temporarily degraded. The gate controls
+  // whether a newly generated report may be persisted, not whether an
+  // established pre-draw report may be recovered.
+  if (qualityGate.targetConfirmed) {
+    const persisted = await readForecastSnapshot<unknown>(
+      forecastIdentity,
+      analysisCutoff.toISOString(),
+    );
+    if (persisted) {
+      const restored = await hydrateRestoredReport({
+        restored: persisted,
+        requestId,
+        game,
+        targetIssue,
+        expectedDrawAt,
+        asOf: analysisCutoff,
+      });
+      if (restored) {
+        responseCache.set(cacheKey, {
+          response: restored,
+          expiresAt:
+            Date.now() +
+            (restored.mode === "ai" ? CACHE_TTL_MS : 30_000),
+        });
+        pruneRuntimeMaps();
+        return json(restored);
+      }
+    }
+  }
   if (resolvedTargetIssue) {
     const proposedPayload = canonicalZodiacPayloadFromPack(pack);
     if (proposedPayload) {
@@ -182,50 +458,23 @@ export async function POST(request: NextRequest) {
       pack = applyCanonicalZodiacObservation(pack, canonical.payload);
     }
   }
-  const model = process.env.AI_MODEL || "gpt-5.6-sol";
-  const reasoning =
-    depth === "deep"
-      ? normalizeReasoning(process.env.AI_REASONING_EFFORT ?? "medium")
-      : "low";
   const decision = lockServerDecision(pack, qualityGate);
-  const fingerprint = await sha256(
-    JSON.stringify(
-      history.draws.map((draw) => [
-        draw.issue,
-        draw.drawAt,
-        ...draw.numbers,
-        draw.special,
-        draw.source,
-        draw.verified,
-      ]),
-    ),
-  );
-  const cacheKey = await sha256(
-    [
-      API_SCHEMA_VERSION,
-      ALGORITHM_VERSION,
-      PROMPT_VERSION,
-      game,
-      windowSize,
-      focus,
-      depth,
-      model,
-      reasoning,
-      targetIssue,
-      expectedDrawAt,
-      fingerprint,
-    ].join("|"),
-  );
-  const cached = responseCache.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) {
-    return json({
-      ...cached.response,
-      requestId: crypto.randomUUID(),
-      cached: true,
-    });
+  const safetyIdentifier = await buildSafetyIdentifier(request);
+  const rate = await consumeAiRateLimit(safetyIdentifier);
+  if (!rate.allowed) {
+    return NextResponse.json(
+      { error: "分析请求较频繁，请稍后再试。" },
+      { status: 429, headers: { "Retry-After": String(rate.retryAfter) } },
+    );
   }
-
-  const requestId = crypto.randomUUID();
+  // Re-check after the D1/canonical/rate-limit awaits. Another request for
+  // the same immutable identity may have installed the shared generation
+  // promise while this request was suspended.
+  const activeAfterGate = inflightReports.get(cacheKey);
+  if (activeAfterGate) {
+    const shared = await activeAfterGate;
+    return json({ ...shared, requestId, cached: true });
+  }
   const base = buildBaseResponse({
     requestId,
     game,
@@ -243,12 +492,6 @@ export async function POST(request: NextRequest) {
   });
   const apiKey = process.env.AI_API_KEY;
   const baseUrl = (process.env.AI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "");
-
-  const activeReport = inflightReports.get(cacheKey);
-  if (activeReport) {
-    const shared = await activeReport;
-    return json({ ...shared, requestId, cached: true });
-  }
 
   const generation = generateReport({
     base,
@@ -273,6 +516,7 @@ export async function POST(request: NextRequest) {
       model,
       reasoning,
       targetConfirmed: qualityGate.targetConfirmed,
+      persistenceEligible: qualityGate.eligible,
     }),
   );
   inflightReports.set(cacheKey, generation);
@@ -282,10 +526,14 @@ export async function POST(request: NextRequest) {
   } finally {
     inflightReports.delete(cacheKey);
   }
-  responseCache.set(cacheKey, {
-    response: result,
-    expiresAt: Date.now() + (result.mode === "ai" ? CACHE_TTL_MS : 30_000),
-  });
+  if (isCacheableAiReport(result)) {
+    responseCache.set(cacheKey, {
+      response: result,
+      expiresAt: Date.now() + CACHE_TTL_MS,
+    });
+  } else {
+    responseCache.delete(cacheKey);
+  }
   pruneRuntimeMaps();
   return json(result);
 }
@@ -392,6 +640,7 @@ async function finalizeForecastLedger({
   model,
   reasoning,
   targetConfirmed,
+  persistenceEligible,
 }: {
   response: AnalysisBase;
   game: GameId;
@@ -405,6 +654,7 @@ async function finalizeForecastLedger({
   model: string;
   reasoning: string;
   targetConfirmed: boolean;
+  persistenceEligible: boolean;
 }): Promise<AnalysisEnvelope> {
   if (!targetConfirmed || targetIssue === "待确认") {
     const ledger = skippedForecastLedger("target_unconfirmed");
@@ -414,8 +664,24 @@ async function finalizeForecastLedger({
       ledger,
     };
   }
+  if (!persistenceEligible) {
+    const ledger = skippedForecastLedger("quality_gate_failed");
+    ledger.summary = await readForecastLedgerSummary(game);
+    return {
+      ...response,
+      ledger,
+    };
+  }
   if (Date.parse(analysisCutoffAt) >= Date.parse(expectedDrawAt)) {
     const ledger = skippedForecastLedger("after_cutoff");
+    ledger.summary = await readForecastLedgerSummary(game);
+    return {
+      ...response,
+      ledger,
+    };
+  }
+  if (!isSuccessfulAiReport(response)) {
+    const ledger = skippedForecastLedger("generation_degraded");
     ledger.summary = await readForecastLedgerSummary(game);
     return {
       ...response,
@@ -441,6 +707,10 @@ async function finalizeForecastLedger({
       reasoning,
     },
     snapshot,
+    {
+      persistenceEligible: true,
+      generationSuccessful: true,
+    },
   );
   locked.ledger.summary = await readForecastLedgerSummary(game);
   return {
@@ -591,6 +861,7 @@ function buildBaseResponse({
     dimensions: pack.dimensions,
     candidateSets: pack.candidateSets,
     zodiacObservation: pack.zodiacObservation,
+    learning: pack.learning,
     evidenceStrength: pack.evidenceStrength,
     backtest: pack.backtest,
     risk: {
@@ -675,6 +946,7 @@ async function requestModel({
     },
     dimensions: pack.dimensions,
     candidateSets: pack.candidateSets,
+    learning: pack.learning,
     evidenceStrength: pack.evidenceStrength,
     backtest: pack.backtest,
   };
@@ -748,7 +1020,7 @@ async function requestModelAttempt({
           verbosity: "medium",
           format: {
             type: "json_schema",
-            name: "marksix_evidence_synthesis_v4",
+            name: "marksix_evidence_synthesis_v5",
             strict: true,
             schema,
           },
@@ -1131,6 +1403,239 @@ function waitFor(milliseconds: number) {
 async function sha256(value: string) {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function buildHistoryFingerprint(draws: Draw[]) {
+  return sha256(
+    JSON.stringify(
+      draws.map((draw) => [
+        draw.issue,
+        draw.drawAt,
+        ...draw.numbers,
+        draw.special,
+        draw.source,
+        draw.verified,
+      ]),
+    ),
+  );
+}
+
+async function buildLearningStateFingerprint(
+  learning: OnlineLearningProfile,
+) {
+  const stableState = {
+    method: learning.method,
+    sourceStatus: learning.sourceStatus,
+    applied: learning.applied,
+    active: learning.active,
+    sampleSize: learning.sampleSize,
+    minimumSamples: learning.minimumSamples,
+    receivedSampleCount: learning.receivedSampleCount,
+    eligibleSampleCount: learning.eligibleSampleCount,
+    deduplicatedIssueCount: learning.deduplicatedIssueCount,
+    excludedSampleCount: learning.excludedSampleCount,
+    lineages: [...learning.lineages].sort(),
+    preferredScenarioId: learning.preferredScenarioId,
+    scenarioWeights: compactLearningWeights(learning.scenarioWeights),
+    observationWeights: compactLearningWeights(
+      learning.observationWeights,
+    ),
+    scenarioObservationWeights: Object.fromEntries(
+      Object.entries(learning.scenarioObservationWeights)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([scenarioId, weights]) => [
+          scenarioId,
+          compactLearningWeights(weights),
+        ]),
+    ),
+    directionWeights: compactLearningWeights(
+      learning.directionWeights,
+    ),
+    lastReview: learning.lastReview,
+  };
+  return sha256(JSON.stringify(stableState));
+}
+
+function compactLearningWeights(
+  weights: Record<
+    string,
+    {
+      weight: number;
+      sampleSize: number;
+      eventCount: number;
+      observedRate: number;
+      baselineRate: number;
+      shrunkenLift: number;
+      status: string;
+    }
+  >,
+) {
+  return Object.fromEntries(
+    Object.entries(weights)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([id, weight]) => [
+        id,
+        {
+          weight: weight.weight,
+          sampleSize: weight.sampleSize,
+          eventCount: weight.eventCount,
+          observedRate: weight.observedRate,
+          baselineRate: weight.baselineRate,
+          shrunkenLift: weight.shrunkenLift,
+          status: weight.status,
+        },
+      ]),
+  );
+}
+
+function isSuccessfulAiReport(
+  response: Pick<AnalysisBase, "mode" | "status" | "fallbackReason">,
+) {
+  return (
+    response.mode === "ai" &&
+    response.status === "ok" &&
+    response.fallbackReason === null
+  );
+}
+
+function isCacheableAiReport(
+  response: AnalysisEnvelope,
+) {
+  return (
+    isSuccessfulAiReport(response) &&
+    response.ledger.immutable &&
+    (
+      response.ledger.state === "locked" ||
+      response.ledger.state === "existing"
+    )
+  );
+}
+
+async function hydrateRestoredReport({
+  restored,
+  requestId,
+  game,
+  targetIssue,
+  expectedDrawAt,
+  asOf,
+  learningReview,
+}: {
+  restored: {
+    snapshot: unknown;
+    ledger: ForecastLedgerStatus;
+  };
+  requestId: string;
+  game: GameId;
+  targetIssue: string;
+  expectedDrawAt: string;
+  asOf: Date;
+  learningReview?: NonNullable<AnalysisBase["learningReview"]>;
+}): Promise<AnalysisEnvelope | null> {
+  if (
+    !isRestorableAnalysisSnapshot(
+      restored.snapshot,
+      game,
+      targetIssue,
+      expectedDrawAt,
+      asOf,
+      restored.ledger.settledAt,
+    )
+  ) {
+    return null;
+  }
+  return {
+    ...restored.snapshot,
+    ...(learningReview ? { learningReview } : {}),
+    requestId,
+    cached: true,
+    ledger: {
+      ...restored.ledger,
+      summary: await readForecastLedgerSummary(game),
+    },
+  };
+}
+
+function isRestorableAnalysisSnapshot(
+  value: unknown,
+  game: GameId,
+  targetIssue: string,
+  expectedDrawAt: string,
+  asOf: Date,
+  settledAtValue: string | null,
+): value is LockedForecastSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as {
+    schemaVersion?: unknown;
+    game?: unknown;
+    generatedAt?: unknown;
+    mode?: unknown;
+    status?: unknown;
+    fallbackReason?: unknown;
+    target?: {
+      issue?: unknown;
+      expectedDrawAt?: unknown;
+    };
+    dataQuality?: {
+      latestDrawAt?: unknown;
+    };
+    synthesis?: unknown;
+    candidateSets?: unknown;
+    zodiacObservation?: {
+      kind?: unknown;
+      zodiac?: unknown;
+    };
+    decision?: unknown;
+  };
+  const generatedAt =
+    typeof snapshot.generatedAt === "string"
+      ? Date.parse(snapshot.generatedAt)
+      : Number.NaN;
+  const latestDrawAt =
+    typeof snapshot.dataQuality?.latestDrawAt === "string"
+      ? Date.parse(snapshot.dataQuality.latestDrawAt)
+      : Number.NaN;
+  const expectedAt = Date.parse(expectedDrawAt);
+  const settledAt = settledAtValue
+    ? Date.parse(settledAtValue)
+    : Number.NaN;
+  const temporalStateIsValid = Number.isFinite(settledAt)
+    ? (
+      expectedAt <= asOf.getTime() &&
+      generatedAt < expectedAt &&
+      settledAt >= expectedAt &&
+      settledAt <= asOf.getTime()
+    )
+    : expectedAt > asOf.getTime();
+  return (
+    snapshot.schemaVersion === API_SCHEMA_VERSION &&
+    snapshot.game === game &&
+    snapshot.mode === "ai" &&
+    snapshot.status === "ok" &&
+    snapshot.fallbackReason === null &&
+    snapshot.target?.issue === targetIssue &&
+    /^\d+$/.test(targetIssue) &&
+    snapshot.target.expectedDrawAt === expectedDrawAt &&
+    Number.isFinite(generatedAt) &&
+    generatedAt <= asOf.getTime() &&
+    Number.isFinite(latestDrawAt) &&
+    latestDrawAt <= generatedAt &&
+    Number.isFinite(expectedAt) &&
+    temporalStateIsValid &&
+    Boolean(snapshot.synthesis) &&
+    Array.isArray(snapshot.candidateSets) &&
+    snapshot.candidateSets.length === 3 &&
+    snapshot.zodiacObservation?.kind ===
+      "zodiac_coverage_6_plus_1" &&
+    typeof snapshot.zodiacObservation.zodiac === "string" &&
+    Boolean(snapshot.decision)
+  );
+}
+
+function noRestoredReport() {
+  return new NextResponse(null, {
+    status: 204,
+    headers: { "Cache-Control": "private, no-store" },
+  });
 }
 
 function json(body: AnalysisEnvelope) {

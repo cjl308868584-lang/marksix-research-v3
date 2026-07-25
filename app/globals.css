@@ -1780,6 +1780,235 @@ footer {
   color: var(--success);
 }
 
+.online-learning-panel {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid rgba(101, 199, 162, 0.22);
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 92% 0, rgba(101, 199, 162, 0.08), transparent 30%),
+    rgba(0, 0, 0, 0.14);
+}
+
+.online-learning-head,
+.online-learning-review-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.online-learning-head > div,
+.online-learning-review-head > div {
+  display: grid;
+  gap: 4px;
+}
+
+.online-learning-head span,
+.online-learning-review-head span {
+  color: var(--success);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.11em;
+}
+
+.online-learning-head strong,
+.online-learning-review-head strong {
+  color: #e4e8df;
+  font-family: var(--font-serif);
+  font-size: 17px;
+}
+
+.online-learning-head > em,
+.online-learning-review-head > em {
+  padding: 5px 8px;
+  border: 1px solid rgba(101, 199, 162, 0.28);
+  border-radius: 999px;
+  color: var(--success);
+  background: rgba(101, 199, 162, 0.06);
+  font-size: 8px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.online-learning-head > em.collecting {
+  border-color: var(--line);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.online-learning-head > em.unavailable {
+  border-color: rgba(224, 99, 103, 0.3);
+  color: #e79a9d;
+  background: rgba(224, 99, 103, 0.06);
+}
+
+.online-learning-summary {
+  margin: 11px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.online-learning-audit {
+  margin: 11px 0 0;
+  padding: 9px 10px;
+  border-left: 2px solid rgba(210, 179, 109, 0.5);
+  color: #cfc5ad;
+  background: rgba(210, 179, 109, 0.045);
+  font-size: 8px;
+  line-height: 1.6;
+}
+
+.online-learning-progress {
+  margin-top: 11px;
+  display: grid;
+  gap: 6px;
+}
+
+.online-learning-progress > span {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(101, 199, 162, 0.09);
+}
+
+.online-learning-progress i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #387d67, var(--success));
+}
+
+.online-learning-progress small,
+.online-learning-empty,
+.online-learning-boundary {
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.online-learning-unavailable {
+  margin-top: 12px;
+  padding: 11px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid rgba(224, 99, 103, 0.18);
+  border-radius: 7px;
+  background: rgba(224, 99, 103, 0.035);
+}
+
+.online-learning-unavailable strong {
+  color: #e7c2c4;
+  font-size: 10px;
+}
+
+.online-learning-unavailable span {
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.online-learning-weights {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.online-learning-weights > div {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  background: rgba(16, 19, 21, 0.72);
+}
+
+.online-learning-weights > div.preferred {
+  border-color: rgba(101, 199, 162, 0.32);
+  background: rgba(101, 199, 162, 0.05);
+}
+
+.online-learning-weights span,
+.online-learning-weights small {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-learning-weights strong {
+  color: #e1e7df;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.online-learning-review {
+  margin-top: 13px;
+  padding: 13px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: rgba(16, 19, 21, 0.66);
+}
+
+.online-learning-review > .ball-row {
+  margin-top: 13px;
+}
+
+.online-learning-review-items {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.online-learning-review-items > span {
+  min-width: 0;
+  padding: 8px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 6px;
+}
+
+.online-learning-review-items > span.hit {
+  border-color: rgba(101, 199, 162, 0.26);
+  background: rgba(101, 199, 162, 0.04);
+}
+
+.online-learning-review-items small,
+.online-learning-review-items em {
+  overflow: hidden;
+  color: var(--dim);
+  font-size: 7px;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.online-learning-review-items strong {
+  color: #ddd9ce;
+  font-family: var(--font-serif);
+  font-size: 13px;
+}
+
+.online-learning-review-items .hit em {
+  color: var(--success);
+}
+
+.online-learning-empty,
+.online-learning-boundary {
+  margin: 11px 0 0;
+}
+
+.online-learning-boundary {
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+}
+
 .evidence-strength {
   margin-top: 24px;
   padding: 13px 14px;
@@ -4229,6 +4458,95 @@ footer p {
   }
 
   .consensus-scroll strong {
+    font-size: 15px;
+  }
+
+  .online-learning-panel {
+    padding: 13px;
+  }
+
+  .online-learning-head,
+  .online-learning-review-head {
+    align-items: flex-start;
+  }
+
+  .online-learning-head span,
+  .online-learning-review-head span,
+  .online-learning-progress small,
+  .online-learning-summary,
+  .online-learning-audit,
+  .online-learning-empty,
+  .online-learning-boundary,
+  .online-learning-unavailable span {
+    font-size: 10px;
+  }
+
+  .online-learning-head strong,
+  .online-learning-review-head strong {
+    font-size: 17px;
+  }
+
+  .online-learning-head > em,
+  .online-learning-review-head > em {
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  .online-learning-weights {
+    margin: 12px -13px 0;
+    padding: 0 13px 4px;
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    scroll-padding-inline: 13px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .online-learning-weights::-webkit-scrollbar,
+  .online-learning-review-items::-webkit-scrollbar {
+    display: none;
+  }
+
+  .online-learning-weights > div {
+    flex: 0 0 min(145px, 46vw);
+    padding: 11px;
+    scroll-snap-align: start;
+  }
+
+  .online-learning-weights span,
+  .online-learning-weights small,
+  .online-learning-review-items small,
+  .online-learning-review-items em {
+    font-size: 10px;
+  }
+
+  .online-learning-weights strong {
+    font-size: 16px;
+  }
+
+  .online-learning-review {
+    padding: 12px;
+  }
+
+  .online-learning-review-items {
+    margin: 12px -12px 0;
+    padding: 0 12px 4px;
+    display: flex;
+    gap: 7px;
+    overflow-x: auto;
+    scroll-padding-inline: 12px;
+    scroll-snap-type: x mandatory;
+    scrollbar-width: none;
+  }
+
+  .online-learning-review-items > span {
+    flex: 0 0 min(128px, 42vw);
+    padding: 10px;
+    scroll-snap-align: start;
+  }
+
+  .online-learning-review-items strong {
     font-size: 15px;
   }
 

@@ -13,6 +13,7 @@ import {
   type AiScenario,
   type AiScenarioObservation,
 } from "../lib/ai-types";
+import type { OnlineLearningProfile } from "../lib/ai-online-learning";
 import {
   FALLBACK_DRAWS,
   GAME_IDS,
@@ -42,6 +43,13 @@ type ApiPayload = {
 };
 
 type ScientificBacktestStrategy = AiBacktestStrategy;
+type AiMode =
+  | "idle"
+  | "restoring"
+  | "loading"
+  | "ai"
+  | "statistical"
+  | "error";
 
 type ScientificReport = AiAnalysisResponse & {
   decision?: {
@@ -61,6 +69,8 @@ type ScientificReport = AiAnalysisResponse & {
       | "already_locked"
       | "after_cutoff"
       | "target_unconfirmed"
+      | "quality_gate_failed"
+      | "generation_degraded"
       | "database_unavailable";
     summary: {
       totalForecasts: number;
@@ -77,12 +87,20 @@ type ScientificReport = AiAnalysisResponse & {
       zodiacCoverageRate: number | null;
     } | null;
   } | null;
+  learning?: OnlineLearningProfile;
+  learningReview?: {
+    currentLearning: OnlineLearningProfile;
+    appliesTo: "next_report";
+    settledTargetIssue: string;
+    reviewedAt: string;
+    notice: string;
+  };
 };
 
 const LIVE_POLL_MS = 3_000;
 const BACKGROUND_POLL_MS = 60_000;
 
-export function LotteryDashboard() {
+export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const [draws, setDraws] = useState<Record<GameId, Draw[]>>(FALLBACK_DRAWS);
   const [status, setStatus] = useState<Record<GameId, ApiPayload | null>>({
     hk: null,
@@ -98,18 +116,19 @@ export function LotteryDashboard() {
   const [windowSize, setWindowSize] = useState(30);
   const [historyVisible, setHistoryVisible] = useState(20);
   const [focus, setFocus] = useState<AiFocus>("comprehensive");
-  const [now, setNow] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date(initialNow));
   const [demo, setDemo] = useState(false);
   const [demoSeconds, setDemoSeconds] = useState(3);
   const [revealed, setRevealed] = useState(0);
   const [realReveal, setRealReveal] = useState({ key: "", count: 0 });
   const [aiReport, setAiReport] = useState<AiAnalysisResponse | null>(null);
-  const [aiMode, setAiMode] = useState<"idle" | "loading" | "ai" | "statistical" | "error">("idle");
+  const [aiMode, setAiMode] = useState<AiMode>("idle");
   const [aiError, setAiError] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState(0);
   const [activeScenario, setActiveScenario] = useState<AiScenario["id"]>("balanced");
   const [activeSection, setActiveSection] = useState("draws");
   const aiAbortRef = useRef<AbortController | null>(null);
+  const aiRestoreAbortRef = useRef<AbortController | null>(null);
   const drawGridRef = useRef<HTMLElement | null>(null);
   const refreshInFlightRef = useRef(new Set<string>());
   const drawsRef = useRef(draws);
@@ -120,6 +139,9 @@ export function LotteryDashboard() {
 
   const resetAi = useCallback(() => {
     aiAbortRef.current?.abort();
+    aiAbortRef.current = null;
+    aiRestoreAbortRef.current?.abort();
+    aiRestoreAbortRef.current = null;
     setAiReport(null);
     setAiMode("idle");
     setAiError("");
@@ -272,7 +294,75 @@ export function LotteryDashboard() {
     return () => window.clearInterval(interval);
   }, [isCurrentResult, realRevealKey]);
 
+  const applyAiReport = useCallback((payload: AiAnalysisResponse) => {
+    setAiReport(payload);
+    if ([10, 30, 50, 100].includes(payload.dataQuality.requestedWindow)) {
+      setWindowSize(payload.dataQuality.requestedWindow);
+    }
+    setFocus(payload.focus);
+    const decisionScenario = (payload as ScientificReport).decision?.scenarioId;
+    setActiveScenario(
+      decisionScenario ??
+      payload.zodiacObservation?.scenarioId ??
+      payload.synthesis.recommendedScenarioId ??
+      payload.candidateSets[0]?.id ??
+      "balanced",
+    );
+    setAiMode(payload.mode === "ai" ? "ai" : "statistical");
+  }, []);
+
+  const restoreAi = useCallback(async (game: GameId) => {
+    if (aiAbortRef.current) return;
+    aiRestoreAbortRef.current?.abort();
+    const controller = new AbortController();
+    aiRestoreAbortRef.current = controller;
+    setAiError("");
+    setAiMode("restoring");
+    try {
+      const response = await fetch(
+        `/api/analyze?${new URLSearchParams({ game })}`,
+        { cache: "no-store", signal: controller.signal },
+      );
+      if (response.status === 204) {
+        setAiReport(null);
+        setAiMode("idle");
+        return;
+      }
+      const payload = (await response.json()) as AiAnalysisResponse & {
+        error?: string;
+      };
+      if (
+        !response.ok ||
+        String(payload.schemaVersion) !== "4" ||
+        payload.game !== game
+      ) {
+        throw new Error(payload.error || "已保存报告暂时无法读取。");
+      }
+      applyAiReport(payload);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setAiReport(null);
+      setAiMode("idle");
+    } finally {
+      if (aiRestoreAbortRef.current === controller) {
+        aiRestoreAbortRef.current = null;
+      }
+    }
+  }, [applyAiReport]);
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(
+      () => void restoreAi(selectedGame),
+      0,
+    );
+    return () => {
+      window.clearTimeout(restoreTimer);
+      aiRestoreAbortRef.current?.abort();
+    };
+  }, [latest.issue, latest.verified, restoreAi, selectedGame]);
+
   const requestAi = useCallback(async () => {
+    aiRestoreAbortRef.current?.abort();
     aiAbortRef.current?.abort();
     const controller = new AbortController();
     aiAbortRef.current = controller;
@@ -300,16 +390,8 @@ export function LotteryDashboard() {
       if (!response.ok || String(payload.schemaVersion) !== "4") {
         throw new Error(payload.error || "分析服务暂时不可用。");
       }
-      setAiReport(payload);
-      const decisionScenario = (payload as ScientificReport).decision?.scenarioId;
-      setActiveScenario(
-        decisionScenario ??
-        payload.zodiacObservation?.scenarioId ??
-        payload.synthesis.recommendedScenarioId ??
-        payload.candidateSets[0]?.id ??
-        "balanced",
-      );
-      setAiMode(payload.mode === "ai" ? "ai" : "statistical");
+      if (controller.signal.aborted) return;
+      applyAiReport(payload);
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setAiError(error instanceof Error ? error.message : "分析服务暂时不可用。");
@@ -318,31 +400,43 @@ export function LotteryDashboard() {
       window.clearInterval(progress);
       if (aiAbortRef.current === controller) aiAbortRef.current = null;
     }
-  }, [focus, selectedGame, windowSize]);
+  }, [applyAiReport, focus, selectedGame, windowSize]);
 
-  useEffect(() => () => aiAbortRef.current?.abort(), []);
+  useEffect(() => () => {
+    aiAbortRef.current?.abort();
+    aiRestoreAbortRef.current?.abort();
+  }, []);
 
   useEffect(() => {
     drawGridRef.current?.scrollTo({ left: 0, behavior: "smooth" });
   }, [selectedGame]);
 
   useEffect(() => {
-    if (!("IntersectionObserver" in window)) return;
     const sections = ["draws", "analysis", "lab", "history"];
-    const observer = new IntersectionObserver(
-      (entries) => {
-        const visible = entries
-          .filter((entry) => entry.isIntersecting)
-          .sort((left, right) => right.intersectionRatio - left.intersectionRatio);
-        if (visible[0]?.target.id) setActiveSection(visible[0].target.id);
-      },
-      { rootMargin: "-18% 0px -62% 0px", threshold: [0, 0.01, 0.2] },
-    );
-    sections.forEach((id) => {
-      const section = document.getElementById(id);
-      if (section) observer.observe(section);
-    });
-    return () => observer.disconnect();
+    let frame = 0;
+    const syncActiveSection = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        const marker = window.innerHeight * 0.28;
+        let current = sections[0];
+        for (const id of sections) {
+          const section = document.getElementById(id);
+          if (!section || section.getBoundingClientRect().top > marker) break;
+          current = id;
+        }
+        setActiveSection(current);
+      });
+    };
+    syncActiveSection();
+    window.addEventListener("scroll", syncActiveSection, { passive: true });
+    window.addEventListener("hashchange", syncActiveSection);
+    window.addEventListener("resize", syncActiveSection);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("scroll", syncActiveSection);
+      window.removeEventListener("hashchange", syncActiveSection);
+      window.removeEventListener("resize", syncActiveSection);
+    };
   }, []);
 
   const liveDraw = latest;
@@ -470,7 +564,10 @@ export function LotteryDashboard() {
             onWindow={chooseWindow}
           />
           <div className="analysis-grid">
-            <NumberHeatmap analysis={analysis} />
+            <NumberHeatmap
+              analysis={analysis}
+              drawAt={liveWindow.target.toISOString()}
+            />
             <StructurePanel analysis={analysis} />
             <ZodiacPanel analysis={analysis} />
           </div>
@@ -512,15 +609,23 @@ export function LotteryDashboard() {
                 <span><i>02</i> 尾数 / 波色 / 单双</span>
                 <span><i>03</i> 三路策略共识与冲突</span>
                 <span><i>04</i> 独立留出与精确基准</span>
+                <span><i>05</i> 开奖核验后复盘学习</span>
               </div>
-              <button className="primary-action ai-button" type="button" onClick={requestAi} disabled={aiMode === "loading"}>
-                {aiMode === "loading"
+              <button
+                className="primary-action ai-button"
+                type="button"
+                onClick={requestAi}
+                disabled={aiMode === "loading" || aiMode === "restoring"}
+              >
+                {aiMode === "restoring"
+                  ? "正在恢复已保存报告…"
+                  : aiMode === "loading"
                   ? ["正在校验历史数据…", "正在运行嵌套回测…", "大模型正在归纳证据…"][aiLoadingStep]
                   : aiReport
-                    ? "重新生成 AI 6+1 观察报告"
+                    ? "刷新本期已保存报告"
                     : "生成 AI 6+1 观察报告"}
               </button>
-              <p className="microcopy">每份报告绑定彩种、目标期号、统计窗口和数据指纹；大模型不能自行编造号码或回测数字。</p>
+              <p className="microcopy">通过数据核验且 AI 完成的报告会按彩种与目标期保存，刷新页面直接恢复；访问分析页面并取得已核验开奖号时，系统会自动复盘已冻结记录。</p>
             </div>
             <AiReport
               analysis={analysis}
@@ -537,6 +642,7 @@ export function LotteryDashboard() {
           analysis={analysis}
           report={aiReport}
           latest={latest}
+          targetDrawAt={liveWindow.target.toISOString()}
           activeScenario={activeScenario}
           onScenario={setActiveScenario}
         />
@@ -569,10 +675,10 @@ export function LotteryDashboard() {
         <div className="footer-links"><a href="#analysis">方法说明</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
       <nav className="mobile-nav" aria-label="手机端快捷导航">
-        <a className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
-        <a className={activeSection === "analysis" ? "active" : ""} aria-current={activeSection === "analysis" ? "page" : undefined} href="#analysis"><span>02</span>统计</a>
-        <a className={activeSection === "lab" ? "active" : ""} aria-current={activeSection === "lab" ? "page" : undefined} href="#lab"><span>03</span>AI</a>
-        <a className={activeSection === "history" ? "active" : ""} aria-current={activeSection === "history" ? "page" : undefined} href="#history"><span>04</span>历史</a>
+        <a onClick={() => setActiveSection("draws")} className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
+        <a onClick={() => setActiveSection("analysis")} className={activeSection === "analysis" ? "active" : ""} aria-current={activeSection === "analysis" ? "page" : undefined} href="#analysis"><span>02</span>统计</a>
+        <a onClick={() => setActiveSection("lab")} className={activeSection === "lab" ? "active" : ""} aria-current={activeSection === "lab" ? "page" : undefined} href="#lab"><span>03</span>AI</a>
+        <a onClick={() => setActiveSection("history")} className={activeSection === "history" ? "active" : ""} aria-current={activeSection === "history" ? "page" : undefined} href="#history"><span>04</span>历史</a>
       </nav>
     </div>
   );
@@ -928,7 +1034,7 @@ function DrawCard({ game, draw, selected, onSelect, message }: { game: GameId; d
   );
 }
 
-function BallRow({ numbers, special, compact = false, drawAt }: { numbers: number[]; special: number; compact?: boolean; drawAt?: string }) {
+function BallRow({ numbers, special, compact = false, drawAt }: { numbers: number[]; special: number; compact?: boolean; drawAt: string }) {
   return (
     <div className={`ball-row ${compact ? "compact" : ""}`}>
       {numbers.map((number, index) => <Ball number={number} drawAt={drawAt} key={`${number}-${index}`} />)}
@@ -938,7 +1044,7 @@ function BallRow({ numbers, special, compact = false, drawAt }: { numbers: numbe
   );
 }
 
-function Ball({ number, special = false, drawAt }: { number: number; special?: boolean; drawAt?: string }) {
+function Ball({ number, special = false, drawAt }: { number: number; special?: boolean; drawAt: string }) {
   const zodiac = getZodiac(number, drawAt);
   return (
     <span
@@ -969,7 +1075,13 @@ function AnalysisToolbar({ game, windowSize, available, onGame, onWindow }: { ga
   );
 }
 
-function NumberHeatmap({ analysis }: { analysis: Analysis }) {
+function NumberHeatmap({
+  analysis,
+  drawAt,
+}: {
+  analysis: Analysis;
+  drawAt: string;
+}) {
   const max = Math.max(...analysis.hot.map((item) => item.frequency), 1);
   const scoreMap = new Map([...analysis.hot, ...analysis.cold, ...analysis.overdue].map((item) => [item.number, item]));
   return (
@@ -993,7 +1105,7 @@ function NumberHeatmap({ analysis }: { analysis: Analysis }) {
           const hot = analysis.hot.some((item) => item.number === number);
           const overdue = analysis.overdue.some((item) => item.number === number);
           const wave = getWave(number);
-          const zodiac = getZodiac(number);
+          const zodiac = getZodiac(number, drawAt);
           const detail = info ? `${info.frequency}次，遗漏${info.omission}期` : "暂无统计";
           return <div className={`number-cell number-wave-${wave} ${hot ? "hot" : ""} ${overdue ? "overdue" : ""}`} style={{ "--heat": `${Math.max((info?.frequency ?? 0) / max, 0.08)}` } as React.CSSProperties} title={`${formatBall(number)} · ${WAVE_LABEL[wave]} · ${zodiac}`} aria-label={`${formatBall(number)}，${WAVE_LABEL[wave]}，${zodiac}，${detail}`} key={number}><strong>{formatBall(number)}</strong><span>{zodiac}</span><small>{info ? <><span>{info.frequency}次</span><span>遗漏{info.omission}</span></> : "—"}</small></div>;
         })}
@@ -1052,13 +1164,16 @@ function AiContextBar({
   windowSize: number;
   report: AiAnalysisResponse | null;
 }) {
+  const displayedTarget = report
+    ? new Date(report.target.expectedDrawAt)
+    : target;
   return (
     <div className="ai-context-bar" aria-label="本次分析上下文">
       <div><span>分析彩种</span><strong>{GAME_META[game].shortName}</strong></div>
       <div><span>目标期号</span><strong>{report?.target.issue ?? `下一期`}</strong></div>
-      <div><span>历史窗口</span><strong>{windowSize} 期</strong></div>
+      <div><span>历史窗口</span><strong>{report?.dataQuality.requestedWindow ?? windowSize} 期</strong></div>
       <div><span>最新数据</span><strong>{latest.issue}</strong></div>
-      <div><span>预计开奖</span><strong>{formatBeijingDate(target)}</strong></div>
+      <div><span>预计开奖</span><strong>{formatBeijingDate(displayedTarget)}</strong></div>
     </div>
   );
 }
@@ -1073,7 +1188,7 @@ function AiReport({
 }: {
   analysis: Analysis;
   report: AiAnalysisResponse | null;
-  mode: "idle" | "loading" | "ai" | "statistical" | "error";
+  mode: AiMode;
   focus: AiFocus;
   game: GameId;
   error: string;
@@ -1083,12 +1198,22 @@ function AiReport({
     return (
       <article className={`ai-report ai-report-${mode}`}>
         <div className="ai-report-head">
-          <div className="ai-orb">{mode === "loading" ? "···" : "AI"}</div>
+          <div className="ai-orb">{mode === "loading" || mode === "restoring" ? "···" : "AI"}</div>
           <div>
-            <span>{mode === "loading" ? "EVIDENCE SYNTHESIS" : mode === "error" ? "SERVICE NOTICE" : "READY"}</span>
+            <span>
+              {mode === "restoring"
+                ? "SAVED REPORT"
+                : mode === "loading"
+                  ? "EVIDENCE SYNTHESIS"
+                  : mode === "error"
+                    ? "SERVICE NOTICE"
+                    : "READY"}
+            </span>
             <h3>
-              {mode === "loading"
-                ? "正在建立跨维度证据链"
+              {mode === "restoring"
+                ? "正在读取已保存的本期报告"
+                : mode === "loading"
+                  ? "正在建立跨维度证据链"
                 : mode === "error"
                   ? "本次报告未能生成"
                   : `${GAME_META[game].shortName} · ${focusLabel}预测工作台`}
@@ -1096,10 +1221,14 @@ function AiReport({
           </div>
           <small>{analysis.sampleSize} 期样本</small>
         </div>
-        {mode === "loading" ? (
+        {mode === "loading" || mode === "restoring" ? (
           <div className="ai-processing">
             <span /><span /><span />
-            <p>统计计算、回测和大模型归纳都在服务端完成，通常需要数秒。</p>
+            <p>
+              {mode === "restoring"
+                ? "优先从永久记录中恢复；只有本期尚无报告时才会重新生成。"
+                : "统计计算、回测和大模型归纳都在服务端完成，通常需要数秒。"}
+            </p>
           </div>
         ) : mode === "error" ? (
           <div className="ai-empty-state error">
@@ -1121,6 +1250,9 @@ function AiReport({
   }
 
   const scientificReport = report as ScientificReport;
+  const displayedLearning =
+    scientificReport.learningReview?.currentLearning ??
+    scientificReport.learning;
   const observesByDecision =
     scientificReport.decision
       ? scientificReport.decision.kind === "observe"
@@ -1185,7 +1317,13 @@ function AiReport({
           <span>{mode === "ai" ? `${report.model.name} 证据归纳` : "本地证据引擎降级"}</span>
           <h3>{report.synthesis.headline}</h3>
         </div>
-        <small>{report.cached ? "缓存报告" : `${report.model.latencyMs / 1000}s`}</small>
+        <small>
+          {scientificReport.ledger?.settledAt
+            ? "已结算复盘"
+            : report.cached
+              ? "已恢复存档"
+              : `${report.model.latencyMs / 1000}s`}
+        </small>
       </div>
       {zodiacDirection && zodiacBacktest && zodiacBaseline !== null && (
         <PrimaryZodiacObservation
@@ -1204,6 +1342,14 @@ function AiReport({
         />
       ) : null}
       <ObservationConsensus scenarios={report.candidateSets} />
+      {displayedLearning && (
+        <OnlineLearningPanel
+          profile={displayedLearning}
+          learningAtLock={scientificReport.learning}
+          isPostDrawReview={Boolean(scientificReport.learningReview)}
+          reviewNotice={scientificReport.learningReview?.notice}
+        />
+      )}
       <div className={`scientific-verdict ${observesAdvantage ? "observe" : "abstain"}`} role="status">
         <span>统计校准状态</span>
         <strong>{scientificConclusion}</strong>
@@ -1396,6 +1542,153 @@ function ObservationConsensus({ scenarios }: { scenarios: AiScenario[] }) {
   );
 }
 
+function OnlineLearningPanel({
+  profile,
+  learningAtLock,
+  isPostDrawReview,
+  reviewNotice,
+}: {
+  profile: OnlineLearningProfile;
+  learningAtLock?: OnlineLearningProfile;
+  isPostDrawReview: boolean;
+  reviewNotice?: string;
+}) {
+  const scenarioLabels: Record<AiScenario["id"], string> = {
+    balanced: "冷热平衡",
+    momentum: "趋势延续",
+    contrarian: "逆向遗漏",
+  };
+  const progress = Math.min(
+    (profile.sampleSize / Math.max(profile.minimumSamples, 1)) * 100,
+    100,
+  );
+  const review = profile.lastReview;
+  const reviewHits =
+    review?.observations.filter((observation) => observation.hit).length ?? 0;
+  const sourceUnavailable = profile.sourceStatus === "unavailable";
+  return (
+    <section className="online-learning-panel" aria-label="开奖后机器学习复盘">
+      <div className="online-learning-head">
+        <div>
+          <span>VERIFIED ONLINE LEARNING</span>
+          <strong>
+            {isPostDrawReview
+              ? "本期开奖复盘 · 下期校准"
+              : "本期采用 · 在线校准"}
+          </strong>
+        </div>
+        <em className={sourceUnavailable ? "unavailable" : profile.active ? "active" : "collecting"}>
+          {sourceUnavailable
+            ? "学习库暂不可用"
+            : profile.active
+            ? profile.applied
+              ? "已启用调权"
+              : "已启用 · 保持中性"
+            : `${profile.sampleSize}/${profile.minimumSamples} 积累中`}
+        </em>
+      </div>
+      <p className="online-learning-audit">
+        {isPostDrawReview
+          ? (
+            reviewNotice ??
+            (
+              learningAtLock
+                ? `本期冻结报告生成时使用 ${learningAtLock.sampleSize} 个独立样本；下方为开奖后的新状态，只从下一份报告开始参与判断。`
+                : "本期冻结报告生成于在线学习启用前；下方为开奖后的新状态，只从下一份报告开始参与判断。"
+            )
+          )
+          : learningAtLock
+            ? `本报告已冻结使用 ${learningAtLock.sampleSize} 个独立样本；后续开奖结果不会倒改本期方向。`
+            : "这是上线前冻结的旧版报告，未使用在线学习；后续开奖结果不会倒改本期方向。"}
+      </p>
+      <p className="online-learning-summary">{profile.conclusion}</p>
+      {sourceUnavailable ? (
+        <div className="online-learning-unavailable" role="status">
+          <strong>本期未使用在线调权</strong>
+          <span>已自动保持中性权重；历史统计与冻结报告仍可正常查看，学习库恢复后再继续积累。</span>
+        </div>
+      ) : (
+        <>
+          <div
+            className="online-learning-progress"
+            aria-label={`已积累 ${profile.sampleSize} 个独立目标期，启用门槛 ${profile.minimumSamples} 期`}
+          >
+            <span><i style={{ width: `${progress}%` }} /></span>
+            <small>
+              已核验并去重 {profile.sampleSize} 期 · 启用门槛 {profile.minimumSamples} 期
+            </small>
+          </div>
+          <div className="online-learning-weights" aria-label="三路策略在线权重">
+            {(["balanced", "momentum", "contrarian"] as const).map((scenarioId) => {
+              const weight = profile.scenarioWeights[scenarioId];
+              return (
+                <div
+                  className={
+                    profile.preferredScenarioId === scenarioId && profile.applied
+                      ? "preferred"
+                      : ""
+                  }
+                  key={scenarioId}
+                >
+                  <span>{scenarioLabels[scenarioId]}</span>
+                  <strong>×{weight.weight.toFixed(3)}</strong>
+                  <small>
+                    {weight.sampleSize} 期 · {learningWeightLabel(weight.status)}
+                  </small>
+                </div>
+              );
+            })}
+          </div>
+          {review ? (
+            <div className="online-learning-review">
+              <div className="online-learning-review-head">
+                <div>
+                  <span>LATEST SETTLED REVIEW</span>
+                  <strong>第 {review.issue} 期复盘</strong>
+                </div>
+                <em>{reviewHits}/{review.observations.length} 项命中</em>
+              </div>
+              {review.actual.length === 7 && (
+                <BallRow
+                  numbers={review.actual.slice(0, 6)}
+                  special={review.actual[6]}
+                  compact
+                  drawAt={review.actualDrawAt}
+                />
+              )}
+              <div className="online-learning-review-items">
+                {review.observations.map((observation) => (
+                  <span className={observation.hit ? "hit" : "miss"} key={observation.id}>
+                    <small>{observation.label}</small>
+                    <strong>{observation.pick}</strong>
+                    <em>{observation.hit ? "命中" : "未中"}</em>
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="online-learning-empty">
+              尚无可复盘的已核验预测；分析页面取得已核验结果后会进入学习记录。
+            </p>
+          )}
+        </>
+      )}
+      <p className="online-learning-boundary">
+        只学习已有的开奖前冻结报告，并按期号去重；在线权重只做保守的小幅旁路调整，尚未纳入嵌套历史回测，不能继承或替代正式的独立留出优势结论。
+      </p>
+    </section>
+  );
+}
+
+function learningWeightLabel(
+  status: OnlineLearningProfile["scenarioWeights"][AiScenario["id"]]["status"],
+) {
+  if (status === "upweighted") return "小幅上调";
+  if (status === "downweighted") return "小幅下调";
+  if (status === "inactive_small_sample") return "暂不调权";
+  return "保持中性";
+}
+
 function observationConsensus(scenarios: AiScenario[]) {
   const ids: AiObservationId[] = [
     "zodiac_coverage",
@@ -1556,6 +1849,8 @@ function ledgerStatusLabel(
   }
   if (ledger.reason === "after_cutoff") return "已过截止时间 · 未入账";
   if (ledger.reason === "target_unconfirmed") return "目标期未确认 · 未入账";
+  if (ledger.reason === "quality_gate_failed") return "数据核验未通过 · 临时报告";
+  if (ledger.reason === "generation_degraded") return "AI 未完成 · 可重新生成";
   return "台账暂不可用";
 }
 
@@ -1599,12 +1894,14 @@ function StrategySection({
   analysis,
   report,
   latest,
+  targetDrawAt,
   activeScenario,
   onScenario,
 }: {
   analysis: Analysis;
   report: AiAnalysisResponse | null;
   latest: Draw;
+  targetDrawAt: string;
   activeScenario: AiScenario["id"];
   onScenario: (scenario: AiScenario["id"]) => void;
 }) {
@@ -1628,7 +1925,9 @@ function StrategySection({
       evidenceScore: Math.round(candidate.score),
       diversity: localDiversity,
       structure: {
-        zodiacCount: new Set(all.map((number) => getZodiac(number))).size,
+        zodiacCount: new Set(
+          all.map((number) => getZodiac(number, targetDrawAt)),
+        ).size,
         waves,
         odd: all.filter((number) => number % 2 === 1).length,
         even: all.filter((number) => number % 2 === 0).length,
@@ -1714,7 +2013,7 @@ function StrategySection({
           const zodiacDirections = [
             ...new Set(
               [...scenario.numbers, scenario.special].map((number) =>
-                getZodiac(number, report?.target.expectedDrawAt),
+                getZodiac(number, report?.target.expectedDrawAt ?? targetDrawAt),
               ),
             ),
           ];
@@ -1742,7 +2041,7 @@ function StrategySection({
                 numbers={scenario.numbers}
                 special={scenario.special}
                 compact
-                drawAt={report?.target.expectedDrawAt}
+                drawAt={report?.target.expectedDrawAt ?? targetDrawAt}
               />
               <div className="strategy-zodiac-track">
                 <span>6+1 生肖观察</span>

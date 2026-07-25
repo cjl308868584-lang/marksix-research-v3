@@ -59,7 +59,7 @@ test("server-renders the finished lottery research dashboard", async () => {
 });
 
 test("keeps the product implementation free of starter preview artifacts", async () => {
-  const [page, layout, dashboard, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, primaryLockMigration] = await Promise.all([
+  const [page, layout, dashboard, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/LotteryDashboard.tsx", import.meta.url), "utf8"),
@@ -72,10 +72,18 @@ test("keeps the product implementation free of starter preview artifacts", async
     readFile(new URL("../lib/ai-types.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/ai-rate-limit.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/ai-forecast-ledger.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/ai-online-learning.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0002_brief_thanos.sql", import.meta.url), "utf8"),
   ]);
 
-  assert.match(page, /<LotteryDashboard \/>/);
+  assert.match(
+    page,
+    /<LotteryDashboard initialNow=\{new Date\(\)\.toISOString\(\)\} \/>/,
+  );
+  assert.match(dashboard, /useState\(\(\) => new Date\(initialNow\)\)/);
+  assert.match(dashboard, /drawAt=\{liveWindow\.target\.toISOString\(\)\}/);
+  assert.match(dashboard, /const marker = window\.innerHeight \* 0\.28/);
+  assert.match(lotteryLib, /ZODIAC_NAMES\.indexOf/);
   assert.match(layout, /lang="zh-CN"/);
   assert.match(layout, /width: "device-width"/);
   assert.match(layout, /viewportFit: "cover"/);
@@ -134,6 +142,16 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /report\.model\.name/);
   assert.match(dashboard, /depth: "standard"/);
   assert.match(dashboard, /EVIDENCE SYNTHESIS/);
+  assert.match(dashboard, /restoreAi/);
+  assert.match(dashboard, /已恢复存档/);
+  assert.match(dashboard, /OnlineLearningPanel/);
+  assert.match(dashboard, /learningReview/);
+  assert.match(dashboard, /只从下一份报告开始参与判断/);
+  assert.match(dashboard, /actualDrawAt/);
+  assert.match(dashboard, /后续开奖结果不会倒改本期方向/);
+  assert.match(dashboard, /profile\.sourceStatus === "unavailable"/);
+  assert.match(dashboard, /学习库暂不可用/);
+  assert.match(dashboard, /本期未使用在线调权/);
   assert.doesNotMatch(dashboard, /DEEP REASONING/);
   assert.doesNotMatch(dashboard, /GPT‑5\.6/);
   assert.match(dashboard, /ai-recommendation-balls/);
@@ -168,6 +186,10 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.observation-consensus/);
   assert.match(styles, /\.strategy-observation-review/);
   assert.match(styles, /\.forward-ledger-summary/);
+  assert.match(styles, /\.online-learning-panel/);
+  assert.match(styles, /\.online-learning-audit/);
+  assert.match(styles, /\.online-learning-review-items/);
+  assert.match(styles, /\.online-learning-unavailable/);
   assert.match(styles, /\.calibration-metrics/);
   assert.match(styles, /\.diversity-strip/);
   assert.match(styles, /\.backtest-strategy-list/);
@@ -206,8 +228,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(analyzeRoute, /safety_identifier/);
   assert.match(analyzeRoute, /store: false/);
   assert.match(analyzeRoute, /isSafeModelText/);
-  assert.match(analyzeRoute, /forecast-engine-v4\.0/);
-  assert.match(analyzeRoute, /evidence-synthesis-v4/);
+  assert.match(analyzeRoute, /forecast-engine-v5\.0/);
+  assert.match(analyzeRoute, /evidence-synthesis-v5/);
   assert.match(
     analyzeRoute,
     /loadServerDraws\(\s*game,\s*MAX_HISTORY_DRAWS,\s*analysisCutoff,\s*\)/,
@@ -216,6 +238,34 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(analyzeRoute, /lockCanonicalZodiacObservation/);
   assert.match(analyzeRoute, /applyCanonicalZodiacObservation/);
   assert.match(analyzeRoute, /persistenceEligible: qualityGate\.eligible/);
+  assert.match(analyzeRoute, /readForecastSnapshot/);
+  assert.match(analyzeRoute, /readLatestRestorableForecast/);
+  assert.match(analyzeRoute, /buildLearningStateFingerprint\(pack\.learning\)/);
+  assert.match(analyzeRoute, /learningStateFingerprint/);
+  assert.match(analyzeRoute, /learningReview/);
+  assert.match(analyzeRoute, /const activeAfterGate = inflightReports\.get\(cacheKey\)/);
+  assert.match(analyzeRoute, /appliesTo: "next_report"/);
+  assert.match(analyzeRoute, /readSettledForecastLearningState/);
+  assert.match(analyzeRoute, /sourceStatus: learningState\.sourceStatus/);
+  assert.match(analyzeRoute, /if \(settlementStatus !== "ok"\)/);
+  assert.match(
+    analyzeRoute,
+    /currentLearningInput\.sourceStatus = "unavailable"/,
+  );
+  assert.match(
+    analyzeRoute,
+    /if \(qualityGate\.targetConfirmed\) \{\s*const persisted = await readForecastSnapshot/,
+  );
+  assert.ok(
+    analyzeRoute.indexOf("const persisted = await readForecastSnapshot") <
+      analyzeRoute.indexOf(
+        "const rate = await consumeAiRateLimit(safetyIdentifier)",
+      ),
+  );
+  assert.equal(
+    (analyzeRoute.match(/max_output_tokens:\s*3_600/g) ?? []).length,
+    1,
+  );
   assert.match(analyzeRoute, /不能改变服务器决策或生肖观察方向/);
   assert.doesNotMatch(analyzeRoute, /request\.headers\.get\("user-agent"\)/);
   assert.match(aiEngine, /buildWalkForwardBacktest/);
@@ -230,7 +280,18 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(aiRateLimit, /WHERE ai_rate_limits\.count < \?/);
   assert.match(aiRateLimit, /return denied\(now \+ 60_000, now\)/);
   assert.match(aiLedger, /INSERT OR IGNORE INTO ai_primary_observation_locks/);
-  assert.match(aiLedger, /ORDER BY locked_at DESC, lock_id DESC/);
+  assert.match(aiLedger, /readForecastSnapshot/);
+  assert.match(aiLedger, /readLatestRestorableForecast/);
+  assert.match(aiLedger, /json_extract\(response_json, '\$\.mode'\) = 'ai'/);
+  assert.match(aiLedger, /generation_degraded/);
+  assert.match(aiLedger, /quality_gate_failed/);
+  assert.match(aiLedger, /ORDER BY locked_at ASC, lock_id ASC/);
+  assert.match(aiOnlineLearning, /ROW_NUMBER\(\) OVER/);
+  assert.match(aiOnlineLearning, /sample\.actual\.issue === sample\.targetIssue/);
+  assert.match(aiOnlineLearning, /settledTime <= asOfTime/);
+  assert.match(aiOnlineLearning, /minimumTargetIssues: 12/);
+  assert.match(aiOnlineLearning, /maximumAdjustment: 0\.06/);
+  assert.match(aiOnlineLearning, /在线学习不参与历史 walk-forward 重算/);
   assert.match(primaryLockMigration, /CREATE TABLE `ai_primary_observation_locks`/);
   assert.match(primaryLockMigration, /ai_primary_observation_identity_idx/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
@@ -245,6 +306,15 @@ test("retired Macau feed is not exposed by the public lottery endpoint", async (
   assert.equal(response.status, 400);
   const payload = await response.json();
   assert.match(payload.error, /仅支持香港与新澳门/);
+});
+
+test("AI report restore endpoint returns no content when no saved ledger is bound", async () => {
+  const response = await fetchWorker("/api/analyze?game=new_macau", {
+    headers: { "sec-fetch-site": "same-origin" },
+  });
+  assert.equal(response.status, 204);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.equal(await response.text(), "");
 });
 
 test("AI endpoint rejects client-supplied history data", async () => {

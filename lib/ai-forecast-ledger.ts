@@ -35,6 +35,8 @@ export type ForecastLedgerStatus = {
     | "already_locked"
     | "after_cutoff"
     | "target_unconfirmed"
+    | "quality_gate_failed"
+    | "generation_degraded"
     | "database_unavailable";
   summary: ForecastLedgerSummary | null;
 };
@@ -81,6 +83,11 @@ type LedgerRow = {
   settled_at: string | null;
 };
 
+type ReadableLedgerRow = LedgerRow & {
+  expected_draw_at: string;
+  analysis_cutoff_at: string;
+};
+
 type LedgerSummaryRow = {
   response_json: string;
   actual_json: string | null;
@@ -92,6 +99,7 @@ type LedgerCountRow = {
 };
 
 type CanonicalZodiacRow = {
+  lock_id?: string;
   payload_json: string;
 };
 
@@ -106,20 +114,315 @@ const runtime = globalThis as typeof globalThis & {
   __marksixD1?: D1Database;
 };
 
+export async function readForecastSnapshot<T>(
+  identity: ForecastLedgerIdentity,
+  asOfAt = new Date().toISOString(),
+): Promise<{ snapshot: T; ledger: ForecastLedgerStatus } | null> {
+  const db = runtime.__marksixD1;
+  const expectedAt = Date.parse(identity.expectedDrawAt);
+  const asOf = Date.parse(asOfAt);
+  if (
+    !db ||
+    !/^\d+$/.test(identity.targetIssue) ||
+    !Number.isFinite(expectedAt) ||
+    !Number.isFinite(asOf) ||
+    asOf >= expectedAt
+  ) {
+    return null;
+  }
+  const [primaryLineage, legacyLineage] = compatibleForecastLineages(
+    identity.algorithmVersion,
+    identity.promptVersion,
+  );
+  try {
+    const row = await db.prepare(
+      `SELECT forecast_id, response_json, locked_at, settled_at,
+              expected_draw_at, analysis_cutoff_at
+       FROM ai_forecast_ledger
+       WHERE game = ?
+         AND target_issue = ?
+         AND expected_draw_at = ?
+         AND window_size = ?
+         AND focus = ?
+         AND depth = ?
+         AND (
+           (algorithm_version = ? AND prompt_version = ?)
+           OR (algorithm_version = ? AND prompt_version = ?)
+         )
+         AND schema_version = ?
+         AND model = ?
+         AND reasoning = ?
+         AND settled_at IS NULL
+         AND analysis_cutoff_at <= ?
+         AND locked_at <= ?
+         AND json_valid(response_json) = 1
+         AND json_extract(response_json, '$.mode') = 'ai'
+         AND json_extract(response_json, '$.status') = 'ok'
+         AND json_extract(response_json, '$.fallbackReason') IS NULL
+       ORDER BY locked_at ASC, forecast_id ASC
+       LIMIT 1`,
+    )
+      .bind(
+        identity.game,
+        identity.targetIssue,
+        identity.expectedDrawAt,
+        identity.windowSize,
+        identity.focus,
+        identity.depth,
+        primaryLineage.algorithmVersion,
+        primaryLineage.promptVersion,
+        legacyLineage.algorithmVersion,
+        legacyLineage.promptVersion,
+        identity.schemaVersion,
+        identity.model,
+        identity.reasoning,
+        asOfAt,
+        asOfAt,
+      )
+      .first<ReadableLedgerRow>();
+    if (!row || Date.parse(row.expected_draw_at) <= asOf) return null;
+    const snapshot = parseJson(row.response_json) as T | null;
+    if (!snapshot) return null;
+    return {
+      snapshot,
+      ledger: status(
+        "existing",
+        row.forecast_id,
+        row.locked_at,
+        row.settled_at,
+        "already_locked",
+        true,
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readLatestRestorableForecast<T>({
+  state,
+  game,
+  targetIssue,
+  expectedDrawAt,
+  asOfAt,
+  algorithmVersion,
+  promptVersion,
+  schemaVersion,
+  model,
+  reasoning,
+  windowSize = null,
+  focus = null,
+  depth,
+}: {
+  state: "pending" | "settled";
+  game: GameId;
+  targetIssue: string;
+  expectedDrawAt?: string;
+  asOfAt: string;
+  algorithmVersion: string;
+  promptVersion: string;
+  schemaVersion: string;
+  model: string;
+  reasoning: string;
+  windowSize?: number | null;
+  focus?: string | null;
+  depth: string;
+}): Promise<{
+  snapshot: T;
+  ledger: ForecastLedgerStatus;
+  expectedDrawAt: string;
+} | null> {
+  const db = runtime.__marksixD1;
+  const asOf = Date.parse(asOfAt);
+  if (
+    !db ||
+    !/^\d+$/.test(targetIssue) ||
+    !Number.isFinite(asOf) ||
+    (state === "pending" &&
+      (
+        !expectedDrawAt ||
+        !Number.isFinite(Date.parse(expectedDrawAt)) ||
+        asOf >= Date.parse(expectedDrawAt)
+      ))
+  ) {
+    return null;
+  }
+  const [primaryLineage, legacyLineage] = compatibleForecastLineages(
+    algorithmVersion,
+    promptVersion,
+  );
+  try {
+    const row = state === "pending"
+      ? await db.prepare(
+        `SELECT forecast_id, response_json, locked_at, settled_at,
+                expected_draw_at, analysis_cutoff_at
+         FROM ai_forecast_ledger
+         WHERE game = ?
+           AND target_issue = ?
+           AND expected_draw_at = ?
+           AND settled_at IS NULL
+           AND analysis_cutoff_at <= ?
+           AND locked_at <= ?
+           AND (
+             (algorithm_version = ? AND prompt_version = ?)
+             OR (algorithm_version = ? AND prompt_version = ?)
+           )
+           AND schema_version = ?
+           AND model = ?
+           AND reasoning = ?
+           AND depth = ?
+           AND (? IS NULL OR window_size = ?)
+           AND (? IS NULL OR focus = ?)
+           AND json_valid(response_json) = 1
+           AND json_extract(response_json, '$.mode') = 'ai'
+           AND json_extract(response_json, '$.status') = 'ok'
+           AND json_extract(response_json, '$.fallbackReason') IS NULL
+         ORDER BY locked_at ASC, forecast_id ASC
+         LIMIT 1`,
+      )
+        .bind(
+          game,
+          targetIssue,
+          expectedDrawAt,
+          asOfAt,
+          asOfAt,
+          primaryLineage.algorithmVersion,
+          primaryLineage.promptVersion,
+          legacyLineage.algorithmVersion,
+          legacyLineage.promptVersion,
+          schemaVersion,
+          model,
+          reasoning,
+          depth,
+          windowSize,
+          windowSize,
+          focus,
+          focus,
+        )
+        .first<ReadableLedgerRow>()
+      : await db.prepare(
+        `SELECT forecast_id, response_json, locked_at, settled_at,
+                expected_draw_at, analysis_cutoff_at
+         FROM ai_forecast_ledger
+         WHERE game = ?
+           AND target_issue = ?
+           AND settled_at IS NOT NULL
+           AND settled_at <= ?
+           AND expected_draw_at <= ?
+           AND analysis_cutoff_at < expected_draw_at
+           AND locked_at < expected_draw_at
+           AND analysis_cutoff_at <= ?
+           AND locked_at <= ?
+           AND actual_json IS NOT NULL
+           AND json_valid(actual_json) = 1
+           AND json_extract(actual_json, '$.issue') = ?
+           AND json_extract(actual_json, '$.verified') = 1
+           AND (
+             (algorithm_version = ? AND prompt_version = ?)
+             OR (algorithm_version = ? AND prompt_version = ?)
+           )
+           AND schema_version = ?
+           AND model = ?
+           AND reasoning = ?
+           AND depth = ?
+           AND (? IS NULL OR window_size = ?)
+           AND (? IS NULL OR focus = ?)
+           AND json_valid(response_json) = 1
+           AND json_extract(response_json, '$.mode') = 'ai'
+           AND json_extract(response_json, '$.status') = 'ok'
+           AND json_extract(response_json, '$.fallbackReason') IS NULL
+         ORDER BY locked_at ASC, forecast_id ASC
+         LIMIT 1`,
+      )
+        .bind(
+          game,
+          targetIssue,
+          asOfAt,
+          asOfAt,
+          asOfAt,
+          asOfAt,
+          targetIssue,
+          primaryLineage.algorithmVersion,
+          primaryLineage.promptVersion,
+          legacyLineage.algorithmVersion,
+          legacyLineage.promptVersion,
+          schemaVersion,
+          model,
+          reasoning,
+          depth,
+          windowSize,
+          windowSize,
+          focus,
+          focus,
+        )
+        .first<ReadableLedgerRow>();
+    if (!row) return null;
+    const rowExpectedAt = Date.parse(row.expected_draw_at);
+    const rowSettledAt = row.settled_at
+      ? Date.parse(row.settled_at)
+      : Number.NaN;
+    if (
+      !Number.isFinite(rowExpectedAt) ||
+      (state === "pending"
+        ? rowExpectedAt <= asOf || row.settled_at !== null
+        : (
+          !Number.isFinite(rowSettledAt) ||
+          rowExpectedAt > asOf ||
+          rowSettledAt > asOf
+        ))
+    ) {
+      return null;
+    }
+    const snapshot = parseJson(row.response_json) as T | null;
+    if (!snapshot) return null;
+    return {
+      snapshot,
+      expectedDrawAt: row.expected_draw_at,
+      ledger: status(
+        "existing",
+        row.forecast_id,
+        row.locked_at,
+        row.settled_at,
+        "already_locked",
+        true,
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function lockForecastSnapshot<T>(
   identity: ForecastLedgerIdentity,
   snapshot: T,
+  policy: {
+    persistenceEligible: boolean;
+    generationSuccessful: boolean;
+  },
 ): Promise<{ snapshot: T; ledger: ForecastLedgerStatus }> {
   const expectedAt = Date.parse(identity.expectedDrawAt);
   const cutoffAt = Date.parse(identity.analysisCutoffAt);
   if (
+    !policy.persistenceEligible ||
+    !policy.generationSuccessful ||
     !Number.isFinite(expectedAt) ||
     !Number.isFinite(cutoffAt) ||
     cutoffAt >= expectedAt
   ) {
     return {
       snapshot,
-      ledger: status("skipped", null, null, null, "after_cutoff", false),
+      ledger: status(
+        "skipped",
+        null,
+        null,
+        null,
+        !policy.persistenceEligible
+          ? "quality_gate_failed"
+          : !policy.generationSuccessful
+            ? "generation_degraded"
+            : "after_cutoff",
+        false,
+      ),
     };
   }
 
@@ -138,9 +441,18 @@ export async function lockForecastSnapshot<T>(
     };
   }
 
+  const established = await readForecastSnapshot<T>(
+    identity,
+    identity.analysisCutoffAt,
+  );
+  if (established) return established;
+
   const forecastId = await buildForecastId(identity);
   const lockedAt = identity.analysisCutoffAt;
   try {
+    // The deployed primary key is lineage-specific. Re-reading the earliest
+    // compatible row after INSERT makes concurrent v4/v5 callers converge on
+    // one immutable response without a destructive schema rewrite.
     const inserted = await db.prepare(
       `INSERT OR IGNORE INTO ai_forecast_ledger (
          forecast_id, game, target_issue, expected_draw_at, analysis_cutoff_at,
@@ -167,6 +479,28 @@ export async function lockForecastSnapshot<T>(
         lockedAt,
       )
       .run();
+    const earliest = await readForecastSnapshot<T>(
+      identity,
+      identity.analysisCutoffAt,
+    );
+    if (earliest) {
+      const created =
+        Number(inserted.meta?.changes ?? 0) > 0 &&
+        earliest.ledger.forecastId === forecastId.slice(0, 16);
+      return {
+        snapshot: earliest.snapshot,
+        ledger: created
+          ? status(
+            "locked",
+            forecastId,
+            lockedAt,
+            null,
+            "pre_draw_lock",
+            true,
+          )
+          : earliest.ledger,
+      };
+    }
     const row = await db.prepare(
       `SELECT forecast_id, response_json, locked_at, settled_at
        FROM ai_forecast_ledger
@@ -234,7 +568,6 @@ export async function lockCanonicalZodiacObservation(
   const expectedAt = Date.parse(identity.expectedDrawAt);
   const cutoffAt = Date.parse(identity.analysisCutoffAt);
   if (
-    !policy.persistenceEligible ||
     !/^\d+$/.test(identity.targetIssue) ||
     !Number.isFinite(expectedAt) ||
     !Number.isFinite(cutoffAt) ||
@@ -245,9 +578,27 @@ export async function lockCanonicalZodiacObservation(
   }
 
   const db = runtime.__marksixD1;
-  if (!db) return { payload, state: "unavailable" };
+  if (!db) {
+    return {
+      payload,
+      state: policy.persistenceEligible ? "unavailable" : "skipped",
+    };
+  }
   const lockId = await buildCanonicalZodiacLockId(identity);
   try {
+    const established = await readEarliestCanonicalZodiacLock(
+      db,
+      identity,
+    );
+    if (established) {
+      return { payload: established.payload, state: "existing" };
+    }
+    if (!policy.persistenceEligible) {
+      return { payload, state: "skipped" };
+    }
+    // The legacy unique index includes algorithm_version. The pre/post reads
+    // keep rolling v4/v5 deployments converged on the earliest target lock;
+    // a future cleanup migration can tighten the index after duplicate audit.
     const inserted = await db.prepare(
       `INSERT OR IGNORE INTO ai_primary_observation_locks (
          lock_id, game, target_issue, expected_draw_at, algorithm_version,
@@ -265,30 +616,52 @@ export async function lockCanonicalZodiacObservation(
         identity.analysisCutoffAt,
       )
       .run();
-    const row = await db.prepare(
-      `SELECT payload_json
-       FROM ai_primary_observation_locks
-       WHERE lock_id = ?
-       LIMIT 1`,
-    )
-      .bind(lockId)
-      .first<CanonicalZodiacRow>();
-    const stored = row
-      ? parseJson(row.payload_json)
-      : null;
-    if (!isCanonicalZodiacPayload(stored)) {
+    const earliest = await readEarliestCanonicalZodiacLock(
+      db,
+      identity,
+    );
+    if (!earliest) {
       throw new Error("canonical zodiac lock read failed");
     }
     return {
-      payload: stored,
+      payload: earliest.payload,
       state:
-        Number(inserted.meta?.changes ?? 0) > 0
+        Number(inserted.meta?.changes ?? 0) > 0 &&
+          earliest.lockId === lockId
           ? "locked"
           : "existing",
     };
   } catch {
     return { payload, state: "unavailable" };
   }
+}
+
+async function readEarliestCanonicalZodiacLock(
+  db: D1Database,
+  identity: CanonicalZodiacLockIdentity,
+): Promise<{
+  lockId: string;
+  payload: CanonicalZodiacLockPayload;
+} | null> {
+  const row = await db.prepare(
+    `SELECT lock_id, payload_json
+     FROM ai_primary_observation_locks
+     WHERE game = ?
+       AND target_issue = ?
+       AND locked_at <= ?
+     ORDER BY locked_at ASC, lock_id ASC
+     LIMIT 1`,
+  )
+    .bind(
+      identity.game,
+      identity.targetIssue,
+      identity.analysisCutoffAt,
+    )
+    .first<CanonicalZodiacRow>();
+  const stored = row ? parseJson(row.payload_json) : null;
+  return row?.lock_id && isCanonicalZodiacPayload(stored)
+    ? { lockId: row.lock_id, payload: stored }
+    : null;
 }
 
 export function applyCanonicalZodiacObservation(
@@ -327,9 +700,10 @@ export async function settleForecastLedger(
   game: GameId,
   draws: Draw[],
   settledAt = new Date().toISOString(),
-): Promise<void> {
+): Promise<"ok" | "unavailable"> {
   const db = runtime.__marksixD1;
-  if (!db || draws.length === 0) return;
+  if (!db) return "unavailable";
+  if (draws.length === 0) return "ok";
 
   try {
     const [forecastRows, canonicalRows] = await Promise.all([
@@ -384,13 +758,19 @@ export async function settleForecastLedger(
       ];
     });
     if (updates.length > 0) await db.batch(updates);
+    return "ok";
   } catch {
     // Ledger settlement must never make the analysis endpoint unavailable.
+    return "unavailable";
   }
 }
 
 export function skippedForecastLedger(
-  reason: "after_cutoff" | "target_unconfirmed",
+  reason:
+    | "after_cutoff"
+    | "target_unconfirmed"
+    | "quality_gate_failed"
+    | "generation_degraded",
 ): ForecastLedgerStatus {
   return status("skipped", null, null, null, reason, false);
 }
@@ -423,7 +803,7 @@ export async function readForecastLedgerSummary(
       `SELECT target_issue, expected_draw_at, payload_json, actual_json
        FROM ai_primary_observation_locks
        WHERE game = ?
-       ORDER BY locked_at DESC, lock_id DESC`,
+       ORDER BY locked_at ASC, lock_id ASC`,
     )
       .bind(game)
       .all<CanonicalZodiacSummaryRow>();
@@ -555,6 +935,10 @@ export async function readForecastLedgerSummary(
 }
 
 async function buildForecastId(identity: ForecastLedgerIdentity) {
+  const [, stableLineage] = compatibleForecastLineages(
+    identity.algorithmVersion,
+    identity.promptVersion,
+  );
   const stableIdentity = [
     "forecast-ledger-v1",
     identity.game,
@@ -562,8 +946,8 @@ async function buildForecastId(identity: ForecastLedgerIdentity) {
     identity.windowSize,
     identity.focus,
     identity.depth,
-    identity.algorithmVersion,
-    identity.promptVersion,
+    stableLineage.algorithmVersion,
+    stableLineage.promptVersion,
     identity.schemaVersion,
     identity.model,
     identity.reasoning,
@@ -578,14 +962,38 @@ async function buildForecastId(identity: ForecastLedgerIdentity) {
   ).join("");
 }
 
+function compatibleForecastLineages(
+  algorithmVersion: string,
+  promptVersion: string,
+) {
+  const current = { algorithmVersion, promptVersion };
+  if (
+    algorithmVersion === "forecast-engine-v5.0" &&
+    promptVersion === "evidence-synthesis-v5"
+  ) {
+    return [
+      current,
+      {
+        algorithmVersion: "forecast-engine-v4.0",
+        promptVersion: "evidence-synthesis-v4",
+      },
+    ] as const;
+  }
+  return [current, current] as const;
+}
+
 async function buildCanonicalZodiacLockId(
   identity: CanonicalZodiacLockIdentity,
 ) {
+  const stableAlgorithmVersion =
+    identity.algorithmVersion === "forecast-engine-v5.0"
+      ? "forecast-engine-v4.0"
+      : identity.algorithmVersion;
   const stableIdentity = [
     "canonical-zodiac-lock-v1",
     identity.game,
     identity.targetIssue,
-    identity.algorithmVersion,
+    stableAlgorithmVersion,
     identity.schemaVersion,
   ].join("|");
   const digest = await crypto.subtle.digest(

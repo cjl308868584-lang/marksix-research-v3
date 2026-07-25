@@ -30,6 +30,12 @@ import {
   type AiSignalLevel,
   type AiSynthesis,
 } from "./ai-types";
+import {
+  buildOnlineLearningProfile,
+  onlineDirectionWeight,
+  type OnlineLearningInput,
+  type OnlineLearningProfile,
+} from "./ai-online-learning.ts";
 
 export type ForecastPack = {
   game: GameId;
@@ -39,6 +45,7 @@ export type ForecastPack = {
   dimensions: AiDimensionEvidence[];
   candidateSets: AiScenario[];
   zodiacObservation: AiPrimaryZodiacObservation;
+  learning: OnlineLearningProfile;
   backtest: AiBacktest;
   evidenceStrength: AiAnalysisResponse["evidenceStrength"];
   localSynthesis: AiSynthesis;
@@ -53,6 +60,7 @@ export function buildForecastPack(
   focus: AiFocus,
   expectedDrawAt: string,
   evaluationHistory: Draw[] = draws,
+  onlineLearningInput: OnlineLearningInput | null = null,
 ): ForecastPack {
   const normalizedDraws = normalizeHistory(draws);
   const cutoff = normalizedDraws[0] ? drawTimeValue(normalizedDraws[0]) : Infinity;
@@ -61,6 +69,18 @@ export function buildForecastPack(
   );
   const analysis = buildAnalysis(normalizedDraws);
   const dimensions = buildDimensions(normalizedDraws, analysis);
+  const learningCutoff = onlineLearningInput
+    ? Date.parse(onlineLearningInput.asOf)
+    : NaN;
+  const expectedDrawTime = Date.parse(expectedDrawAt);
+  const safeLearningInput =
+    onlineLearningInput &&
+      Number.isFinite(learningCutoff) &&
+      Number.isFinite(expectedDrawTime) &&
+      learningCutoff < expectedDrawTime
+      ? onlineLearningInput
+      : null;
+  const learning = buildOnlineLearningProfile(game, safeLearningInput);
   const primaryTrainWindow = Math.min(
     PRIMARY_TRAIN_WINDOW,
     normalizedEvaluationHistory.length,
@@ -75,12 +95,22 @@ export function buildForecastPack(
     PRIMARY_FOCUS,
     primaryTrainWindow,
   );
-  const primaryCandidates = buildFocusedCandidates(
+  const validatedPrimaryCandidates = buildFocusedCandidates(
     primaryDraws,
     primaryAnalysis,
     PRIMARY_FOCUS,
     expectedDrawAt,
   );
+  const primaryCandidates =
+    backtest.status === "observed_advantage"
+      ? validatedPrimaryCandidates
+      : buildFocusedCandidates(
+        primaryDraws,
+        primaryAnalysis,
+        PRIMARY_FOCUS,
+        expectedDrawAt,
+        learning,
+      );
   const primaryPicks = new Map(
     primaryCandidates.map((candidate) => [
       candidate.id,
@@ -92,20 +122,27 @@ export function buildForecastPack(
     analysis,
     focus,
     expectedDrawAt,
+    backtest.status === "observed_advantage" ? undefined : learning,
   ).map((candidate) => ({
     ...candidate,
     observationPicks:
       primaryPicks.get(candidate.id) ?? candidate.observationPicks,
   }));
-  const candidateSets = buildScenarios(
+  const scenarios = buildScenarios(
     focusedCandidates,
     backtest,
     expectedDrawAt,
     dimensions,
+    learning,
   );
+  const candidateSets =
+    backtest.status === "observed_advantage"
+      ? scenarios
+      : orderScenariosByLearning(scenarios, learning);
   const zodiacObservation = buildPrimaryZodiacObservation(
     candidateSets,
     backtest,
+    learning,
   );
   const evidenceStrength = buildEvidenceStrength(
     dimensions,
@@ -120,6 +157,7 @@ export function buildForecastPack(
     dimensions,
     candidateSets,
     zodiacObservation,
+    learning,
     backtest,
     evidenceStrength,
   };
@@ -513,6 +551,7 @@ function buildFocusedCandidates(
   analysis: Analysis,
   focus: AiFocus,
   targetDrawAt: string,
+  learning?: OnlineLearningProfile,
 ): FocusedCandidate[] {
   const frequency = Array(50).fill(0) as number[];
   const recent = Array(50).fill(0) as number[];
@@ -622,6 +661,7 @@ function buildFocusedCandidates(
       profiles,
       id,
       targetDrawAt,
+      learning,
     );
     results.push({
       id,
@@ -648,32 +688,73 @@ function pickObservationDirections(
   profiles: NumberProfile[],
   id: AiScenarioId,
   targetDrawAt: string,
+  learning?: OnlineLearningProfile,
 ): ObservationPicks {
   return {
     zodiac: highestScoringGroup(
       profiles,
       id,
       (profile) => getZodiac(profile.number, targetDrawAt),
+      (zodiac) =>
+        learning
+          ? onlineDirectionWeight(
+            learning,
+            "zodiac_coverage",
+            zodiac,
+          )
+          : 1,
     ),
     tail: highestScoringGroup(
       profiles,
       id,
       (profile) => profile.number % 10,
+      (tail) =>
+        learning
+          ? onlineDirectionWeight(
+            learning,
+            "tail_coverage",
+            `${tail}尾`,
+          )
+          : 1,
     ),
     wave: highestScoringGroup(
       profiles,
       id,
       (profile) => getWave(profile.number),
+      (wave) =>
+        learning
+          ? onlineDirectionWeight(
+            learning,
+            "wave_threshold",
+            WAVE_LABEL[wave],
+          )
+          : 1,
     ),
     parity: highestScoringGroup(
       profiles,
       id,
       (profile) => profile.number % 2 === 1 ? "奇" as const : "偶" as const,
+      (parity) =>
+        learning
+          ? onlineDirectionWeight(
+            learning,
+            "parity_majority",
+            `${parity}数`,
+          )
+          : 1,
     ),
     size: highestScoringGroup(
       profiles,
       id,
       (profile) => profile.number >= 25 ? "大" as const : "小" as const,
+      (size) =>
+        learning
+          ? onlineDirectionWeight(
+            learning,
+            "size_majority",
+            `${size}数`,
+          )
+          : 1,
     ),
   };
 }
@@ -682,6 +763,7 @@ function highestScoringGroup<T extends string | number>(
   profiles: NumberProfile[],
   id: AiScenarioId,
   groupFor: (profile: NumberProfile) => T,
+  groupWeight: (group: T) => number = () => 1,
 ): T {
   const grouped = new Map<T, number[]>();
   profiles.forEach((profile) => {
@@ -693,7 +775,8 @@ function highestScoringGroup<T extends string | number>(
   return [...grouped.entries()]
     .sort(
       ([leftGroup, leftScores], [rightGroup, rightScores]) =>
-        average(rightScores) - average(leftScores) ||
+        average(rightScores) * groupWeight(rightGroup) -
+          average(leftScores) * groupWeight(leftGroup) ||
         String(leftGroup).localeCompare(String(rightGroup), "zh-Hans-CN", {
           numeric: true,
         }),
@@ -1252,6 +1335,7 @@ function buildScenarios(
   backtest: AiBacktest,
   expectedDrawAt: string,
   dimensions: AiDimensionEvidence[],
+  learning: OnlineLearningProfile,
 ): AiScenario[] {
   const dimensionLeaders = [...dimensions]
     .sort((a, b) => b.evidenceScore - a.evidenceScore)
@@ -1318,6 +1402,7 @@ function buildScenarios(
         backtestResult
           ? `单生肖覆盖 6+1：独立留出 ${observationFor(backtestResult, "zodiac_coverage").hitCount}/${backtestResult.sampleSize} 期`
           : "等待回测数据",
+        learning.scenarioWeights[candidate.id].explanation,
         `与其余场景最大重合 ${Math.max(...pairwiseOverlaps, 0)} 个主号`,
       ],
       counterEvidence: [
@@ -1333,6 +1418,23 @@ function buildScenarios(
       ],
     };
   });
+}
+
+function orderScenariosByLearning(
+  scenarios: AiScenario[],
+  learning: OnlineLearningProfile,
+) {
+  if (!learning.preferredScenarioId) return scenarios;
+  const originalOrder = new Map(
+    scenarios.map((scenario, index) => [scenario.id, index]),
+  );
+  return [...scenarios].sort(
+    (left, right) =>
+      learning.scenarioWeights[right.id].weight -
+        learning.scenarioWeights[left.id].weight ||
+      (originalOrder.get(left.id) ?? 0) -
+        (originalOrder.get(right.id) ?? 0),
+  );
 }
 
 function buildScenarioObservations(
@@ -1361,10 +1463,17 @@ function buildScenarioObservations(
 function buildPrimaryZodiacObservation(
   candidateSets: AiScenario[],
   backtest: AiBacktest,
+  learning: OnlineLearningProfile,
 ): AiPrimaryZodiacObservation {
+  const learnedScenarioId =
+    backtest.status !== "observed_advantage" && learning.applied
+      ? learning.preferredScenarioId
+      : null;
   const scenario =
     candidateSets.find(
-      (candidate) => candidate.id === backtest.selectedStrategyId,
+      (candidate) =>
+        candidate.id ===
+        (learnedScenarioId ?? backtest.selectedStrategyId),
     ) ??
     candidateSets.find((candidate) => candidate.id === "balanced") ??
     candidateSets[0];
@@ -1396,6 +1505,8 @@ function buildPrimaryZodiacObservation(
   const conclusion =
     backtest.status === "observed_advantage"
       ? `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”，目标是当期 6+1 任一号码出现该生肖；独立留出结果高于精确组合随机基准，但仍需前瞻复核。`
+      : learnedScenarioId
+        ? `开奖后在线复盘在 ${learning.sampleSize} 个独立已结算目标期上，经随机基线收缩后优先${scenario.name}，选择“${observation.pick}”作为下一期 6+1 生肖观察；正式独立留出仍未证明优势。`
       : backtest.status === "insufficient"
         ? `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”作为可结算观察方向；独立历史不足，不标注统计优势。`
         : `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”作为可结算观察方向；独立留出尚未证明高于精确组合随机基准。`;

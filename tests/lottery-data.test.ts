@@ -82,7 +82,26 @@ test("zodiac mapping keeps the verified 05 tiger result and lunar-new-year bound
   assert.equal(getZodiac(5, "2026-02-17T21:32:00+08:00"), "虎");
 });
 
+test("equal zodiac counts use one deterministic order on server and client", () => {
+  const draw = {
+    game: "new_macau",
+    issue: "2026204",
+    drawAt: "2026-07-24T21:32:00+08:00",
+    numbers: [1, 2, 3, 4, 5, 6],
+    special: 7,
+    source: "测试",
+    verified: true,
+  };
+  assert.deepEqual(
+    buildAnalysis([draw]).zodiacs.map(({ name }) => name),
+    ["鼠", "牛", "虎", "兔", "龙", "蛇", "马"],
+  );
+});
+
 let server: ViteDevServer;
+let buildAnalysis: (
+  draws: unknown[],
+) => { zodiacs: Array<{ name: string; count: number }> };
 let loadServerDraws: (
   game: "hk" | "macau" | "new_macau",
   limit: number,
@@ -106,7 +125,9 @@ before(async () => {
     appType: "custom",
     logLevel: "silent",
   });
+  const loadedLottery = await server.ssrLoadModule("/lib/lottery.ts");
   const loadedData = await server.ssrLoadModule("/lib/lottery-data.ts");
+  buildAnalysis = loadedLottery.buildAnalysis;
   loadServerDraws = loadedData.loadServerDraws;
 });
 

@@ -1,5 +1,5 @@
 import lotteryHistory from "./lottery-history.json";
-import { getZodiac } from "./zodiac";
+import { getZodiac, ZODIAC_NAMES } from "./zodiac";
 
 export { getZodiac } from "./zodiac";
 
@@ -264,7 +264,16 @@ export function buildAnalysis(draws: Draw[]): Analysis {
     waves,
     zodiacs: [...zodiacMap.entries()]
       .map(([name, count]) => ({ name, count }))
-      .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name)),
+      .sort(
+        (a, b) =>
+          b.count - a.count ||
+          ZODIAC_NAMES.indexOf(
+            a.name as (typeof ZODIAC_NAMES)[number],
+          ) -
+            ZODIAC_NAMES.indexOf(
+              b.name as (typeof ZODIAC_NAMES)[number],
+            ),
+      ),
     odd,
     even,
     big,

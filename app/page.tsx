@@ -1,5 +1,5 @@
 import { LotteryDashboard } from "./LotteryDashboard";
 
 export default function Home() {
-  return <LotteryDashboard />;
+  return <LotteryDashboard initialNow={new Date().toISOString()} />;
 }
