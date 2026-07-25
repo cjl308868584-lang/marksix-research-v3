@@ -292,7 +292,7 @@ export function LotteryDashboard() {
           game: selectedGame,
           window: windowSize,
           focus,
-          depth: "deep",
+          depth: "standard",
         }),
         signal: controller.signal,
       });
@@ -1085,7 +1085,7 @@ function AiReport({
         <div className="ai-report-head">
           <div className="ai-orb">{mode === "loading" ? "···" : "AI"}</div>
           <div>
-            <span>{mode === "loading" ? "DEEP REASONING" : mode === "error" ? "SERVICE NOTICE" : "READY"}</span>
+            <span>{mode === "loading" ? "EVIDENCE SYNTHESIS" : mode === "error" ? "SERVICE NOTICE" : "READY"}</span>
             <h3>
               {mode === "loading"
                 ? "正在建立跨维度证据链"
@@ -1182,7 +1182,7 @@ function AiReport({
       <div className="ai-report-head">
         <div className="ai-orb">AI</div>
         <div>
-          <span>{mode === "ai" ? `${report.model.name} 深度归纳` : "本地证据引擎降级"}</span>
+          <span>{mode === "ai" ? `${report.model.name} 证据归纳` : "本地证据引擎降级"}</span>
           <h3>{report.synthesis.headline}</h3>
         </div>
         <small>{report.cached ? "缓存报告" : `${report.model.latencyMs / 1000}s`}</small>

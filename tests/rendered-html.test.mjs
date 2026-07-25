@@ -132,6 +132,9 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /configuration\.trainWindow/);
   assert.match(dashboard, /dataQuality\.verifiedRatio/);
   assert.match(dashboard, /report\.model\.name/);
+  assert.match(dashboard, /depth: "standard"/);
+  assert.match(dashboard, /EVIDENCE SYNTHESIS/);
+  assert.doesNotMatch(dashboard, /DEEP REASONING/);
   assert.doesNotMatch(dashboard, /GPT‑5\.6/);
   assert.match(dashboard, /ai-recommendation-balls/);
   assert.match(dashboard, /diversity-strip/);
