@@ -51,8 +51,16 @@ query marksixResult($lastNDraw: Int, $startDate: String, $endDate: String, $draw
 
 export async function GET(request: NextRequest) {
   const requestedGame = request.nextUrl.searchParams.get("game");
-  const game: GameId =
-    requestedGame === "macau" || requestedGame === "new_macau" ? requestedGame : "hk";
+  if (requestedGame && requestedGame !== "hk" && requestedGame !== "new_macau") {
+    return NextResponse.json(
+      { error: "当前仅支持香港与新澳门彩种。" },
+      {
+        status: 400,
+        headers: { "Cache-Control": "private, no-store, max-age=0" },
+      },
+    );
+  }
+  const game: GameId = requestedGame === "hk" ? "hk" : "new_macau";
   const limit = Math.min(Math.max(Number(request.nextUrl.searchParams.get("limit") ?? 60), 3), 120);
   const liveRequest = request.nextUrl.searchParams.get("live") === "1";
 
@@ -61,9 +69,7 @@ export async function GET(request: NextRequest) {
       liveRequest
         ? await getCachedLiveDraws(game, limit)
         : game === "hk"
-        ? await getHongKongDraws(limit)
-        : game === "macau"
-          ? await getMacauDraws(limit)
+          ? await getHongKongDraws(limit)
           : await getNewMacauDraws(limit);
     return NextResponse.json(result, {
       headers: {
@@ -158,13 +164,10 @@ async function getLiveDraws(game: GameId, limit: number): Promise<LotteryRespons
   }
 
   if (!draws[0] || !isDrawForTarget(draws[0], liveWindow.target)) {
-    const token = process.env.BOYI_API_TOKEN;
     const alternatives: Array<Promise<Draw[]>> =
       game === "hk"
         ? [fetchHkjc(limit), fetchKj1868("xg6", "hk", limit)]
-        : game === "macau" && token
-          ? [fetchBoyi(token, limit)]
-          : [];
+        : [];
     if (alternatives.length) {
       const alternate = await firstNonEmpty(alternatives).catch(() => []);
       draws = mergeDrawBatches([draws, alternate]);
@@ -249,38 +252,6 @@ async function getHongKongDraws(limit: number) {
         : secondaryDraws.length
           ? "香港赛马会接口当前受访问策略限制，已切换备用开奖 API。"
         : `实时开奖源暂不可达，当前使用最近一次同步的 ${FALLBACK_DRAWS.hk.length} 期历史快照。`,
-    fetchedAt: new Date().toISOString(),
-  };
-}
-
-async function getMacauDraws(limit: number) {
-  const token = process.env.BOYI_API_TOKEN;
-  const [primary, freeHistory, secondary] = await Promise.allSettled([
-    fetchMarksixLatest("macau"),
-    fetchApi16868("macau", limit),
-    token ? fetchBoyi(token, limit) : Promise.resolve([] as Draw[]),
-  ]);
-  const latest = fulfilled(primary)[0];
-  const history = fulfilled(freeHistory);
-  const paidHistory = fulfilled(secondary);
-  const base = history.length
-    ? history
-    : paidHistory.length
-      ? paidHistory
-      : FALLBACK_DRAWS.macau;
-  const merged = mergeLatest(base, latest);
-  const checked = markVerified(merged, [latest, history[0], paidHistory[0]]);
-
-  return {
-    game: "macau" as const,
-    draws: checked.slice(0, limit),
-    live: Boolean(latest) || history.length > 0,
-    degraded: history.length === 0,
-    message: history.length
-      ? `澳门彩免费历史 API 已接入，当前载入 ${checked.length} 期；最新一期自动交叉核验。`
-      : paidHistory.length
-        ? "澳门彩独立历史源已接入。"
-        : `澳门彩实时数据源暂不可达，当前使用最近一次同步的 ${FALLBACK_DRAWS.macau.length} 期历史快照。`,
     fetchedAt: new Date().toISOString(),
   };
 }
@@ -422,7 +393,7 @@ async function fetchMarksixPayload(
   const sourceType: Record<GameId, string> = {
     hk: "hk",
     macau: "macau",
-    new_macau: "newmacau",
+    new_macau: "newMacau",
   };
   const response = await fetchWithTimeout(
     `https://api3.marksix6.net/lottery_api.php?type=${sourceType[game]}`,
@@ -466,36 +437,6 @@ async function fetchMarksixProgress(
     special: values.length >= 7 ? values[6] : null,
     source: "Marksix6 实时源",
   };
-}
-
-async function fetchBoyi(token: string, limit: number): Promise<Draw[]> {
-  const response = await fetchWithTimeout(
-    `https://boyi-api.com/api?token=${encodeURIComponent(token)}&code=amlhc&rows=${limit}&format=json`,
-    { headers: { accept: "application/json" } },
-  );
-  if (!response.ok) throw new Error(`Boyi ${response.status}`);
-  const payload = (await response.json()) as {
-    data?: Array<{
-      drawIssue?: string;
-      issue?: string;
-      drawTime?: string;
-      openTime?: string;
-      drawCode?: string;
-      openCode?: string;
-    }>;
-  };
-  return (payload.data ?? [])
-    .map((item) =>
-      parseDraw(
-        "macau",
-        item.drawIssue ?? item.issue ?? "",
-        item.drawTime ?? item.openTime ?? "",
-        item.drawCode ?? item.openCode ?? "",
-        "博易 API",
-      ),
-    )
-    .filter((item): item is Draw => Boolean(item))
-    .sort(byNewest);
 }
 
 function parseDraw(

@@ -1491,6 +1491,295 @@ footer {
   font-size: 8px;
 }
 
+.primary-zodiac-observation {
+  margin-top: 20px;
+  padding: 18px;
+  border: 1px solid rgba(234, 208, 141, 0.4);
+  border-radius: 11px;
+  background:
+    radial-gradient(circle at 14% 34%, rgba(210, 179, 109, 0.16), transparent 30%),
+    linear-gradient(135deg, rgba(210, 179, 109, 0.1), rgba(9, 11, 12, 0.42));
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.primary-zodiac-heading,
+.observation-deck-head,
+.observation-consensus > div:first-child {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.primary-zodiac-heading > div,
+.observation-deck-head > div,
+.observation-consensus > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.primary-zodiac-heading span,
+.observation-deck-head span,
+.observation-consensus > div:first-child span {
+  color: var(--gold);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.12em;
+}
+
+.primary-zodiac-heading strong,
+.observation-deck-head strong,
+.observation-consensus > div:first-child strong {
+  color: #eee7d6;
+  font-family: var(--font-serif);
+  font-size: 17px;
+}
+
+.observation-status {
+  width: fit-content;
+  padding: 5px 8px;
+  border: 1px solid rgba(210, 179, 109, 0.25);
+  border-radius: 999px;
+  color: var(--gold-bright);
+  background: rgba(210, 179, 109, 0.06);
+  font-size: 8px;
+  font-style: normal;
+  white-space: nowrap;
+}
+
+.observation-status.observed_above_random {
+  border-color: rgba(101, 199, 162, 0.32);
+  color: var(--success);
+  background: rgba(101, 199, 162, 0.06);
+}
+
+.primary-zodiac-core {
+  margin-top: 17px;
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr);
+  align-items: center;
+  gap: 17px;
+}
+
+.primary-zodiac-core > strong {
+  display: grid;
+  place-items: center;
+  width: 84px;
+  height: 84px;
+  border: 1px solid rgba(234, 208, 141, 0.58);
+  border-radius: 50%;
+  color: #f4dfaa;
+  background: rgba(210, 179, 109, 0.12);
+  box-shadow:
+    0 0 0 7px rgba(210, 179, 109, 0.035),
+    inset 0 0 22px rgba(210, 179, 109, 0.08);
+  font-family: var(--font-serif);
+  font-size: 42px;
+  line-height: 1;
+}
+
+.primary-zodiac-core span {
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.primary-zodiac-core p {
+  margin: 6px 0 0;
+  color: #ece6d8;
+  font-family: var(--font-serif);
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+.primary-zodiac-lock {
+  margin-top: 13px;
+  padding: 9px 11px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid rgba(210, 179, 109, 0.18);
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.primary-zodiac-lock strong {
+  color: var(--gold-bright);
+  font-family: var(--font-mono);
+  font-size: 8px;
+}
+
+.primary-zodiac-lock span {
+  color: var(--dim);
+  font-size: 8px;
+  text-align: right;
+}
+
+.primary-zodiac-metrics {
+  margin-top: 17px;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  overflow: hidden;
+}
+
+.primary-zodiac-metrics > span {
+  min-width: 0;
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.primary-zodiac-metrics > span + span {
+  border-left: 1px solid var(--line-soft);
+}
+
+.primary-zodiac-metrics strong {
+  color: #e9dfc8;
+  font-family: var(--font-mono);
+  font-size: 14px;
+}
+
+.primary-zodiac-metrics small {
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.primary-zodiac-observation > p {
+  margin: 13px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.observation-deck,
+.observation-consensus {
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: rgba(0, 0, 0, 0.13);
+}
+
+.observation-deck-head > small {
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.observation-scroll,
+.consensus-scroll {
+  margin: 12px -14px 0;
+  padding: 0 14px 4px;
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+}
+
+.observation-scroll::-webkit-scrollbar,
+.consensus-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.observation-card {
+  flex: 0 0 min(190px, 72vw);
+  min-height: 156px;
+  padding: 13px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(16, 19, 21, 0.9);
+  scroll-snap-align: start;
+}
+
+.observation-card.primary {
+  border-color: rgba(210, 179, 109, 0.34);
+  background: rgba(210, 179, 109, 0.055);
+}
+
+.observation-card > span {
+  color: var(--gold);
+  font-size: 8px;
+}
+
+.observation-card > strong {
+  margin-top: 8px;
+  color: #eee5cf;
+  font-family: var(--font-serif);
+  font-size: 24px;
+}
+
+.observation-card > p {
+  margin: 5px 0 10px;
+  color: var(--muted);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.observation-card > div {
+  width: 100%;
+  margin-top: auto;
+  padding-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 7px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.observation-card > .observation-status {
+  margin-top: 8px;
+}
+
+.observation-settlement-note,
+.observation-consensus > p {
+  margin: 9px 0 0;
+  color: var(--dim);
+  font-size: 8px;
+  line-height: 1.55;
+}
+
+.consensus-scroll > span {
+  flex: 0 0 min(145px, 56vw);
+  padding: 10px;
+  display: grid;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: rgba(16, 19, 21, 0.72);
+  scroll-snap-align: start;
+}
+
+.consensus-scroll > span.aligned {
+  border-color: rgba(101, 199, 162, 0.22);
+}
+
+.consensus-scroll small,
+.consensus-scroll em {
+  color: var(--dim);
+  font-size: 8px;
+  font-style: normal;
+}
+
+.consensus-scroll strong {
+  color: #ded8ca;
+  font-family: var(--font-serif);
+  font-size: 14px;
+}
+
+.consensus-scroll .aligned strong {
+  color: var(--success);
+}
+
 .evidence-strength {
   margin-top: 24px;
   padding: 13px 14px;
@@ -1990,6 +2279,16 @@ footer {
   transition: border-color 160ms ease, background 160ms ease;
 }
 
+.strategy-card.observation-primary {
+  border-color: rgba(210, 179, 109, 0.3);
+}
+
+.strategy-card.observation-primary:not(.recommended) {
+  background:
+    linear-gradient(160deg, rgba(210, 179, 109, 0.04), transparent 42%),
+    rgba(16, 19, 21, 0.86);
+}
+
 .strategy-card.recommended {
   border-color: rgba(210, 179, 109, 0.42);
   background:
@@ -2110,6 +2409,40 @@ footer {
 }
 
 .strategy-review-result .hit strong {
+  color: var(--success);
+}
+
+.strategy-observation-review {
+  padding-top: 8px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.strategy-observation-review > span {
+  min-width: 0;
+  padding: 7px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  color: var(--dim);
+  font-size: 8px;
+}
+
+.strategy-observation-review > span.primary {
+  grid-column: 1 / -1;
+  border-color: rgba(210, 179, 109, 0.28);
+  background: rgba(210, 179, 109, 0.035);
+}
+
+.strategy-observation-review > span strong {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.strategy-observation-review > span.hit strong {
   color: var(--success);
 }
 
@@ -3778,6 +4111,127 @@ footer p {
     padding-block: 25px;
   }
 
+  .primary-zodiac-observation {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: 10px;
+  }
+
+  .primary-zodiac-heading {
+    align-items: flex-start;
+  }
+
+  .primary-zodiac-heading span,
+  .observation-deck-head span,
+  .observation-consensus > div:first-child span,
+  .primary-zodiac-core span {
+    font-size: 10px;
+  }
+
+  .primary-zodiac-heading strong,
+  .observation-deck-head strong,
+  .observation-consensus > div:first-child strong {
+    font-size: 17px;
+  }
+
+  .observation-status {
+    padding: 5px 7px;
+    font-size: 10px;
+  }
+
+  .primary-zodiac-core {
+    grid-template-columns: 74px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .primary-zodiac-core > strong {
+    width: 74px;
+    height: 74px;
+    font-size: 39px;
+  }
+
+  .primary-zodiac-core p {
+    font-size: 17px;
+  }
+
+  .primary-zodiac-lock {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .primary-zodiac-lock strong,
+  .primary-zodiac-lock span {
+    font-size: 10px;
+    text-align: left;
+  }
+
+  .primary-zodiac-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .primary-zodiac-metrics > span {
+    padding: 9px 7px;
+    font-size: 10px;
+  }
+
+  .primary-zodiac-metrics > span:nth-child(3) {
+    border-left: 0;
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .primary-zodiac-metrics > span:nth-child(4) {
+    border-top: 1px solid var(--line-soft);
+  }
+
+  .primary-zodiac-metrics strong {
+    font-size: 15px;
+  }
+
+  .primary-zodiac-metrics small,
+  .primary-zodiac-observation > p,
+  .observation-settlement-note,
+  .observation-consensus > p {
+    font-size: 10px;
+  }
+
+  .observation-deck,
+  .observation-consensus {
+    padding: 13px;
+  }
+
+  .observation-scroll,
+  .consensus-scroll {
+    margin-inline: -13px;
+    padding-inline: 13px;
+  }
+
+  .observation-card {
+    flex-basis: min(208px, 74vw);
+    min-height: 174px;
+    padding: 13px;
+  }
+
+  .observation-card > span,
+  .observation-card > p,
+  .observation-card > div,
+  .consensus-scroll small,
+  .consensus-scroll em {
+    font-size: 10px;
+  }
+
+  .observation-card > strong {
+    font-size: 26px;
+  }
+
+  .consensus-scroll > span {
+    flex-basis: min(158px, 55vw);
+  }
+
+  .consensus-scroll strong {
+    font-size: 15px;
+  }
+
   .ai-overview {
     font-size: 16px;
     line-height: 1.75;
@@ -4030,6 +4484,11 @@ footer p {
 
   .strategy-review-result strong {
     font-size: 11px;
+  }
+
+  .strategy-observation-review > span,
+  .strategy-observation-review > span strong {
+    font-size: 10px;
   }
 
   .strategy-review-status,

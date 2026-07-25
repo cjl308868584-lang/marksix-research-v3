@@ -1,6 +1,86 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 import { createServer, type ViteDevServer } from "vite";
+import { assessQualityGate } from "../lib/ai-quality-gate.ts";
+import { mergeDrawLists } from "../lib/draw-merge.ts";
+import { getZodiac } from "../lib/zodiac.ts";
+
+test("draw refresh upgrades a duplicate issue from single-source to verified", () => {
+  const initial = {
+    game: "new_macau",
+    issue: "2026204",
+    verified: false,
+    source: "单源",
+    special: 8,
+  };
+  const verifiedCorrection = {
+    ...initial,
+    verified: true,
+    source: "双源",
+    special: 9,
+  };
+  assert.deepEqual(
+    mergeDrawLists([initial], [verifiedCorrection]),
+    [verifiedCorrection],
+  );
+
+  const staleSingleSource = {
+    ...initial,
+    source: "较旧单源",
+    special: 7,
+  };
+  assert.deepEqual(
+    mergeDrawLists([verifiedCorrection], [staleSingleSource]),
+    [verifiedCorrection],
+  );
+});
+
+test("quality gate rejects an unverified latest draw even when an older draw is verified", () => {
+  const draws = [
+    {
+      game: "new_macau" as const,
+      drawAt: "2026-07-25T13:32:00.000Z",
+      verified: false,
+    },
+    {
+      game: "new_macau" as const,
+      drawAt: "2026-07-24T13:32:00.000Z",
+      verified: true,
+    },
+  ];
+  const blocked = assessQualityGate({
+    game: "new_macau",
+    history: { sourceMode: "live", rejectedFutureCount: 0 },
+    draws,
+    windowSize: 2,
+    analysisCutoff: new Date("2026-07-26T00:00:00.000Z"),
+    targetConfirmed: true,
+  });
+  assert.equal(blocked.eligible, false);
+  assert.ok(
+    blocked.reasons.includes(
+      "最近一期尚未完成跨源一致核验，不能形成优势推荐",
+    ),
+  );
+
+  const eligible = assessQualityGate({
+    game: "new_macau",
+    history: { sourceMode: "live", rejectedFutureCount: 0 },
+    draws: [{ ...draws[0], verified: true }, draws[1]],
+    windowSize: 2,
+    analysisCutoff: new Date("2026-07-26T00:00:00.000Z"),
+    targetConfirmed: true,
+  });
+  assert.equal(eligible.eligible, true);
+});
+
+test("zodiac mapping keeps the verified 05 tiger result and lunar-new-year boundary", () => {
+  assert.equal(getZodiac(5, "2026-07-24T21:32:00+08:00"), "虎");
+  assert.equal(getZodiac(1, "2026-02-16T21:32:00+08:00"), "蛇");
+  assert.equal(getZodiac(1, "2026-02-17T21:32:00+08:00"), "马");
+  assert.equal(getZodiac(5, "2026-02-16T21:32:00+08:00"), "牛");
+  assert.equal(getZodiac(5, "2026-02-17T21:32:00+08:00"), "虎");
+});
 
 let server: ViteDevServer;
 let loadServerDraws: (
@@ -36,6 +116,7 @@ after(async () => {
 
 test("history loader cross-verifies the latest issue with an independent endpoint", async () => {
   const originalFetch = globalThis.fetch;
+  const marksixUrls: string[] = [];
   const latestIssue = "2026204";
   const history = Array.from({ length: 10 }, (_, index) => {
     const values = Array.from(
@@ -64,6 +145,7 @@ test("history loader cross-verifies the latest issue with an independent endpoin
       });
     }
     if (url.startsWith("https://api3.marksix6.net/")) {
+      marksixUrls.push(url);
       return Response.json({
         expect: latestIssue,
         openTime: history[0].preDrawTime,
@@ -83,6 +165,8 @@ test("history loader cross-verifies the latest issue with an independent endpoin
     assert.equal(result.draws.length, 10);
     assert.equal(result.draws[0].issue, latestIssue);
     assert.equal(result.draws[0].verified, true);
+    assert.equal(marksixUrls.length, 1);
+    assert.match(marksixUrls[0], /[?&]type=newMacau(?:&|$)/);
     assert.match(result.draws[0].source, /交叉一致/);
     assert.equal(result.draws.slice(1).some((draw) => draw.verified), false);
     assert.match(result.warning ?? "", /独立接口交叉一致校验/);

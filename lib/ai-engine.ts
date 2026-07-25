@@ -16,12 +16,15 @@ import {
   AI_FOCUS_OPTIONS,
   type AiAnalysisResponse,
   type AiBacktest,
+  type AiBacktestObservation,
   type AiBacktestSegment,
   type AiBacktestStrategy,
   type AiConfidenceInterval,
   type AiDimensionEvidence,
   type AiDimensionId,
   type AiFocus,
+  type AiObservationId,
+  type AiPrimaryZodiacObservation,
   type AiScenario,
   type AiScenarioId,
   type AiSignalLevel,
@@ -35,10 +38,14 @@ export type ForecastPack = {
   analysis: Analysis;
   dimensions: AiDimensionEvidence[];
   candidateSets: AiScenario[];
+  zodiacObservation: AiPrimaryZodiacObservation;
   backtest: AiBacktest;
   evidenceStrength: AiAnalysisResponse["evidenceStrength"];
   localSynthesis: AiSynthesis;
 };
+
+const PRIMARY_FOCUS = "comprehensive" as const satisfies AiFocus;
+const PRIMARY_TRAIN_WINDOW = 30;
 
 export function buildForecastPack(
   game: GameId,
@@ -54,22 +61,51 @@ export function buildForecastPack(
   );
   const analysis = buildAnalysis(normalizedDraws);
   const dimensions = buildDimensions(normalizedDraws, analysis);
+  const primaryTrainWindow = Math.min(
+    PRIMARY_TRAIN_WINDOW,
+    normalizedEvaluationHistory.length,
+  );
+  const primaryDraws = normalizedEvaluationHistory.slice(
+    0,
+    primaryTrainWindow,
+  );
+  const primaryAnalysis = buildAnalysis(primaryDraws);
   const backtest = buildWalkForwardBacktest(
     normalizedEvaluationHistory,
-    focus,
-    normalizedDraws.length,
+    PRIMARY_FOCUS,
+    primaryTrainWindow,
+  );
+  const primaryCandidates = buildFocusedCandidates(
+    primaryDraws,
+    primaryAnalysis,
+    PRIMARY_FOCUS,
+    expectedDrawAt,
+  );
+  const primaryPicks = new Map(
+    primaryCandidates.map((candidate) => [
+      candidate.id,
+      candidate.observationPicks,
+    ]),
   );
   const focusedCandidates = buildFocusedCandidates(
     normalizedDraws,
     analysis,
     focus,
     expectedDrawAt,
-  );
+  ).map((candidate) => ({
+    ...candidate,
+    observationPicks:
+      primaryPicks.get(candidate.id) ?? candidate.observationPicks,
+  }));
   const candidateSets = buildScenarios(
     focusedCandidates,
     backtest,
     expectedDrawAt,
     dimensions,
+  );
+  const zodiacObservation = buildPrimaryZodiacObservation(
+    candidateSets,
+    backtest,
   );
   const evidenceStrength = buildEvidenceStrength(
     dimensions,
@@ -83,6 +119,7 @@ export function buildForecastPack(
     analysis,
     dimensions,
     candidateSets,
+    zodiacObservation,
     backtest,
     evidenceStrength,
   };
@@ -451,12 +488,32 @@ function buildDimensions(draws: Draw[], analysis: Analysis): AiDimensionEvidence
   ];
 }
 
+type ObservationPicks = {
+  zodiac: string;
+  tail: number;
+  wave: Wave;
+  parity: "奇" | "偶";
+  size: "大" | "小";
+};
+
+type NumberProfile = {
+  number: number;
+  balanced: number;
+  momentum: number;
+  contrarian: number;
+  specialScore: number;
+};
+
+type FocusedCandidate = CandidateSet & {
+  observationPicks: ObservationPicks;
+};
+
 function buildFocusedCandidates(
   draws: Draw[],
   analysis: Analysis,
   focus: AiFocus,
   targetDrawAt: string,
-): CandidateSet[] {
+): FocusedCandidate[] {
   const frequency = Array(50).fill(0) as number[];
   const recent = Array(50).fill(0) as number[];
   const specialFrequency = Array(50).fill(0) as number[];
@@ -500,7 +557,7 @@ function buildFocusedCandidates(
   const tailRanks = new Map(tailCounts.map((item, index) => [item.tail, index]));
   const focusLabel = AI_FOCUS_OPTIONS.find((item) => item.id === focus)?.label ?? "综合";
 
-  const profiles = Array.from({ length: 49 }, (_, index) => {
+  const profiles: NumberProfile[] = Array.from({ length: 49 }, (_, index) => {
     const number = index + 1;
     const hot = frequency[number] / maxFrequency;
     const momentum = recent[number] / maxRecent;
@@ -529,7 +586,7 @@ function buildFocusedCandidates(
     };
   });
 
-  const results: CandidateSet[] = [];
+  const results: FocusedCandidate[] = [];
   const priorMainSets: number[][] = [];
   for (const id of ["balanced", "momentum", "contrarian"] as AiScenarioId[]) {
     const ranked = [...profiles].sort((a, b) => {
@@ -561,6 +618,11 @@ function buildFocusedCandidates(
             a.number - b.number,
         )[0]?.number ?? ranked.find((item) => !main.includes(item.number))?.number ?? 1;
     const selected = [...main, special];
+    const observationPicks = pickObservationDirections(
+      profiles,
+      id,
+      targetDrawAt,
+    );
     results.push({
       id,
       name: scenarioName(id),
@@ -575,10 +637,67 @@ function buildFocusedCandidates(
           }),
         ),
       ),
+      observationPicks,
     });
     priorMainSets.push(main);
   }
   return results;
+}
+
+function pickObservationDirections(
+  profiles: NumberProfile[],
+  id: AiScenarioId,
+  targetDrawAt: string,
+): ObservationPicks {
+  return {
+    zodiac: highestScoringGroup(
+      profiles,
+      id,
+      (profile) => getZodiac(profile.number, targetDrawAt),
+    ),
+    tail: highestScoringGroup(
+      profiles,
+      id,
+      (profile) => profile.number % 10,
+    ),
+    wave: highestScoringGroup(
+      profiles,
+      id,
+      (profile) => getWave(profile.number),
+    ),
+    parity: highestScoringGroup(
+      profiles,
+      id,
+      (profile) => profile.number % 2 === 1 ? "奇" as const : "偶" as const,
+    ),
+    size: highestScoringGroup(
+      profiles,
+      id,
+      (profile) => profile.number >= 25 ? "大" as const : "小" as const,
+    ),
+  };
+}
+
+function highestScoringGroup<T extends string | number>(
+  profiles: NumberProfile[],
+  id: AiScenarioId,
+  groupFor: (profile: NumberProfile) => T,
+): T {
+  const grouped = new Map<T, number[]>();
+  profiles.forEach((profile) => {
+    const group = groupFor(profile);
+    const scores = grouped.get(group) ?? [];
+    scores.push(profile[id] * 0.8 + profile.specialScore * 0.2);
+    grouped.set(group, scores);
+  });
+  return [...grouped.entries()]
+    .sort(
+      ([leftGroup, leftScores], [rightGroup, rightScores]) =>
+        average(rightScores) - average(leftScores) ||
+        String(leftGroup).localeCompare(String(rightGroup), "zh-Hans-CN", {
+          numeric: true,
+        }),
+    )[0][0];
 }
 
 function focusedBonus({
@@ -704,17 +823,38 @@ type BacktestBucket = {
   special: number;
   specialZodiac: number;
   specialZodiacBaselines: number[];
+  observations: Record<
+    AiObservationId,
+    {
+      hits: number;
+      baselines: number[];
+    }
+  >;
   stability: number[];
   previous: number[] | null;
 };
 
+const OBSERVATION_IDS = [
+  "zodiac_coverage",
+  "tail_coverage",
+  "wave_threshold",
+  "parity_majority",
+  "size_majority",
+] as const satisfies readonly AiObservationId[];
 const MIN_BACKTEST_SEGMENT = 20;
 const SUPPORTED_WINDOW_COUNT = 4;
+const SCENARIO_COMPARISON_COUNT = 3;
 const MULTIPLE_COMPARISON_COUNT =
   AI_FOCUS_OPTIONS.length * SUPPORTED_WINDOW_COUNT;
+const OBSERVATION_COMPARISON_COUNT =
+  MULTIPLE_COMPARISON_COUNT *
+  OBSERVATION_IDS.length *
+  SCENARIO_COMPARISON_COUNT;
 const FAMILY_WISE_ALPHA = 0.05;
 const VALIDATION_ALPHA =
   FAMILY_WISE_ALPHA / MULTIPLE_COMPARISON_COUNT;
+const OBSERVATION_VALIDATION_ALPHA =
+  FAMILY_WISE_ALPHA / OBSERVATION_COMPARISON_COUNT;
 
 function buildWalkForwardBacktest(
   draws: Draw[],
@@ -755,8 +895,9 @@ function buildWalkForwardBacktest(
   const observedAdvantage = Boolean(
     sufficient &&
       selectedHoldout &&
-      selectedHoldout.averageMainOverlapCI.low > baseline.averageMainOverlap &&
-      selectedHoldout.randomPValue < VALIDATION_ALPHA,
+      observationFor(selectedHoldout, "zodiac_coverage").lift > 0 &&
+      observationFor(selectedHoldout, "zodiac_coverage").randomPValue <
+        VALIDATION_ALPHA,
   );
   const status: AiBacktest["status"] = !sufficient
     ? "insufficient"
@@ -769,8 +910,8 @@ function buildWalkForwardBacktest(
     status === "insufficient"
       ? `评估历史需至少包含 ${trainWindow + MIN_BACKTEST_SEGMENT * 2} 期，当前独立选择段 ${selection.testCount} 期、留出段 ${holdout.testCount} 期，不生成优势推荐。`
       : status === "observed_advantage" && selectedHoldout
-        ? `${selectedHoldout.name}由选择段预先确定，并在 ${holdout.testCount} 期独立留出段通过多配置校正门槛；该结果仍需前瞻样本复核。`
-        : `${selectedFromSelection?.name ?? "预选策略"}在 ${holdout.testCount} 期独立留出段未通过多窗口与维度尝试校正，本期保持弃权。`;
+        ? `${selectedHoldout.name}由选择段预先确定，其单生肖覆盖 6+1 的方向在 ${holdout.testCount} 期独立留出段通过多配置校正门槛；该结果仍需前瞻样本复核。`
+        : `${selectedFromSelection?.name ?? "预选策略"}的单生肖覆盖方向在 ${holdout.testCount} 期独立留出段未证明高于精确随机基准；本期仍给出可结算观察方向，但不标注统计优势。`;
 
   return {
     method: "nested_holdout_walk_forward",
@@ -782,6 +923,8 @@ function buildWalkForwardBacktest(
     noLookahead: true,
     multipleComparisonCount: MULTIPLE_COMPARISON_COUNT,
     validationAlpha: round6(VALIDATION_ALPHA),
+    observationComparisonCount: OBSERVATION_COMPARISON_COUNT,
+    observationValidationAlpha: round6(OBSERVATION_VALIDATION_ALPHA),
     correction: "bonferroni",
     status,
     decision,
@@ -817,6 +960,7 @@ function evaluateBacktestSegment({
       special: 0,
       specialZodiac: 0,
       specialZodiacBaselines: [],
+      observations: emptyObservationBuckets(),
       stability: [],
       previous: null,
     }),
@@ -848,6 +992,15 @@ function evaluateBacktestSegment({
         countNumbers((number) => getZodiac(number, actual.drawAt) === predictedZodiac) /
           49,
       );
+      const observationResults = evaluateObservations(
+        candidate.observationPicks,
+        actual,
+      );
+      observationResults.forEach(({ id, hit, baseline }) => {
+        const observation = bucket.observations[id];
+        if (hit) observation.hits += 1;
+        observation.baselines.push(baseline);
+      });
       if (bucket.previous) {
         bucket.stability.push(jaccard(bucket.previous, candidate.numbers));
       }
@@ -879,6 +1032,15 @@ function buildBacktestStrategy(
     sampleSize,
     totalMainOverlap,
   );
+  const observations = OBSERVATION_IDS.map((observationId) =>
+    buildBacktestObservation(
+      observationId,
+      bucket.observations[observationId].hits,
+      bucket.observations[observationId].baselines,
+    ));
+  const primaryObservation = observations.find(
+    (observation) => observation.id === "zodiac_coverage",
+  )!;
   return {
     id,
     name: scenarioName(id),
@@ -900,9 +1062,13 @@ function buildBacktestStrategy(
     specialZodiacRate: rate(bucket.specialZodiac, sampleSize),
     specialZodiacCI: wilsonInterval(bucket.specialZodiac, sampleSize),
     specialZodiacBaseline: round4(average(bucket.specialZodiacBaselines) * 100),
+    observations,
     stabilityScore: round4(average(bucket.stability) * 100),
-    randomPValue: round6(randomPValue),
-    evidenceScore: sampleSize ? Math.round((1 - randomPValue) * 100) : 0,
+    mainRandomPValue: round6(randomPValue),
+    randomPValue: primaryObservation.randomPValue,
+    evidenceScore: sampleSize
+      ? Math.round((1 - primaryObservation.randomPValue) * 100)
+      : 0,
   };
 }
 
@@ -911,6 +1077,10 @@ function compareSelectionStrategies(
   right: AiBacktestStrategy,
 ) {
   return (
+    observationFor(right, "zodiac_coverage").lift -
+      observationFor(left, "zodiac_coverage").lift ||
+    observationFor(left, "zodiac_coverage").randomPValue -
+      observationFor(right, "zodiac_coverage").randomPValue ||
     right.totalMainOverlap - left.totalMainOverlap ||
     right.anyMainOverlapCount - left.anyMainOverlapCount ||
     right.specialExactCount - left.specialExactCount ||
@@ -918,8 +1088,167 @@ function compareSelectionStrategies(
   );
 }
 
+type ObservationDefinition = {
+  id: AiObservationId;
+  label: string;
+  pick: string;
+  target: string;
+  threshold: number;
+  memberCount: number;
+  baseline: number;
+  matches: (number: number) => boolean;
+};
+
+function emptyObservationBuckets(): BacktestBucket["observations"] {
+  return {
+    zodiac_coverage: { hits: 0, baselines: [] },
+    tail_coverage: { hits: 0, baselines: [] },
+    wave_threshold: { hits: 0, baselines: [] },
+    parity_majority: { hits: 0, baselines: [] },
+    size_majority: { hits: 0, baselines: [] },
+  };
+}
+
+function observationDefinitions(
+  picks: ObservationPicks,
+  drawAt: string,
+): ObservationDefinition[] {
+  const definitions = [
+    {
+      id: "zodiac_coverage",
+      label: "生肖覆盖 6+1",
+      pick: picks.zodiac,
+      target: "当期 6+1 至少出现 1 个该生肖",
+      threshold: 1,
+      matches: (number: number) => getZodiac(number, drawAt) === picks.zodiac,
+    },
+    {
+      id: "tail_coverage",
+      label: "尾数覆盖 6+1",
+      pick: `${picks.tail}尾`,
+      target: "当期 6+1 至少出现 1 个该尾数",
+      threshold: 1,
+      matches: (number: number) => number % 10 === picks.tail,
+    },
+    {
+      id: "wave_threshold",
+      label: "波色强覆盖",
+      pick: WAVE_LABEL[picks.wave],
+      target: "所选波色在当期 6+1 中至少出现 3 个",
+      threshold: 3,
+      matches: (number: number) => getWave(number) === picks.wave,
+    },
+    {
+      id: "parity_majority",
+      label: "单双多数",
+      pick: `${picks.parity}数`,
+      target: "所选单双在当期 6+1 中占多数（至少 4 个）",
+      threshold: 4,
+      matches: (number: number) =>
+        picks.parity === "奇" ? number % 2 === 1 : number % 2 === 0,
+    },
+    {
+      id: "size_majority",
+      label: "大小多数",
+      pick: `${picks.size}数`,
+      target: "所选大小在当期 6+1 中占多数（至少 4 个）",
+      threshold: 4,
+      matches: (number: number) =>
+        picks.size === "大" ? number >= 25 : number < 25,
+    },
+  ] satisfies Array<
+    Omit<ObservationDefinition, "memberCount" | "baseline">
+  >;
+
+  return definitions.map((definition) => {
+    const memberCount = countNumbers(definition.matches);
+    return {
+      ...definition,
+      memberCount,
+      baseline: exactCoverageProbability(
+        memberCount,
+        definition.threshold,
+      ),
+    };
+  });
+}
+
+function evaluateObservations(
+  picks: ObservationPicks,
+  actual: Draw,
+): Array<{ id: AiObservationId; hit: boolean; baseline: number }> {
+  const actualNumbers = [...actual.numbers, actual.special];
+  return observationDefinitions(picks, actual.drawAt).map((definition) => ({
+    id: definition.id,
+    hit:
+      definition.id === "zodiac_coverage"
+        ? isZodiacCovered(picks.zodiac, actual.drawAt, actualNumbers)
+        : actualNumbers.filter((number) => definition.matches(number)).length >=
+          definition.threshold,
+    baseline: definition.baseline,
+  }));
+}
+
+export function isZodiacCovered(
+  zodiac: string,
+  drawAt: string,
+  numbers: number[],
+) {
+  return numbers.some((number) => getZodiac(number, drawAt) === zodiac);
+}
+
+function buildBacktestObservation(
+  id: AiObservationId,
+  hits: number,
+  baselines: number[],
+): AiBacktestObservation {
+  const sampleSize = baselines.length;
+  const hitRate = rate(hits, sampleSize);
+  const baselineRate = round4(average(baselines) * 100);
+  const randomPValue = round6(
+    poissonBinomialUpperTailPValue(hits, baselines),
+  );
+  const lift = round4(hitRate - baselineRate);
+  const validationAlpha =
+    id === "zodiac_coverage"
+      ? VALIDATION_ALPHA
+      : OBSERVATION_VALIDATION_ALPHA;
+  return {
+    id,
+    label: observationLabel(id),
+    sampleSize,
+    hitCount: hits,
+    hitRate,
+    confidenceInterval: wilsonInterval(hits, sampleSize),
+    baselineRate,
+    lift,
+    randomPValue,
+    status:
+      sampleSize < MIN_BACKTEST_SEGMENT
+        ? "insufficient"
+        : lift > 0 && randomPValue < validationAlpha
+          ? "observed_above_random"
+          : "not_above_random",
+  };
+}
+
+function observationFor(
+  strategy: AiBacktestStrategy,
+  id: AiObservationId,
+): AiBacktestObservation {
+  return strategy.observations.find((observation) => observation.id === id)!;
+}
+
+function observationLabel(id: AiObservationId) {
+  if (id === "zodiac_coverage") return "生肖覆盖 6+1";
+  if (id === "tail_coverage") return "尾数覆盖 6+1";
+  if (id === "wave_threshold") return "波色强覆盖";
+  if (id === "parity_majority") return "单双多数";
+  return "大小多数";
+}
+
 function buildScenarios(
-  candidates: CandidateSet[],
+  candidates: FocusedCandidate[],
   backtest: AiBacktest,
   expectedDrawAt: string,
   dimensions: AiDimensionEvidence[],
@@ -979,10 +1308,15 @@ function buildScenarios(
         small: all.filter((number) => number < 25).length,
         tails: [...new Set(all.map((number) => number % 10))].sort((a, b) => a - b),
       },
+      observations: buildScenarioObservations(
+        candidate,
+        backtestResult,
+        expectedDrawAt,
+      ),
       supportingEvidence: [
         ...dimensionLeaders.slice(0, 2).map((item) => `${item.label}：${item.direction}`),
         backtestResult
-          ? `独立留出段平均覆盖 ${backtestResult.averageMainOverlap} 个正码`
+          ? `单生肖覆盖 6+1：独立留出 ${observationFor(backtestResult, "zodiac_coverage").hitCount}/${backtestResult.sampleSize} 期`
           : "等待回测数据",
         `与其余场景最大重合 ${Math.max(...pairwiseOverlaps, 0)} 个主号`,
       ],
@@ -999,6 +1333,87 @@ function buildScenarios(
       ],
     };
   });
+}
+
+function buildScenarioObservations(
+  candidate: FocusedCandidate,
+  backtestResult: AiBacktestStrategy | undefined,
+  expectedDrawAt: string,
+): AiScenario["observations"] {
+  return observationDefinitions(
+    candidate.observationPicks,
+    expectedDrawAt,
+  ).map((definition) => ({
+    id: definition.id,
+    label: definition.label,
+    pick: definition.pick,
+    target: definition.target,
+    threshold: definition.threshold,
+    memberCount: definition.memberCount,
+    baselineRate: round4(definition.baseline * 100),
+    backtest:
+      backtestResult
+        ? observationFor(backtestResult, definition.id)
+        : buildBacktestObservation(definition.id, 0, []),
+  }));
+}
+
+function buildPrimaryZodiacObservation(
+  candidateSets: AiScenario[],
+  backtest: AiBacktest,
+): AiPrimaryZodiacObservation {
+  const scenario =
+    candidateSets.find(
+      (candidate) => candidate.id === backtest.selectedStrategyId,
+    ) ??
+    candidateSets.find((candidate) => candidate.id === "balanced") ??
+    candidateSets[0];
+  const observation = scenario?.observations.find(
+    (item) => item.id === "zodiac_coverage",
+  );
+  if (!scenario || !observation) {
+    const emptyBacktest = buildBacktestObservation(
+      "zodiac_coverage",
+      0,
+      [],
+    );
+    return {
+      kind: "zodiac_coverage_6_plus_1",
+      scenarioId: "balanced",
+      zodiac: "—",
+      target: "当期 6+1 至少出现 1 个该生肖",
+      baselineRate: 0,
+      validation: "insufficient",
+      configuration: {
+        focus: PRIMARY_FOCUS,
+        trainWindow: backtest.trainWindow,
+        userSelectable: false,
+      },
+      backtest: emptyBacktest,
+      conclusion: "当前没有足够的有效历史生成生肖观察方向。",
+    };
+  }
+  const conclusion =
+    backtest.status === "observed_advantage"
+      ? `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”，目标是当期 6+1 任一号码出现该生肖；独立留出结果高于精确组合随机基准，但仍需前瞻复核。`
+      : backtest.status === "insufficient"
+        ? `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”作为可结算观察方向；独立历史不足，不标注统计优势。`
+        : `固定综合 ${backtest.trainWindow} 期配置的${scenario.name}选择“${observation.pick}”作为可结算观察方向；独立留出尚未证明高于精确组合随机基准。`;
+  return {
+    kind: "zodiac_coverage_6_plus_1",
+    scenarioId: scenario.id,
+    zodiac: observation.pick,
+    target: "当期 6+1 至少出现 1 个该生肖",
+    baselineRate: observation.baselineRate,
+    validation: backtest.status,
+    configuration: {
+      focus: PRIMARY_FOCUS,
+      trainWindow: backtest.trainWindow,
+      userSelectable: false,
+    },
+    backtest: observation.backtest,
+    conclusion,
+  };
 }
 
 function buildEvidenceStrength(
@@ -1066,13 +1481,13 @@ function buildLocalSynthesis(pack: Omit<ForecastPack, "localSynthesis">): AiSynt
   return {
     headline: `${GAME_META[pack.game].shortName} · ${focusLabel}多策略研判`,
     executiveSummary: recommended
-      ? `当前最值得观察的是${preferredDimension.label}维度：${preferredDimension.direction}。${recommended.name}由选择段预先确定，并通过独立留出门槛；仍需前瞻样本复核。`
-      : `当前最值得观察的是${preferredDimension.label}维度：${preferredDimension.direction}。独立留出回测尚未证明三路场景优于随机基准，本期不作优势推荐。`,
+      ? `本期单生肖观察为“${pack.zodiacObservation.zodiac}”，结算标准是 6+1 任一号码出现该生肖。${recommended.name}由选择段预先确定，并通过独立留出门槛；仍需前瞻样本复核。`
+      : `本期单生肖观察为“${pack.zodiacObservation.zodiac}”，结算标准是 6+1 任一号码出现该生肖。当前最值得同步观察的是${preferredDimension.label}维度；独立留出尚未证明高于随机基准。`,
     recommendedScenarioId: recommended?.id ?? null,
     recommendationReason: recommended
       ? `${recommended.name}通过独立留出门槛，校准证据 ${recommended.evidenceScore}。`
-      : "选择段与留出段相互独立；当前留出结果不足以支持优势推荐，系统保持弃权。",
-    uncertainty: "所有候选都处在高不确定性环境。证据指数反映样本内一致性，不是中奖概率，也不意味着下一期更容易出现。",
+      : `仍输出“${pack.zodiacObservation.zodiac}”这一可结算观察方向；选择段与留出段相互独立，当前结果不支持把它描述为已证实优势。`,
+    uncertainty: "生肖、尾数、波色、单双和大小均按事先定义的 6+1 事件结算。证据指数反映独立历史中的一致性，不是中奖概率，也不意味着下一期更容易出现。",
     strongestSignals: rankedDimensions
       .slice(0, 3)
       .map((item) => `${item.label}：${item.direction}（证据指数 ${item.evidenceScore}）`),
@@ -1136,6 +1551,39 @@ export function randomBaseline() {
     anyMainOverlapRate: round6((1 - noOverlap) * 100),
     specialExactRate: round6((1 / 49) * 100),
   };
+}
+
+export function exactCoverageProbability(
+  memberCount: number,
+  threshold = 1,
+  drawSize = 7,
+) {
+  const populationSize = 49;
+  const safeMemberCount = Math.trunc(memberCount);
+  const safeDrawSize = Math.trunc(drawSize);
+  const safeThreshold = Math.trunc(threshold);
+  if (
+    safeMemberCount < 0 ||
+    safeMemberCount > populationSize ||
+    safeDrawSize < 0 ||
+    safeDrawSize > populationSize
+  ) {
+    return 0;
+  }
+  if (safeThreshold <= 0) return 1;
+  if (safeThreshold > safeDrawSize || safeThreshold > safeMemberCount) return 0;
+  const denominator = combination(populationSize, safeDrawSize);
+  let probability = 0;
+  const upper = Math.min(safeMemberCount, safeDrawSize);
+  for (let matches = safeThreshold; matches <= upper; matches += 1) {
+    const nonMatches = safeDrawSize - matches;
+    if (nonMatches > populationSize - safeMemberCount) continue;
+    probability +=
+      (combination(safeMemberCount, matches) *
+        combination(populationSize - safeMemberCount, nonMatches)) /
+      denominator;
+  }
+  return clamp(probability, 0, 1);
 }
 
 function combinationRatio(aN: number, aK: number, bN: number, bK: number) {
@@ -1296,6 +1744,32 @@ function binomialProbability(trials: number, successes: number, probability: num
     logCombination +
       successes * Math.log(probability) +
       (trials - successes) * Math.log1p(-probability),
+  );
+}
+
+export function poissonBinomialUpperTailPValue(
+  observed: number,
+  probabilities: number[],
+) {
+  if (!probabilities.length) return 1;
+  if (observed <= 0) return 1;
+  if (observed > probabilities.length) return 0;
+  let distribution = [1];
+  probabilities.forEach((rawProbability) => {
+    const probability = clamp(rawProbability, 0, 1);
+    const next = Array(distribution.length + 1).fill(0) as number[];
+    distribution.forEach((current, hits) => {
+      next[hits] += current * (1 - probability);
+      next[hits + 1] += current * probability;
+    });
+    distribution = next;
+  });
+  return clamp(
+    distribution
+      .slice(observed)
+      .reduce((sum, probability) => sum + probability, 0),
+    0,
+    1,
   );
 }
 

@@ -1,8 +1,15 @@
 import lotteryHistory from "./lottery-history.json";
+import { getZodiac } from "./zodiac";
 
-export const GAME_IDS = ["hk", "macau", "new_macau"] as const;
+export { getZodiac } from "./zodiac";
 
-export type GameId = (typeof GAME_IDS)[number];
+export const ALL_GAME_IDS = ["hk", "macau", "new_macau"] as const;
+
+export type GameId = (typeof ALL_GAME_IDS)[number];
+
+// Public product surface: the legacy Macau feed remains available only for
+// historical compatibility, while all user-facing selectors use these two.
+export const GAME_IDS: readonly GameId[] = ["hk", "new_macau"];
 
 export type Draw = {
   game: GameId;
@@ -100,31 +107,6 @@ export function getWave(number: number): Wave {
   return "green";
 }
 
-const ZODIAC_CYCLE = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
-const LUNAR_NEW_YEAR: Record<number, string> = {
-  2020: "2020-01-25",
-  2021: "2021-02-12",
-  2022: "2022-02-01",
-  2023: "2023-01-22",
-  2024: "2024-02-10",
-  2025: "2025-01-29",
-  2026: "2026-02-17",
-  2027: "2027-02-06",
-  2028: "2028-01-26",
-  2029: "2029-02-13",
-  2030: "2030-02-03",
-};
-
-export function getZodiac(number: number, drawAt?: string): string {
-  const dateKey = drawAt?.slice(0, 10) ?? beijingDateKey(new Date());
-  let zodiacYear = Number(dateKey.slice(0, 4)) || 2026;
-  const newYear = LUNAR_NEW_YEAR[zodiacYear];
-  if (newYear && dateKey < newYear) zodiacYear -= 1;
-  const yearAnimalIndex = ((zodiacYear - 2020) % 12 + 12) % 12;
-  const offset = (number - 1) % 12;
-  return ZODIAC_CYCLE[(yearAnimalIndex - offset + 12) % 12];
-}
-
 export function formatBall(number: number): string {
   return String(number).padStart(2, "0");
 }
@@ -168,7 +150,7 @@ const SEED_DRAWS: Record<GameId, Draw[]> = {
 const HISTORY_SNAPSHOT = lotteryHistory as unknown as Record<GameId, Draw[]>;
 
 export const FALLBACK_DRAWS = Object.fromEntries(
-  GAME_IDS.map((game) => {
+  ALL_GAME_IDS.map((game) => {
     const snapshot = Array.isArray(HISTORY_SNAPSHOT[game]) ? HISTORY_SNAPSHOT[game] : [];
     const merged = [...SEED_DRAWS[game], ...snapshot].map((item) => ({ ...item, game }));
     const unique = [
@@ -394,11 +376,6 @@ function partsInBeijing(date: Date) {
   }).formatToParts(date);
   const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? 0);
   return { year: get("year"), month: get("month"), day: get("day") };
-}
-
-function beijingDateKey(date: Date) {
-  const { year, month, day } = partsInBeijing(date);
-  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
 function beijingDate(year: number, month: number, day: number, hour: number, minute: number) {

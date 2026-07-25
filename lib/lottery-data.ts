@@ -157,7 +157,7 @@ async function fetchLatestCrossCheck(game: GameId): Promise<Draw[]> {
   const sourceType: Record<GameId, string> = {
     hk: "hk",
     macau: "macau",
-    new_macau: "newmacau",
+    new_macau: "newMacau",
   };
   const response = await fetchWithTimeout(
     `https://api3.marksix6.net/lottery_api.php?type=${sourceType[game]}`,

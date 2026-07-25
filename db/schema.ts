@@ -1,4 +1,10 @@
-import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 export const aiRateLimits = sqliteTable(
   "ai_rate_limits",
@@ -38,6 +44,30 @@ export const aiForecastLedger = sqliteTable(
       table.game,
       table.settledAt,
       table.targetIssue,
+    ),
+  ],
+);
+
+export const aiPrimaryObservationLocks = sqliteTable(
+  "ai_primary_observation_locks",
+  {
+    lockId: text("lock_id").primaryKey(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    expectedDrawAt: text("expected_draw_at").notNull(),
+    algorithmVersion: text("algorithm_version").notNull(),
+    schemaVersion: text("schema_version").notNull(),
+    payloadJson: text("payload_json").notNull(),
+    lockedAt: text("locked_at").notNull(),
+    actualJson: text("actual_json"),
+    settledAt: text("settled_at"),
+  },
+  (table) => [
+    uniqueIndex("ai_primary_observation_identity_idx").on(
+      table.game,
+      table.targetIssue,
+      table.algorithmVersion,
+      table.schemaVersion,
     ),
   ],
 );

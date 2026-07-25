@@ -15,6 +15,20 @@ type LoadedEngine = {
     anyMainOverlapRate: number;
     specialExactRate: number;
   };
+  exactCoverageProbability: (
+    memberCount: number,
+    threshold?: number,
+    drawSize?: number,
+  ) => number;
+  poissonBinomialUpperTailPValue: (
+    observed: number,
+    probabilities: number[],
+  ) => number;
+  isZodiacCovered: (
+    zodiac: string,
+    drawAt: string,
+    numbers: number[],
+  ) => boolean;
   wilsonInterval: (
     successes: number,
     trials: number,
@@ -37,6 +51,7 @@ type ForecastPack = {
     numbers: number[];
     special: number;
     evidenceScore: number;
+    observations: ScenarioObservation[];
     diversity: {
       uniqueMainNumbers: number;
       maxMainOverlap: number;
@@ -53,12 +68,29 @@ type ForecastPack = {
     testCount: number;
     multipleComparisonCount: number;
     validationAlpha: number;
+    observationComparisonCount: number;
+    observationValidationAlpha: number;
     correction: string;
     status: string;
     decision: string;
     selectedStrategyId: string | null;
     selection: BacktestSegment;
     holdout: BacktestSegment;
+  };
+  zodiacObservation: {
+    kind: string;
+    scenarioId: string;
+    zodiac: string;
+    target: string;
+    baselineRate: number;
+    validation: string;
+    configuration: {
+      focus: string;
+      trainWindow: number;
+      userSelectable: boolean;
+    };
+    backtest: BacktestObservation;
+    conclusion: string;
   };
   evidenceStrength: { score: number; label: string };
   localSynthesis: { recommendedScenarioId: string | null };
@@ -79,13 +111,40 @@ type BacktestSegment = {
     specialExactCI: { low: number; high: number; method: string };
     specialZodiacCI: { low: number; high: number; method: string };
     specialZodiacBaseline: number;
+    observations: BacktestObservation[];
+    mainRandomPValue: number;
     randomPValue: number;
   }>;
+};
+
+type BacktestObservation = {
+  id: string;
+  label: string;
+  sampleSize: number;
+  hitCount: number;
+  hitRate: number;
+  confidenceInterval: { low: number; high: number; method: string };
+  baselineRate: number;
+  lift: number;
+  randomPValue: number;
+  status: string;
+};
+
+type ScenarioObservation = {
+  id: string;
+  label: string;
+  pick: string;
+  target: string;
+  threshold: number;
+  memberCount: number;
+  baselineRate: number;
+  backtest: BacktestObservation;
 };
 
 let server: ViteDevServer;
 let engine: LoadedEngine;
 let history: Record<"hk" | "macau" | "new_macau", Draw[]>;
+let zodiacFor: (number: number, drawAt: string) => string;
 
 before(async () => {
   server = await createServer({
@@ -98,8 +157,10 @@ before(async () => {
   engine = (await server.ssrLoadModule("/lib/ai-engine.ts")) as LoadedEngine;
   const lottery = (await server.ssrLoadModule("/lib/lottery.ts")) as {
     FALLBACK_DRAWS: typeof history;
+    getZodiac: typeof zodiacFor;
   };
   history = lottery.FALLBACK_DRAWS;
+  zodiacFor = lottery.getZodiac;
 });
 
 after(async () => {
@@ -119,6 +180,79 @@ test("uses the exact theoretical random baseline", () => {
   assert.ok(Math.abs(baseline.specialExactRate - (1 / 49) * 100) < 1e-6);
 });
 
+test("uses exact without-replacement baselines for the five 6+1 observations", () => {
+  const fourMemberCoverage =
+    1 - combination(45, 7) / combination(49, 7);
+  const fiveMemberCoverage =
+    1 - combination(44, 7) / combination(49, 7);
+  const redAtLeastThree = hypergeometricUpperTail(17, 3, 7);
+  const oddMajority = hypergeometricUpperTail(25, 4, 7);
+
+  assert.ok(
+    Math.abs(engine.exactCoverageProbability(4) - fourMemberCoverage) < 1e-12,
+  );
+  assert.ok(
+    Math.abs(engine.exactCoverageProbability(5) - fiveMemberCoverage) < 1e-12,
+  );
+  assert.ok(
+    Math.abs(engine.exactCoverageProbability(17, 3) - redAtLeastThree) < 1e-12,
+  );
+  assert.ok(
+    Math.abs(engine.exactCoverageProbability(25, 4) - oddMajority) < 1e-12,
+  );
+  assert.equal(engine.exactCoverageProbability(4, 8), 0);
+  assert.equal(engine.exactCoverageProbability(50), 0);
+});
+
+test("Poisson-binomial upper tails are exact for equal and unequal null rates", () => {
+  assert.ok(
+    Math.abs(
+      engine.poissonBinomialUpperTailPValue(2, [0.5, 0.5, 0.5]) - 0.5,
+    ) < 1e-12,
+  );
+  assert.ok(
+    Math.abs(
+      engine.poissonBinomialUpperTailPValue(1, [0.2, 0.4]) - 0.52,
+    ) < 1e-12,
+  );
+  assert.equal(engine.poissonBinomialUpperTailPValue(0, [0.2, 0.4]), 1);
+  assert.equal(engine.poissonBinomialUpperTailPValue(3, [0.2, 0.4]), 0);
+});
+
+test("生肖覆盖命中可来自任一正码或特码", () => {
+  const drawAt = "2026-07-25T13:32:00.000Z";
+  const targetZodiac = zodiacFor(5, drawAt);
+  const nonTargetNumbers = Array.from(
+    { length: 49 },
+    (_, index) => index + 1,
+  ).filter((number) => zodiacFor(number, drawAt) !== targetZodiac);
+
+  assert.equal(
+    engine.isZodiacCovered(
+      targetZodiac,
+      drawAt,
+      [5, ...nonTargetNumbers.slice(0, 6)],
+    ),
+    true,
+  );
+  assert.equal(
+    engine.isZodiacCovered(
+      targetZodiac,
+      drawAt,
+      [...nonTargetNumbers.slice(0, 6), 5],
+    ),
+    true,
+  );
+  assert.equal(
+    engine.isZodiacCovered(
+      targetZodiac,
+      drawAt,
+      nonTargetNumbers.slice(0, 7),
+    ),
+    false,
+  );
+});
+
 test("Wilson intervals are deterministic and contain the observed rate", () => {
   const first = engine.wilsonInterval(5, 10);
   const second = engine.wilsonInterval(5, 10);
@@ -136,7 +270,7 @@ test("Wilson intervals are deterministic and contain the observed rate", () => {
   });
 });
 
-test("uses the selected window at every walk-forward step and keeps selection separate", () => {
+test("uses the predeclared 30-period primary window and keeps selection separate", () => {
   const evaluationHistory = history.new_macau;
   const selectedWindow = evaluationHistory.slice(0, 30);
   const pack = engine.buildForecastPack(
@@ -160,6 +294,10 @@ test("uses the selected window at every walk-forward step and keeps selection se
     Math.abs(pack.backtest.validationAlpha - 0.05 / 40) < 1e-6,
   );
   assert.equal(pack.backtest.correction, "bonferroni");
+  assert.equal(pack.backtest.observationComparisonCount, 600);
+  assert.ok(
+    Math.abs(pack.backtest.observationValidationAlpha - 0.05 / 600) < 1e-6,
+  );
   assert.ok(pack.backtest.selectionCount >= 20);
   assert.ok(pack.backtest.holdoutCount >= 20);
   assert.ok(
@@ -175,8 +313,47 @@ test("uses the selected window at every walk-forward step and keeps selection se
       assert.equal(strategy.specialZodiacCI.method, "wilson");
       assert.ok(strategy.specialZodiacBaseline > 0);
       assert.ok(strategy.specialZodiacBaseline < 100);
+      assert.deepEqual(
+        strategy.observations.map((observation) => observation.id),
+        [
+          "zodiac_coverage",
+          "tail_coverage",
+          "wave_threshold",
+          "parity_majority",
+          "size_majority",
+        ],
+      );
+      for (const observation of strategy.observations) {
+        assert.equal(observation.sampleSize, segment.testCount);
+        assert.equal(observation.confidenceInterval.method, "wilson");
+        assert.ok(observation.baselineRate > 0);
+        assert.ok(observation.baselineRate < 100);
+        assert.ok(observation.randomPValue >= 0);
+        assert.ok(observation.randomPValue <= 1);
+      }
+      const zodiac = strategy.observations[0];
+      assert.equal(strategy.randomPValue, zodiac.randomPValue);
+      assert.ok(strategy.mainRandomPValue >= 0);
+      assert.ok(strategy.mainRandomPValue <= 1);
     }
   }
+  assert.equal(
+    pack.zodiacObservation.kind,
+    "zodiac_coverage_6_plus_1",
+  );
+  assert.equal(
+    pack.zodiacObservation.scenarioId,
+    pack.backtest.selectedStrategyId,
+  );
+  assert.match(pack.zodiacObservation.target, /6\+1/);
+  assert.ok(pack.zodiacObservation.zodiac.length > 0);
+  assert.ok(pack.zodiacObservation.baselineRate > 40);
+  assert.ok(pack.zodiacObservation.baselineRate < 60);
+  assert.deepEqual(pack.zodiacObservation.configuration, {
+    focus: "comprehensive",
+    trainWindow: 30,
+    userSelectable: false,
+  });
 });
 
 test("is deterministic and returns valid, deliberately diverse candidate sets", () => {
@@ -207,6 +384,31 @@ test("is deterministic and returns valid, deliberately diverse candidate sets", 
     assert.ok(candidate.diversity.maxMainOverlap <= 2);
     assert.ok(candidate.diversity.score >= 80);
     assert.ok(candidate.evidenceScore >= 0 && candidate.evidenceScore <= 99);
+    assert.deepEqual(
+      candidate.observations.map((observation) => observation.id),
+      [
+        "zodiac_coverage",
+        "tail_coverage",
+        "wave_threshold",
+        "parity_majority",
+        "size_majority",
+      ],
+    );
+    for (const observation of candidate.observations) {
+      assert.ok(observation.pick.length > 0);
+      assert.ok(observation.target.length > 0);
+      assert.ok(observation.threshold >= 1);
+      assert.ok(observation.memberCount >= 4);
+      assert.ok(
+        Math.abs(
+          observation.baselineRate / 100 -
+            engine.exactCoverageProbability(
+              observation.memberCount,
+              observation.threshold,
+            ),
+        ) < 1e-4,
+      );
+    }
   }
   for (let left = 0; left < first.candidateSets.length; left += 1) {
     for (let right = left + 1; right < first.candidateSets.length; right += 1) {
@@ -248,6 +450,32 @@ test("future evaluation rows cannot change the current forecast or backtest", ()
   assert.deepEqual(withFuture.candidateSets, baseline.candidateSets);
   assert.deepEqual(withFuture.backtest, baseline.backtest);
   assert.deepEqual(withFuture.evidenceStrength, baseline.evidenceStrength);
+});
+
+test("the official zodiac direction cannot be changed by focus or visible window", () => {
+  const evaluationHistory = history.new_macau;
+  const compact = engine.buildForecastPack(
+    "new_macau",
+    evaluationHistory.slice(0, 10),
+    "zodiac",
+    "2026-07-25T13:32:00.000Z",
+    evaluationHistory,
+  );
+  const expanded = engine.buildForecastPack(
+    "new_macau",
+    evaluationHistory.slice(0, 50),
+    "omission",
+    "2026-07-25T13:32:00.000Z",
+    evaluationHistory,
+  );
+
+  assert.deepEqual(expanded.zodiacObservation, compact.zodiacObservation);
+  assert.deepEqual(expanded.backtest, compact.backtest);
+  assert.equal(compact.backtest.trainWindow, 30);
+  assert.notDeepEqual(
+    expanded.candidateSets.map((candidate) => candidate.numbers),
+    compact.candidateSets.map((candidate) => candidate.numbers),
+  );
 });
 
 test("holdout outcomes cannot alter the strategy chosen by the earlier selection segment", () => {
@@ -373,4 +601,23 @@ function combination(n: number, k: number) {
     value = (value * (n - k + index)) / index;
   }
   return value;
+}
+
+function hypergeometricUpperTail(
+  memberCount: number,
+  threshold: number,
+  drawSize: number,
+) {
+  let probability = 0;
+  for (
+    let matches = threshold;
+    matches <= Math.min(memberCount, drawSize);
+    matches += 1
+  ) {
+    probability +=
+      (combination(memberCount, matches) *
+        combination(49 - memberCount, drawSize - matches)) /
+      combination(49, drawSize);
+  }
+  return probability;
 }

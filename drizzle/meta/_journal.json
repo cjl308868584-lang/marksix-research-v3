@@ -15,6 +15,13 @@
       "when": 1784844414752,
       "tag": "0001_sweet_epoch",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1784998988628,
+      "tag": "0002_brief_thanos",
+      "breakpoints": true
     }
   ]
 }

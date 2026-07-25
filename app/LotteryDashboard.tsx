@@ -8,7 +8,10 @@ import {
   type AiConfidenceInterval,
   type AiDimensionId,
   type AiFocus,
+  type AiObservationId,
+  type AiPrimaryZodiacObservation,
   type AiScenario,
+  type AiScenarioObservation,
 } from "../lib/ai-types";
 import {
   FALLBACK_DRAWS,
@@ -26,6 +29,7 @@ import {
   type LiveDrawProgress,
   type Wave,
 } from "../lib/lottery";
+import { mergeDrawLists } from "../lib/draw-merge";
 
 type ApiPayload = {
   game: GameId;
@@ -67,6 +71,10 @@ type ScientificReport = AiAnalysisResponse & {
       totalMainOverlap: number;
       averageMainOverlap: number | null;
       specialExactHits: number;
+      zodiacObservedForecasts: number;
+      zodiacEvaluatedForecasts: number;
+      zodiacCoverageHits: number;
+      zodiacCoverageRate: number | null;
     } | null;
   } | null;
 };
@@ -86,7 +94,7 @@ export function LotteryDashboard() {
     macau: null,
     new_macau: null,
   });
-  const [selectedGame, setSelectedGame] = useState<GameId>("hk");
+  const [selectedGame, setSelectedGame] = useState<GameId>("new_macau");
   const [windowSize, setWindowSize] = useState(30);
   const [historyVisible, setHistoryVisible] = useState(20);
   const [focus, setFocus] = useState<AiFocus>("comprehensive");
@@ -289,13 +297,14 @@ export function LotteryDashboard() {
         signal: controller.signal,
       });
       const payload = (await response.json()) as AiAnalysisResponse & { error?: string };
-      if (!response.ok || String(payload.schemaVersion) !== "3") {
+      if (!response.ok || String(payload.schemaVersion) !== "4") {
         throw new Error(payload.error || "分析服务暂时不可用。");
       }
       setAiReport(payload);
       const decisionScenario = (payload as ScientificReport).decision?.scenarioId;
       setActiveScenario(
         decisionScenario ??
+        payload.zodiacObservation?.scenarioId ??
         payload.synthesis.recommendedScenarioId ??
         payload.candidateSets[0]?.id ??
         "balanced",
@@ -377,7 +386,7 @@ export function LotteryDashboard() {
           <div className="hero-copy">
             <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · AI RESEARCH</div>
             <h1>让每一期数据<br />都有可解释的结论</h1>
-            <p>香港、澳门与新澳门三类开奖数据实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，形成清晰而克制的 AI 研究报告。</p>
+            <p>香港与新澳门双彩开奖数据实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，形成清晰而克制的 AI 研究报告。</p>
             <div className="hero-actions">
               <a className="primary-action" href="#lab">进入 AI 实验室 <span>→</span></a>
               <button className="ghost-action" type="button" onClick={() => { setDemo(false); window.setTimeout(() => setDemo(true), 0); }}>
@@ -471,8 +480,8 @@ export function LotteryDashboard() {
           <div className="ai-lab-header">
             <SectionHeading
               eyebrow="AI · EVIDENCE ENGINE"
-              title="AI 多策略预测实验室"
-              description="服务端先计算九类信号和三路候选，再以嵌套走步与独立留出验证控制选择偏差，最后由当前大模型归纳冲突并形成总结。"
+              title="AI 6+1 多维观察实验室"
+              description="以“当期 6+1 是否出现一个生肖”为主目标，并扩展尾数、波色、奇偶与大小观察；每个方向独立回测，再由大模型归纳共识与冲突。"
             />
             <AiContextBar
               game={selectedGame}
@@ -499,17 +508,17 @@ export function LotteryDashboard() {
                 ))}
               </div>
               <div className="ai-capability-list">
-                <span><i>01</i> 号码与特码分层</span>
-                <span><i>02</i> 生肖 / 波色 / 尾数</span>
-                <span><i>03</i> 冷热 / 遗漏 / 形态</span>
-                <span><i>04</i> 独立留出与随机基准</span>
+                <span><i>01</i> 6+1 单生肖覆盖</span>
+                <span><i>02</i> 尾数 / 波色 / 单双</span>
+                <span><i>03</i> 三路策略共识与冲突</span>
+                <span><i>04</i> 独立留出与精确基准</span>
               </div>
               <button className="primary-action ai-button" type="button" onClick={requestAi} disabled={aiMode === "loading"}>
                 {aiMode === "loading"
                   ? ["正在校验历史数据…", "正在运行嵌套回测…", "大模型正在归纳证据…"][aiLoadingStep]
                   : aiReport
-                    ? "重新生成 AI 深度报告"
-                    : "生成 AI 深度报告"}
+                    ? "重新生成 AI 6+1 观察报告"
+                    : "生成 AI 6+1 观察报告"}
               </button>
               <p className="microcopy">每份报告绑定彩种、目标期号、统计窗口和数据指纹；大模型不能自行编造号码或回测数字。</p>
             </div>
@@ -1100,9 +1109,9 @@ function AiReport({
         ) : (
           <div className="ai-empty-state">
             <strong>一键生成完整预测研究包</strong>
-            <p>包含九维信号、三路候选、主动弃权机制、反方证据和独立留出回测。所有数值都由统计引擎先行计算。</p>
+            <p>先给出一个可结算的 6+1 生肖方向，再展开尾数、波色、单双与大小观察；是否高于随机由独立留出回测另行标注。</p>
             <div className="empty-signal-grid">
-              <span>九维证据</span><span>三路场景</span><span>滚动回测</span><span>强总结</span>
+              <span>6+1 生肖观察</span><span>多维观察</span><span>独立结算</span><span>强总结</span>
             </div>
           </div>
         )}
@@ -1130,13 +1139,41 @@ function AiReport({
       (strategy) => strategy.id === report.backtest.selectedStrategyId,
     )
     : null;
+  const observationScenarioId =
+    report.zodiacObservation?.scenarioId ??
+    report.backtest.selectedStrategyId ??
+    report.synthesis.recommendedScenarioId ??
+    report.candidateSets[0]?.id;
+  const observationScenario = report.candidateSets.find(
+    (scenario) => scenario.id === observationScenarioId,
+  ) ?? report.candidateSets[0] ?? null;
+  const scenarioZodiacObservation = observationScenario?.observations.find(
+    (observation) => observation.id === "zodiac_coverage",
+  );
+  const zodiacDirection =
+    report.zodiacObservation?.zodiac ?? scenarioZodiacObservation?.pick ?? null;
+  const zodiacBacktest =
+    report.zodiacObservation?.backtest ?? scenarioZodiacObservation?.backtest ?? null;
+  const zodiacTarget =
+    report.zodiacObservation?.target ??
+    scenarioZodiacObservation?.target ??
+    "当期 6+1 至少出现 1 个该生肖";
+  const zodiacBaseline =
+    report.zodiacObservation?.baselineRate ??
+    scenarioZodiacObservation?.baselineRate ??
+    null;
   const observesAdvantage =
     report.backtest.status === "observed_advantage" &&
     observesByDecision &&
     Boolean(recommended && selectedBacktest);
-  const scientificConclusion = observesAdvantage ? "观察优先" : "暂无可验证优势";
+  const scientificConclusion = observesAdvantage ? "已观察到统计优势" : "结构观察 · 未证实优势";
   const verdictDetail = scientificReport.decision
-    ? [scientificReport.decision.label, ...scientificReport.decision.reasons]
+    ? [
+      scientificReport.decision.kind === "observe"
+        ? scientificReport.decision.label
+        : "未证实高于随机",
+      ...scientificReport.decision.reasons,
+    ]
       .filter(Boolean)
       .join("；")
     : report.backtest.conclusion;
@@ -1150,8 +1187,25 @@ function AiReport({
         </div>
         <small>{report.cached ? "缓存报告" : `${report.model.latencyMs / 1000}s`}</small>
       </div>
+      {zodiacDirection && zodiacBacktest && zodiacBaseline !== null && (
+        <PrimaryZodiacObservation
+          zodiac={zodiacDirection}
+          target={zodiacTarget}
+          baselineRate={zodiacBaseline}
+          backtest={zodiacBacktest}
+          conclusion={report.zodiacObservation?.conclusion ?? report.backtest.conclusion}
+          configuration={report.zodiacObservation?.configuration}
+        />
+      )}
+      {observationScenario?.observations.length ? (
+        <ObservationDeck
+          scenarioName={observationScenario.name}
+          observations={observationScenario.observations}
+        />
+      ) : null}
+      <ObservationConsensus scenarios={report.candidateSets} />
       <div className={`scientific-verdict ${observesAdvantage ? "observe" : "abstain"}`} role="status">
-        <span>科学结论</span>
+        <span>统计校准状态</span>
         <strong>{scientificConclusion}</strong>
         <p>{verdictDetail}</p>
       </div>
@@ -1179,8 +1233,8 @@ function AiReport({
         </div>
       ) : (
         <div className="ai-abstain-panel">
-          <strong>本期主动弃权，不输出“优先号码”</strong>
-          <p>三路候选仍保留作结构观察；当前独立留出结果未达到可验证优势门槛。</p>
+          <strong>本期仍提供可结算观察方向</strong>
+          <p>当前独立留出结果未证明高于随机；观察方向照常展示，且会在开奖后按预先定义的口径复核。</p>
         </div>
       )}
       <ScientificCalibration
@@ -1211,6 +1265,168 @@ function AiReport({
   );
 }
 
+function PrimaryZodiacObservation({
+  zodiac,
+  target,
+  baselineRate,
+  backtest,
+  conclusion,
+  configuration,
+}: {
+  zodiac: string;
+  target: string;
+  baselineRate: number;
+  backtest: AiScenarioObservation["backtest"];
+  conclusion: string;
+  configuration?: AiPrimaryZodiacObservation["configuration"];
+}) {
+  return (
+    <section className="primary-zodiac-observation" aria-label={`AI 6+1 生肖观察：${zodiac}`}>
+      <div className="primary-zodiac-heading">
+        <div>
+          <span>PRIMARY VIEW · 6+1 ZODIAC</span>
+          <strong>本期生肖观察</strong>
+        </div>
+        <em className={`observation-status ${backtest.status}`}>
+          {observationStatusLabel(backtest.status)}
+        </em>
+      </div>
+      <div className="primary-zodiac-core">
+        <strong aria-label={`生肖 ${zodiac}`}>{zodiac}</strong>
+        <div>
+          <span>目标口径</span>
+          <p>{target.replace("该生肖", zodiac)}</p>
+        </div>
+      </div>
+      {configuration && (
+        <div className="primary-zodiac-lock">
+          <strong>固定综合 {configuration.trainWindow} 期 · 主方向口径固定</strong>
+          <span>切换页面分析维度或统计窗口，不会改变本期主生肖方向。</span>
+        </div>
+      )}
+      <div className="primary-zodiac-metrics">
+        <span>
+          独立留出
+          <strong>{backtest.hitCount}/{backtest.sampleSize}</strong>
+          <small>{formatStatistic(backtest.hitRate)}%</small>
+        </span>
+        <span>
+          留出平均基准
+          <strong>{formatStatistic(backtest.baselineRate)}%</strong>
+          <small>各测试期精确基准</small>
+        </span>
+        <span>
+          留出与基准差
+          <strong>{backtest.lift > 0 ? "+" : ""}{formatStatistic(backtest.lift)}%</strong>
+          <small>不是中奖概率</small>
+        </span>
+        <span>
+          本期理论基准
+          <strong>{formatStatistic(baselineRate)}%</strong>
+          <small>按本期生肖号码数计算</small>
+        </span>
+      </div>
+      <p>{conclusion}</p>
+    </section>
+  );
+}
+
+function ObservationDeck({
+  scenarioName,
+  observations,
+}: {
+  scenarioName: string;
+  observations: AiScenarioObservation[];
+}) {
+  return (
+    <section className="observation-deck" aria-label={`${scenarioName}多维 6+1 观察`}>
+      <div className="observation-deck-head">
+        <div>
+          <span>MULTI-VIEW OBSERVATIONS</span>
+          <strong>{scenarioName} · 多维观察</strong>
+        </div>
+        <small>左右滑动查看</small>
+      </div>
+      <div className="observation-scroll">
+        {observations.map((observation) => (
+          <article
+            className={`observation-card ${observation.id === "zodiac_coverage" ? "primary" : ""}`}
+            key={observation.id}
+          >
+            <span>{observation.label}</span>
+            <strong>{observation.pick}</strong>
+            <p>{observation.target}</p>
+            <div>
+              <span>留出 {observation.backtest.hitCount}/{observation.backtest.sampleSize}</span>
+              <span>基准 {formatStatistic(observation.baselineRate)}%</span>
+            </div>
+            <em className={`observation-status ${observation.backtest.status}`}>
+              {observationStatusLabel(observation.backtest.status)}
+            </em>
+          </article>
+        ))}
+      </div>
+      <p className="observation-settlement-note">
+        每项观察均按预先定义的口径独立结算；不可只挑命中项展示，也不能把多个方向合并成“总命中率”。
+      </p>
+    </section>
+  );
+}
+
+function ObservationConsensus({ scenarios }: { scenarios: AiScenario[] }) {
+  const consensus = observationConsensus(scenarios);
+  if (!consensus.length) return null;
+  return (
+    <section className="observation-consensus" aria-label="三路策略观察共识">
+      <div>
+        <span>STRATEGY CONSENSUS</span>
+        <strong>三路策略共识</strong>
+      </div>
+      <div className="consensus-scroll">
+        {consensus.map((item) => (
+          <span className={item.count >= 2 ? "aligned" : "split"} key={item.id}>
+            <small>{item.label}</small>
+            <strong>{item.count >= 2 ? item.pick : "方向分歧"}</strong>
+            <em>{item.count >= 2 ? `${item.count}/3 同向` : "无多数"}</em>
+          </span>
+        ))}
+      </div>
+      <p>共识只表示三种权重得到相同方向，不代表概率叠加或独立证据。</p>
+    </section>
+  );
+}
+
+function observationConsensus(scenarios: AiScenario[]) {
+  const ids: AiObservationId[] = [
+    "zodiac_coverage",
+    "tail_coverage",
+    "wave_threshold",
+    "parity_majority",
+    "size_majority",
+  ];
+  return ids.flatMap((id) => {
+    const observations = scenarios
+      .map((scenario) => scenario.observations.find((item) => item.id === id))
+      .filter((item): item is AiScenarioObservation => Boolean(item));
+    if (!observations.length) return [];
+    const counts = new Map<string, number>();
+    observations.forEach((observation) => {
+      counts.set(observation.pick, (counts.get(observation.pick) ?? 0) + 1);
+    });
+    const [pick, count] = [...counts.entries()]
+      .sort(([leftPick, leftCount], [rightPick, rightCount]) =>
+        rightCount - leftCount || leftPick.localeCompare(rightPick, "zh-Hans-CN")
+      )[0];
+    return [{ id, label: observations[0].label, pick, count }];
+  });
+}
+
+function observationStatusLabel(status: AiScenarioObservation["backtest"]["status"]) {
+  if (status === "observed_above_random") return "留出观察高于随机";
+  if (status === "insufficient") return "样本不足";
+  return "未证实高于随机";
+}
+
 function ScientificCalibration({
   report,
   strategy,
@@ -1225,8 +1441,11 @@ function ScientificCalibration({
     report.backtest.status === "observed_advantage"
       ? "独立留出观察到优势"
       : report.backtest.status === "insufficient"
-        ? "样本不足 · 主动弃权"
+        ? "样本不足 · 仅作结构观察"
         : "未区别于精确随机基准";
+  const zodiacCalibration = strategy?.observations.find(
+    (observation) => observation.id === "zodiac_coverage",
+  );
   return (
     <section className="scientific-calibration" aria-label="候选科学校准">
       <div className="calibration-head">
@@ -1237,7 +1456,7 @@ function ScientificCalibration({
         <em className={`calibration-status ${report.backtest.status}`}>{statusLabel}</em>
       </div>
       <p className="calibration-method">
-        选择段用于挑选策略，独立留出段只做最终评估；每个测试期仅使用此前数据。系统再对可尝试的 {report.backtest.multipleComparisonCount} 种窗口与维度组合做 Bonferroni 校正（α≤{report.backtest.validationAlpha}），避免挑选偶然最好看的结果。
+        主生肖方向固定采用综合 {report.zodiacObservation.configuration.trainWindow} 期，并对预声明的 {report.backtest.multipleComparisonCount} 组配置做保守校正；选择段用于挑选策略，独立留出段只做最终评估。扩展五维观察合计校正 {report.backtest.observationComparisonCount} 次比较（α≤{report.backtest.observationValidationAlpha}），每个测试期仅使用此前数据，避免挑选偶然最好看的结果。
       </p>
       <div className="calibration-samples">
         <span>选择段 <strong>{report.backtest.selectionCount} 期</strong><small>{formatIssueRange(report.backtest.selection.startIssue, report.backtest.selection.endIssue)}</small></span>
@@ -1250,12 +1469,12 @@ function ScientificCalibration({
         <div className="forward-ledger-summary">
           <span>全量前瞻复核</span>
           <strong>
-            已冻结 {report.ledger.summary.totalForecasts} 份 · 已结算 {report.ledger.summary.settledForecasts} 份
+            官方生肖已冻结 {report.ledger.summary.zodiacObservedForecasts} 期 · 已结算 {report.ledger.summary.zodiacEvaluatedForecasts} 期
           </strong>
           <small>
-            {report.ledger.summary.evaluatedObservedForecasts > 0
-              ? `已结算观察推荐 ${report.ledger.summary.evaluatedObservedForecasts} 份；平均正码覆盖 ${formatStatistic(report.ledger.summary.averageMainOverlap ?? 0)} 个/期；特码 ${report.ledger.summary.specialExactHits}/${report.ledger.summary.evaluatedObservedForecasts}。`
-              : `已记录观察推荐 ${report.ledger.summary.observedForecasts} 份，尚无可结算的推荐样本；系统不会只挑命中期展示。`}
+            {report.ledger.summary.zodiacEvaluatedForecasts > 0
+              ? `6+1 生肖观察已结算 ${report.ledger.summary.zodiacEvaluatedForecasts} 份，命中 ${report.ledger.summary.zodiacCoverageHits} 份，命中率 ${formatStatistic(report.ledger.summary.zodiacCoverageRate ?? 0)}%；无论是否标注优势均全量计入。`
+              : `已冻结 6+1 生肖观察 ${report.ledger.summary.zodiacObservedForecasts} 份，尚无可结算样本；系统不会只挑命中期展示。`}
           </small>
         </div>
       )}
@@ -1264,9 +1483,16 @@ function ScientificCalibration({
           <div className="calibration-object">
             <span>校准对象</span>
             <strong>{strategy.name}</strong>
-            <small>{(report.decision?.kind ?? (report.backtest.decision === "recommend" ? "observe" : "abstain")) === "abstain" ? "结构展示，不作优先推荐" : "通过选择段后进入独立留出评估"}</small>
+            <small>{(report.decision?.kind ?? (report.backtest.decision === "recommend" ? "observe" : "abstain")) === "abstain" ? "照常给出观察方向，但不标注统计优势" : "通过选择段后进入独立留出评估"}</small>
           </div>
           <div className="calibration-metrics">
+            {zodiacCalibration && (
+              <CalibrationMetric
+                label="6+1 单生肖覆盖"
+                value={`${zodiacCalibration.hitCount}/${zodiacCalibration.sampleSize} · ${formatStatistic(zodiacCalibration.hitRate)}%`}
+                detail={`95% CI ${formatConfidenceInterval(zodiacCalibration.confidenceInterval, "%")} · 精确随机 ${formatStatistic(zodiacCalibration.baselineRate)}%`}
+              />
+            )}
             <CalibrationMetric
               label="平均正码覆盖"
               value={`${formatStatistic(strategy.averageMainOverlap)} 个/期`}
@@ -1281,11 +1507,6 @@ function ScientificCalibration({
               label="特码精确命中"
               value={`${strategy.specialExactCount}/${strategy.sampleSize} · ${formatStatistic(strategy.specialExactRate)}%`}
               detail={`95% CI ${formatConfidenceInterval(strategy.specialExactCI, "%")} · 随机 ${formatStatistic(report.backtest.baseline.specialExactRate)}%`}
-            />
-            <CalibrationMetric
-              label="特码生肖命中"
-              value={`${strategy.specialZodiacCount}/${strategy.sampleSize} · ${formatStatistic(strategy.specialZodiacRate)}%`}
-              detail={`95% CI ${formatConfidenceInterval(strategy.specialZodiacCI, "%")} · 精确随机 ${formatStatistic(strategy.specialZodiacBaseline)}%`}
             />
           </div>
         </>
@@ -1341,7 +1562,7 @@ function ledgerStatusLabel(
 function backtestStatusLabel(status: AiAnalysisResponse["backtest"]["status"]): string {
   if (status === "observed_advantage") return "独立留出 · 观察到优势";
   if (status === "insufficient") return "独立留出 · 样本不足";
-  return "独立留出 · 暂无可验证优势";
+  return "独立留出 · 未证实高于随机";
 }
 
 function calculateScenarioDiversity(
@@ -1417,9 +1638,11 @@ function StrategySection({
       },
       supportingEvidence: ["等待 AI 生成后展示完整证据链。"],
       counterEvidence: ["结构排序不代表中奖概率。"],
+      observations: [],
     };
   });
   const reportDecision = (report as ScientificReport | null)?.decision;
+  const primaryObservationId = report?.zodiacObservation?.scenarioId ?? null;
   const recommendedId =
     report &&
     (reportDecision ? reportDecision.kind === "observe" : report.backtest.decision === "recommend")
@@ -1471,7 +1694,11 @@ function StrategySection({
             key={scenario.id}
           >
             {scenario.name}
-            {recommendedId === scenario.id && <span>观察优先</span>}
+            {recommendedId === scenario.id
+              ? <span>留出优势</span>
+              : primaryObservationId === scenario.id
+                ? <span>主生肖方向</span>
+                : null}
           </button>
         ))}
       </div>
@@ -1481,13 +1708,9 @@ function StrategySection({
             ? scenario.numbers.filter((number) => reviewDraw.numbers.includes(number))
             : [];
           const specialExact = reviewDraw ? scenario.special === reviewDraw.special : false;
-          const predictedSpecialZodiac = getZodiac(
-            scenario.special,
-            report?.target.expectedDrawAt,
+          const primaryZodiac = scenario.observations.find(
+            (observation) => observation.id === "zodiac_coverage",
           );
-          const actualSpecialZodiac = reviewDraw
-            ? getZodiac(reviewDraw.special, reviewDraw.drawAt)
-            : null;
           const zodiacDirections = [
             ...new Set(
               [...scenario.numbers, scenario.special].map((number) =>
@@ -1499,14 +1722,21 @@ function StrategySection({
             <article
               id={`strategy-${scenario.id}`}
               data-scenario={scenario.id}
-              className={`strategy-card ${activeScenario === scenario.id ? "active" : ""} ${recommendedId === scenario.id ? "recommended" : ""}`}
+              className={`strategy-card ${activeScenario === scenario.id ? "active" : ""} ${recommendedId === scenario.id ? "recommended" : ""} ${primaryObservationId === scenario.id ? "observation-primary" : ""}`}
               key={scenario.id}
             >
               <div className="strategy-topline">
                 <span>0{index + 1}</span>
                 <span>{report ? `校准分 ${scenario.evidenceScore} · 非概率` : "本地预研"}</span>
               </div>
-              <h3>{scenario.name}{recommendedId === scenario.id && <small>观察优先</small>}</h3>
+              <h3>
+                {scenario.name}
+                {recommendedId === scenario.id
+                  ? <small>留出优势</small>
+                  : primaryObservationId === scenario.id
+                    ? <small>主生肖方向</small>
+                    : null}
+              </h3>
               <p>{scenario.description}</p>
               <BallRow
                 numbers={scenario.numbers}
@@ -1515,10 +1745,10 @@ function StrategySection({
                 drawAt={report?.target.expectedDrawAt}
               />
               <div className="strategy-zodiac-track">
-                <span>组合生肖覆盖</span>
+                <span>6+1 生肖观察</span>
+                <strong>{primaryZodiac?.pick ?? "生成报告后显示"}</strong>
+                <span>候选组合覆盖</span>
                 <strong>{zodiacDirections.join(" · ")}</strong>
-                <span>预测特码生肖</span>
-                <strong>{predictedSpecialZodiac}</strong>
               </div>
               {reviewDraw && (
                 <div className="strategy-review-result" aria-label={`${scenario.name}赛后复盘`}>
@@ -1540,14 +1770,20 @@ function StrategySection({
                         : `未中 ${formatBall(scenario.special)} → ${formatBall(reviewDraw.special)}`}
                     </strong>
                   </span>
-                  <span className={predictedSpecialZodiac === actualSpecialZodiac ? "hit" : ""}>
-                    特码生肖
-                    <strong>
-                      {predictedSpecialZodiac === actualSpecialZodiac
-                        ? `方向命中 ${actualSpecialZodiac}`
-                        : `${predictedSpecialZodiac} → ${actualSpecialZodiac}`}
-                    </strong>
-                  </span>
+                  <div className="strategy-observation-review">
+                    {scenario.observations.map((observation) => {
+                      const hit = observationHit(observation, reviewDraw);
+                      return (
+                        <span
+                          className={`${hit ? "hit" : ""} ${observation.id === "zodiac_coverage" ? "primary" : ""}`}
+                          key={observation.id}
+                        >
+                          {observation.label}
+                          <strong>{observation.pick} · {hit ? "命中" : "未中"}</strong>
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
               <div className="strategy-tags">
@@ -1572,7 +1808,7 @@ function StrategySection({
       </div>
       <div className="strategy-review-rule">
         <span>复盘口径</span>
-        <p><strong>正码命中</strong>＝候选六码与实际六码的交集；<strong>特码命中</strong>＝预测特码与实际特码完全相同；<strong>特码生肖命中</strong>＝两者按目标期开奖日期映射后的生肖相同。同生肖但不同号码只计生肖方向，不计号码命中。报告目标期结果返回后自动显示，单源结果会标记为待交叉核验。</p>
+        <p><strong>6+1 生肖命中</strong>＝预先选择的一个生肖，在当期六码加特码任一位置出现；<strong>正码命中</strong>＝候选六码与实际六码的交集；<strong>特码命中</strong>＝预测特码与实际特码完全相同。每项独立结算，报告目标期结果返回后自动显示，单源结果会标记为待交叉核验。</p>
       </div>
       <div className="responsible-note">
         <span>!</span>
@@ -1580,6 +1816,32 @@ function StrategySection({
       </div>
     </section>
   );
+}
+
+function observationHit(observation: AiScenarioObservation, draw: Draw): boolean {
+  const all = [...draw.numbers, draw.special];
+  if (observation.id === "zodiac_coverage") {
+    return all.some((number) => getZodiac(number, draw.drawAt) === observation.pick);
+  }
+  if (observation.id === "tail_coverage") {
+    const tail = Number(observation.pick.match(/\d/)?.[0]);
+    return Number.isInteger(tail) && all.some((number) => number % 10 === tail);
+  }
+  if (observation.id === "wave_threshold") {
+    const wave =
+      observation.pick.includes("红")
+        ? "red"
+        : observation.pick.includes("蓝")
+          ? "blue"
+          : "green";
+    return all.filter((number) => getWave(number) === wave).length >= observation.threshold;
+  }
+  if (observation.id === "parity_majority") {
+    const wantsOdd = observation.pick.includes("奇");
+    return all.filter((number) => (number % 2 === 1) === wantsOdd).length >= observation.threshold;
+  }
+  const wantsBig = observation.pick.includes("大");
+  return all.filter((number) => (number >= 25) === wantsBig).length >= observation.threshold;
 }
 
 function AiEvidenceSection({ report }: { report: AiAnalysisResponse }) {
@@ -1601,6 +1863,9 @@ function AiEvidenceSection({ report }: { report: AiAnalysisResponse }) {
       ) ?? null
       : null;
   const calibrationExample = selected ?? report.backtest.strategies[0] ?? null;
+  const calibrationZodiac = calibrationExample?.observations.find(
+    (observation) => observation.id === "zodiac_coverage",
+  );
   const generatedBeforeDraw =
     new Date(report.generatedAt).getTime() < new Date(report.target.expectedDrawAt).getTime();
   return (
@@ -1665,10 +1930,12 @@ function AiEvidenceSection({ report }: { report: AiAnalysisResponse }) {
           <p>{report.backtest.conclusion}</p>
           {calibrationExample && (
             <div className="backtest-metrics">
+              {calibrationZodiac && (
+                <div><span>{calibrationExample.name} · 6+1 单生肖</span><strong>{calibrationZodiac.hitCount}/{calibrationZodiac.sampleSize}</strong><small>{formatStatistic(calibrationZodiac.hitRate)}% · 95% CI {formatConfidenceInterval(calibrationZodiac.confidenceInterval, "%")} · 精确随机 {formatStatistic(calibrationZodiac.baselineRate)}%</small></div>
+              )}
               <div><span>{calibrationExample.name} · 平均正码</span><strong>{formatStatistic(calibrationExample.averageMainOverlap)} 个/期</strong><small>累计 {calibrationExample.totalMainOverlap} 个 · 95% CI {formatConfidenceInterval(calibrationExample.averageMainOverlapCI)} · 随机 {formatStatistic(report.backtest.baseline.averageMainOverlap)}</small></div>
               <div><span>至少覆盖 1 码</span><strong>{calibrationExample.anyMainOverlapCount}/{calibrationExample.sampleSize}</strong><small>{formatStatistic(calibrationExample.anyMainOverlapRate)}% · 95% CI {formatConfidenceInterval(calibrationExample.anyMainOverlapCI, "%")} · 随机 {formatStatistic(report.backtest.baseline.anyMainOverlapRate)}%</small></div>
               <div><span>特码精确命中</span><strong>{calibrationExample.specialExactCount}/{calibrationExample.sampleSize}</strong><small>{formatStatistic(calibrationExample.specialExactRate)}% · 95% CI {formatConfidenceInterval(calibrationExample.specialExactCI, "%")} · 随机 {formatStatistic(report.backtest.baseline.specialExactRate)}%</small></div>
-              <div><span>特码生肖命中</span><strong>{calibrationExample.specialZodiacCount}/{calibrationExample.sampleSize}</strong><small>{formatStatistic(calibrationExample.specialZodiacRate)}% · 95% CI {formatConfidenceInterval(calibrationExample.specialZodiacCI, "%")} · 精确随机 {formatStatistic(calibrationExample.specialZodiacBaseline)}%</small></div>
             </div>
           )}
           <div className="backtest-strategy-list">
@@ -1677,14 +1944,16 @@ function AiEvidenceSection({ report }: { report: AiAnalysisResponse }) {
               <details open={selected?.id === strategy.id} key={strategy.id}>
                 <summary>
                   <span>{strategy.name}</span>
-                  <strong>正码 {formatStatistic(strategy.averageMainOverlap)}/期</strong>
-                  <em>{strategy.specialExactCount}/{strategy.sampleSize} 期中特码</em>
+                  <strong>生肖 6+1 {strategy.observations.find((item) => item.id === "zodiac_coverage")?.hitCount ?? 0}/{strategy.sampleSize}</strong>
+                  <em>正码 {formatStatistic(strategy.averageMainOverlap)}/期</em>
                 </summary>
                 <div>
+                  {strategy.observations.map((observation) => (
+                    <p key={observation.id}>{observation.label}：{observation.hitCount}/{observation.sampleSize}（{formatStatistic(observation.hitRate)}%）；95% CI {formatConfidenceInterval(observation.confidenceInterval, "%")}；精确随机 {formatStatistic(observation.baselineRate)}%。</p>
+                  ))}
                   <p>正码累计 {strategy.totalMainOverlap} 个；95% CI {formatConfidenceInterval(strategy.averageMainOverlapCI)}；随机 {formatStatistic(report.backtest.baseline.averageMainOverlap)}。</p>
                   <p>至少一正码 {strategy.anyMainOverlapCount}/{strategy.sampleSize}（{formatStatistic(strategy.anyMainOverlapRate)}%）；95% CI {formatConfidenceInterval(strategy.anyMainOverlapCI, "%")}；随机 {formatStatistic(report.backtest.baseline.anyMainOverlapRate)}%。</p>
                   <p>特码 {strategy.specialExactCount}/{strategy.sampleSize}（{formatStatistic(strategy.specialExactRate)}%）；95% CI {formatConfidenceInterval(strategy.specialExactCI, "%")}；随机 {formatStatistic(report.backtest.baseline.specialExactRate)}%。</p>
-                  <p>特码生肖 {strategy.specialZodiacCount}/{strategy.sampleSize}（{formatStatistic(strategy.specialZodiacRate)}%）；95% CI {formatConfidenceInterval(strategy.specialZodiacCI, "%")}；精确随机 {formatStatistic(strategy.specialZodiacBaseline)}%。</p>
                 </div>
               </details>
             ))}
@@ -1737,16 +2006,6 @@ function HistoryTable({ draws }: { draws: Draw[] }) {
       </div>
     </>
   );
-}
-
-function mergeDrawLists(current: Draw[], incoming: Draw[]) {
-  return [
-    ...new Map(
-      [...current, ...incoming].map((draw) => [`${draw.game}:${draw.issue}`, draw]),
-    ).values(),
-  ]
-    .sort((left, right) => right.issue.localeCompare(left.issue, "en", { numeric: true }))
-    .slice(0, 120);
 }
 
 function mergeLiveProgress(
