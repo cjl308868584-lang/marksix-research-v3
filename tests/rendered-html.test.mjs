@@ -198,6 +198,14 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.strategy-grid[\s\S]*scroll-snap-type: x mandatory/);
   assert.match(styles, /\.topbar[\s\S]*position: sticky/);
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
+  assert.match(
+    styles,
+    /@media \(max-width: 760px\)[\s\S]*\.ai-lab \{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/,
+  );
+  assert.match(
+    styles,
+    /\.ai-intro,\s*\.ai-report \{[\s\S]*max-width: 100%/,
+  );
   assert.match(styles, /max-width: 370px/);
   assert.match(styles, /touch-action: none/);
   assert.match(styles, /\.special-stage-wrap[\s\S]*grid-column: 1 \/ -1/);

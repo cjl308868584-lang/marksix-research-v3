@@ -4236,12 +4236,14 @@ footer p {
 
   .ai-lab {
     margin-top: 10px;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
     gap: 10px;
   }
 
   .ai-intro,
   .ai-report {
+    min-width: 0;
+    max-width: 100%;
     padding: 16px 14px;
     border-radius: 11px;
   }
