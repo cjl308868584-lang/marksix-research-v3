@@ -106,10 +106,13 @@ export function buildResearchSnapshot({
   const evaluated = specs.map((spec) => evaluateRule(spec, chronological));
   const capped = applyResourceCaps(evaluated);
   const corrected = applyFalseDiscoveryRate(capped);
-  const selected = corrected
+  const annotated = corrected.map((rule) =>
+    attachCurrentRuleSignal(rule, chronological, expectedDrawAt),
+  );
+  const selected = annotated
     .filter((rule) => rule.resourceDecision === "full_backtest")
     .sort(compareRuleEvidence);
-  const negativeRules = corrected
+  const negativeRules = annotated
     .filter((rule) => rule.resourceDecision === "negative_pool")
     .sort(compareRuleEvidence)
     .slice(0, 24);
@@ -119,7 +122,7 @@ export function buildResearchSnapshot({
     ),
     36,
   );
-  const verifiedRules = corrected
+  const verifiedRules = annotated
     .filter((rule) => rule.tier === "verified")
     .sort(compareRuleEvidence);
   const forecastRules = [...verifiedRules, ...experimentalRules, ...negativeRules];
@@ -166,7 +169,7 @@ export function buildResearchSnapshot({
     verifiedRules,
     experimentalRules,
     negativeRules,
-    archivedRuleCount: corrected.filter(
+    archivedRuleCount: annotated.filter(
       (rule) =>
         rule.resourceDecision !== "full_backtest" &&
         rule.resourceDecision !== "negative_pool",
@@ -452,8 +455,28 @@ function evaluateRule(
     pValue: round6(pValue),
     qValue: 1,
     stabilityScore: rolling.stabilityScore,
+    currentPrediction: null,
+    currentTriggerMatched: false,
     resourceDecision,
     spec,
+  };
+}
+
+function attachCurrentRuleSignal(
+  rule: ResearchRuleEvidence,
+  chronological: Draw[],
+  expectedDrawAt: string,
+): ResearchRuleEvidence {
+  const currentPrediction = predictRule(
+    rule.spec,
+    chronological,
+    chronological.length,
+    expectedDrawAt,
+  );
+  return {
+    ...rule,
+    currentPrediction,
+    currentTriggerMatched: currentPrediction !== null,
   };
 }
 
@@ -558,9 +581,9 @@ function buildTargetForecasts({
     );
     const firingRules = rules.filter(
       (rule) =>
-        rule.targetId === definition.targetId &&
-        predictRule(rule.spec, chronological, chronological.length, expectedDrawAt) !==
-          null,
+        ruleAppliesToTarget(rule, definition) &&
+        rule.currentTriggerMatched &&
+        rule.currentPrediction !== null,
     );
     const formalProbabilities = values.map((value) => {
       const baseline = baselineForTarget(
@@ -620,6 +643,24 @@ function buildTargetForecasts({
             : "没有通过筛选且适用于本期的规律，保持精确随机基线。",
     };
   });
+}
+
+function ruleAppliesToTarget(
+  rule: ResearchRuleEvidence,
+  definition: TargetDefinition,
+): boolean {
+  if (rule.targetId === definition.targetId) return true;
+  if (rule.spec.target.family !== definition.family) return false;
+  if (definition.scope === "draw.6_plus_1") {
+    return (
+      rule.spec.target.scope === "special" ||
+      rule.spec.target.scope.startsWith("main.position.")
+    );
+  }
+  if (definition.scope === "main.any") {
+    return rule.spec.target.scope.startsWith("main.position.");
+  }
+  return false;
 }
 
 function adjustedProbabilities({

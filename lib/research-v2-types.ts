@@ -1,9 +1,9 @@
 import type { GameId } from "./lottery";
 
 export const RESEARCH_SCHEMA_VERSION = "1" as const;
-export const RESEARCH_ENGINE_VERSION = "research-v2.0" as const;
+export const RESEARCH_ENGINE_VERSION = "research-v2.1" as const;
 export const RULE_ENGINE_VERSION = "rule-dsl-v1" as const;
-export const MODEL_VERSION = "dual-track-shadow-v1" as const;
+export const MODEL_VERSION = "dual-track-shadow-v2" as const;
 
 export type ResearchSourceGrade =
   | "official_verified"
@@ -89,6 +89,8 @@ export type ResearchRuleEvidence = {
   pValue: number;
   qValue: number;
   stabilityScore: number;
+  currentPrediction: string | null;
+  currentTriggerMatched: boolean;
   resourceDecision:
     | "full_backtest"
     | "negative_pool"

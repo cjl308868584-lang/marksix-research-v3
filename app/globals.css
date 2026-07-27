@@ -3561,6 +3561,47 @@ footer p {
   line-height: 1.7;
 }
 
+.research-rule-card .research-rule-signal {
+  margin-bottom: 12px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 12px;
+  align-items: center;
+  border: 1px solid rgba(101, 199, 162, 0.22);
+  border-radius: 9px;
+  background: rgba(101, 199, 162, 0.07);
+}
+
+.research-rule-card.negative .research-rule-signal {
+  border-color: rgba(231, 129, 115, 0.22);
+  background: rgba(231, 129, 115, 0.06);
+}
+
+.research-rule-signal > span {
+  color: var(--dim);
+  font-size: 9px;
+}
+
+.research-rule-signal > strong {
+  color: var(--gold-bright);
+  font-family: var(--font-serif);
+  font-size: 28px;
+  font-weight: 500;
+}
+
+.research-rule-card.negative .research-rule-signal > strong {
+  color: #e78173;
+}
+
+.research-rule-signal > em {
+  grid-column: 1 / -1;
+  color: var(--muted);
+  font-size: 9px;
+  font-style: normal;
+  line-height: 1.55;
+}
+
 .research-rule-card > div {
   display: flex;
   flex-wrap: wrap;

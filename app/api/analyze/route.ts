@@ -939,6 +939,8 @@ function compactResearchForPrompt(research: ResearchSnapshot) {
     lift: rule.lift,
     brierSkill: rule.brierSkill,
     qValue: rule.qValue,
+    currentPrediction: rule.currentPrediction,
+    currentTriggerMatched: rule.currentTriggerMatched,
   });
   return {
     immutable: true,

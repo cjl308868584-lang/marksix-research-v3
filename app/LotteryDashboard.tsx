@@ -1139,16 +1139,24 @@ function ResearchV2Lab({
       right.probability - left.probability ||
       left.value.localeCompare(right.value, "zh-CN", { numeric: true }),
   );
-  const positiveRules = snapshot.experimentalRules.filter(
-    (rule) => rule.direction === "positive",
+  const allRules = [
+    ...snapshot.verifiedRules,
+    ...snapshot.experimentalRules,
+    ...snapshot.negativeRules,
+  ];
+  const activeRules = new Set(target?.activeRuleIds ?? []);
+  const positiveRules = allRules.filter(
+    (rule) =>
+      rule.direction === "positive" &&
+      (activeRules.has(rule.ruleId) || rule.targetId === target?.targetId),
   );
   const strongestPositive =
-    positiveRules.find((rule) => target?.activeRuleIds.includes(rule.ruleId)) ??
+    positiveRules.find((rule) => activeRules.has(rule.ruleId)) ??
     positiveRules[0] ??
     null;
   const strongestNegative =
+    snapshot.negativeRules.find((rule) => activeRules.has(rule.ruleId)) ??
     snapshot.negativeRules.find((rule) => rule.targetId === target?.targetId) ??
-    snapshot.negativeRules[0] ??
     null;
   return (
     <section className="research-v2" aria-label="v2 双轨概率研究">
@@ -1267,6 +1275,29 @@ function ResearchRuleCard({
       {rule ? (
         <>
           <h4>{rule.description}</h4>
+          <div className="research-rule-signal">
+            <span>
+              {rule.currentTriggerMatched
+                ? tone === "negative"
+                  ? "本期降权对象"
+                  : "本期策略结果"
+                : "本期状态"}
+            </span>
+            <strong>
+              {rule.currentPrediction
+                ? rule.spec.target.family === "number"
+                  ? formatBall(Number(rule.currentPrediction))
+                  : rule.currentPrediction
+                : "未触发"}
+            </strong>
+            <em>
+              {rule.currentTriggerMatched
+                ? tone === "negative"
+                  ? "该方向只降低权重，不等同于排除必不开。"
+                  : "前置条件已匹配，已计入实验层概率。"
+                : "前置条件与最新一期不匹配，本期不参与计算。"}
+            </em>
+          </div>
           <div>
             <small>触发 <strong>{rule.support}</strong></small>
             <small>命中 <strong>{formatResearchPercent(rule.hitRate)}</strong></small>
@@ -1276,7 +1307,7 @@ function ResearchRuleCard({
           <p>{rule.direction === "negative" ? "只进入排除与降权池，不会反向包装成正向推荐。" : "仍须独立前瞻验证，当前只影响实验层。"}</p>
         </>
       ) : (
-        <p>当前样本中没有满足资源筛选和稳定性要求的规则。</p>
+        <p>当前目标没有满足筛选且适用于本期的规则，因此没有策略结果，不会拿其他目标的规律充数。</p>
       )}
     </article>
   );

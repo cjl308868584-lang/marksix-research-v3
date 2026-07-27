@@ -58,6 +58,7 @@ type ResearchEngine = {
     resourceReductionRate: number;
     targetForecasts: Array<{
       targetId: string;
+      activeRuleIds: string[];
       formalProbabilities: Array<{
         value: string;
         probability: number;
@@ -69,12 +70,15 @@ type ResearchEngine = {
       }>;
     }>;
     experimentalRules: Array<{
+      ruleId: string;
       description: string;
       support: number;
       hitRate: number;
       baselineRate: number;
       direction: string;
       tier: string;
+      currentPrediction: string | null;
+      currentTriggerMatched: boolean;
     }>;
     negativeRules: Array<{
       direction: string;
@@ -201,6 +205,24 @@ test("discovers the user example but keeps it in the research track", () => {
   assert.ok(snapshot.generatedRuleCount > 7_000);
   assert.ok(snapshot.fullBacktestRuleCount < snapshot.generatedRuleCount * 0.1);
   assert.ok(snapshot.resourceReductionRate >= 0.95);
+  const coverage = snapshot.targetForecasts.find(
+    (target) => target.targetId === "draw.6_plus_1.zodiac",
+  );
+  assert.ok(coverage);
+  assert.ok(
+    coverage.activeRuleIds.length > 0,
+    "6+1 coverage should inherit currently firing positional zodiac rules",
+  );
+  const activeRuleIds = new Set(coverage.activeRuleIds);
+  assert.ok(
+    snapshot.experimentalRules.some(
+      (rule) =>
+        activeRuleIds.has(rule.ruleId) &&
+        rule.currentTriggerMatched &&
+        rule.currentPrediction,
+    ),
+    "an active strategy must expose its current prediction",
+  );
 });
 
 function makeInjectedHistory(count: number, verified: boolean): Draw[] {
