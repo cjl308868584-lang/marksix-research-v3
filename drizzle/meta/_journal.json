@@ -22,6 +22,13 @@
       "when": 1784998988628,
       "tag": "0002_brief_thanos",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1785144296388,
+      "tag": "0003_dizzy_goliath",
+      "breakpoints": true
     }
   ]
 }

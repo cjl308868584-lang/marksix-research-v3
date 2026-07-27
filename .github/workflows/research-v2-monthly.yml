@@ -1,0 +1,23 @@
+name: Research v2 fair-random audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "35 2 1 * *"
+
+permissions:
+  contents: read
+
+jobs:
+  fair-random-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - name: Run 10,000 fair-random histories
+        run: node --test tests/research-v2-random.test.ts

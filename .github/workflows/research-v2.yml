@@ -1,0 +1,52 @@
+name: Research v2 shadow run
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "20 14 * * *"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: research-v2-shadow
+  cancel-in-progress: false
+
+jobs:
+  research:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SITE_URL: ${{ secrets.RESEARCH_SITE_URL }}
+      RESEARCH_SECRET: ${{ secrets.RESEARCH_INGEST_SECRET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: npm ci
+      - run: pip install -e research
+      - run: npm run typecheck
+      - run: npm run test:ai
+      - run: python -m unittest discover -s research/tests -v
+      - name: Run separated game research
+        run: |
+          mkdir -p research-artifacts
+          marksix-research run --history lib/lottery-history.json --game hk --output research-artifacts/hk.json
+          marksix-research run --history lib/lottery-history.json --game new_macau --output research-artifacts/new_macau.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: research-v2-${{ github.run_id }}
+          path: research-artifacts
+          retention-days: 90
+      - name: Freeze current production snapshots
+        if: ${{ env.SITE_URL != '' && env.RESEARCH_SECRET != '' }}
+        run: |
+          marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game hk
+          marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game new_macau
+

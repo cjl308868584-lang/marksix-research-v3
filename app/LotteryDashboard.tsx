@@ -14,9 +14,12 @@ import {
   type AiScenarioObservation,
 } from "../lib/ai-types";
 import type { OnlineLearningProfile } from "../lib/ai-online-learning";
+import type {
+  ResearchRuleEvidence,
+  ResearchSnapshot,
+} from "../lib/research-v2-types";
 import {
   FALLBACK_DRAWS,
-  GAME_IDS,
   GAME_META,
   WAVE_LABEL,
   buildAnalysis,
@@ -99,6 +102,7 @@ type ScientificReport = AiAnalysisResponse & {
 
 const LIVE_POLL_MS = 3_000;
 const BACKGROUND_POLL_MS = 60_000;
+const VISIBLE_GAME_IDS: readonly GameId[] = ["new_macau", "hk"];
 
 export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const [draws, setDraws] = useState<Record<GameId, Draw[]>>(FALLBACK_DRAWS);
@@ -122,6 +126,8 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const [revealed, setRevealed] = useState(0);
   const [realReveal, setRealReveal] = useState({ key: "", count: 0 });
   const [aiReport, setAiReport] = useState<AiAnalysisResponse | null>(null);
+  const [research, setResearch] = useState<ResearchSnapshot | null>(null);
+  const [researchLoading, setResearchLoading] = useState(true);
   const [aiMode, setAiMode] = useState<AiMode>("idle");
   const [aiError, setAiError] = useState("");
   const [aiLoadingStep, setAiLoadingStep] = useState(0);
@@ -151,6 +157,8 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const chooseGame = useCallback((game: GameId) => {
     setSelectedGame(game);
     setHistoryVisible(20);
+    setResearch(null);
+    setResearchLoading(true);
     resetAi();
   }, [resetAi]);
 
@@ -165,7 +173,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   }, [resetAi]);
 
   const refresh = useCallback(async (
-    games: readonly GameId[] = GAME_IDS,
+    games: readonly GameId[] = VISIBLE_GAME_IDS,
     options: { limit?: number; fresh?: boolean } = {},
   ) => {
     const { limit = 100, fresh = false } = options;
@@ -206,12 +214,12 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
     void refresh();
     const clock = window.setInterval(() => setNow(new Date()), 1_000);
     const backgroundPoll = window.setInterval(
-      () => void refresh(GAME_IDS, { limit: 10 }),
+      () => void refresh(VISIBLE_GAME_IDS, { limit: 10 }),
       BACKGROUND_POLL_MS,
     );
     const refreshOnReturn = () => {
       if (document.visibilityState === "visible") {
-        void refresh(GAME_IDS, { limit: 5, fresh: true });
+        void refresh(VISIBLE_GAME_IDS, { limit: 5, fresh: true });
       }
     };
     window.addEventListener("focus", refreshOnReturn);
@@ -225,7 +233,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   }, [refresh]);
 
   const liveWindow = useMemo(() => getLiveWindow(selectedGame, now), [selectedGame, now]);
-  const liveGameKey = GAME_IDS
+  const liveGameKey = VISIBLE_GAME_IDS
     .filter((game) => getLiveWindow(game, now).visible)
     .join(",");
 
@@ -296,6 +304,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
 
   const applyAiReport = useCallback((payload: AiAnalysisResponse) => {
     setAiReport(payload);
+    setResearch(payload.research);
     if ([10, 30, 50, 100].includes(payload.dataQuality.requestedWindow)) {
       setWindowSize(payload.dataQuality.requestedWindow);
     }
@@ -333,7 +342,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
       };
       if (
         !response.ok ||
-        String(payload.schemaVersion) !== "4" ||
+        String(payload.schemaVersion) !== "5" ||
         payload.game !== game
       ) {
         throw new Error(payload.error || "已保存报告暂时无法读取。");
@@ -387,7 +396,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
         signal: controller.signal,
       });
       const payload = (await response.json()) as AiAnalysisResponse & { error?: string };
-      if (!response.ok || String(payload.schemaVersion) !== "4") {
+      if (!response.ok || String(payload.schemaVersion) !== "5") {
         throw new Error(payload.error || "分析服务暂时不可用。");
       }
       if (controller.signal.aborted) return;
@@ -406,6 +415,30 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
     aiAbortRef.current?.abort();
     aiRestoreAbortRef.current?.abort();
   }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch(`/api/research/forecast?game=${selectedGame}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("研究快照暂不可用");
+        return await response.json() as ResearchSnapshot;
+      })
+      .then((snapshot) => {
+        if (snapshot.game === selectedGame) setResearch(snapshot);
+      })
+      .catch((error) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) {
+          setResearch(null);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setResearchLoading(false);
+      });
+    return () => controller.abort();
+  }, [latest.issue, selectedGame]);
 
   useEffect(() => {
     drawGridRef.current?.scrollTo({ left: 0, behavior: "smooth" });
@@ -450,7 +483,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const stageReveal = demo ? revealed : realReveal.key === realRevealKey ? realReveal.count : 0;
   const orderedGames = [
     selectedGame,
-    ...GAME_IDS.filter((game) => game !== selectedGame),
+    ...VISIBLE_GAME_IDS.filter((game) => game !== selectedGame),
   ];
 
   return (
@@ -500,7 +533,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
               <span>开奖前 3 分钟自动开启开奖台</span>
             </div>
             <div className="schedule-switch" role="group" aria-label="选择彩种">
-              {GAME_IDS.map((game) => (
+              {VISIBLE_GAME_IDS.map((game) => (
                 <button
                   type="button"
                   className={selectedGame === game ? "active" : ""}
@@ -576,9 +609,9 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
         <section className="section-block" id="lab">
           <div className="ai-lab-header">
             <SectionHeading
-              eyebrow="AI · EVIDENCE ENGINE"
-              title="AI 6+1 多维观察实验室"
-              description="以“当期 6+1 是否出现一个生肖”为主目标，并扩展尾数、波色、奇偶与大小观察；每个方向独立回测，再由大模型归纳共识与冲突。"
+              eyebrow="AI · RESEARCH ENGINE V2"
+              title="双轨概率研究实验室"
+              description="正式层只使用通过验证的证据；实验层并行研究跨期、位置、生肖、波色、尾数与号码变换规律，并用黑盒模型作为影子挑战者。"
             />
             <AiContextBar
               game={selectedGame}
@@ -605,11 +638,11 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
                 ))}
               </div>
               <div className="ai-capability-list">
-                <span><i>01</i> 6+1 单生肖覆盖</span>
-                <span><i>02</i> 尾数 / 波色 / 单双</span>
-                <span><i>03</i> 三路策略共识与冲突</span>
-                <span><i>04</i> 独立留出与精确基准</span>
-                <span><i>05</i> 开奖核验后复盘学习</span>
+                <span><i>01</i> 特码 / 正码 / 6+1 全目标</span>
+                <span><i>02</i> 成千规则自动发现与去重</span>
+                <span><i>03</i> 正向证据与负向排除池</span>
+                <span><i>04</i> 快中慢模型与黑盒挑战</span>
+                <span><i>05</i> 冻结、结算、复盘再学习</span>
               </div>
               <button
                 className="primary-action ai-button"
@@ -636,6 +669,10 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
               error={aiError}
             />
           </div>
+          <ResearchV2Lab
+            snapshot={research ?? aiReport?.research ?? null}
+            loading={researchLoading}
+          />
         </section>
 
         <StrategySection
@@ -1063,11 +1100,198 @@ function SectionHeading({ eyebrow, title, description }: { eyebrow: string; titl
   return <div className="section-heading"><span>{eyebrow}</span><div><h2>{title}</h2><p>{description}</p></div></div>;
 }
 
+const RESEARCH_TARGET_TABS = [
+  { id: "draw.6_plus_1.zodiac", label: "6+1 生肖" },
+  { id: "special.zodiac", label: "特码生肖" },
+  { id: "special.number", label: "特码号码" },
+  { id: "main.position.3.zodiac", label: "第3正码" },
+  { id: "special.wave", label: "特码波色" },
+  { id: "special.tail", label: "特码尾数" },
+] as const;
+
+function ResearchV2Lab({
+  snapshot,
+  loading,
+}: {
+  snapshot: ResearchSnapshot | null;
+  loading: boolean;
+}) {
+  const [targetId, setTargetId] = useState<string>("draw.6_plus_1.zodiac");
+  const [layer, setLayer] = useState<"formal" | "experimental">("formal");
+  if (!snapshot) {
+    return (
+      <section className="research-v2 research-v2-loading" aria-live="polite">
+        <span className="panel-kicker">RESEARCH V2 · SHADOW RUN</span>
+        <h3>{loading ? "正在恢复冻结研究快照…" : "研究快照暂不可用"}</h3>
+        <p>开奖、历史与已保存 AI 报告不受影响；研究任务恢复后会自动显示同一期结果。</p>
+      </section>
+    );
+  }
+  const target =
+    snapshot.targetForecasts.find((item) => item.targetId === targetId) ??
+    snapshot.targetForecasts[0];
+  const probabilities =
+    layer === "formal"
+      ? target?.formalProbabilities ?? []
+      : target?.experimentalProbabilities ?? [];
+  const ranked = [...probabilities].sort(
+    (left, right) =>
+      right.probability - left.probability ||
+      left.value.localeCompare(right.value, "zh-CN", { numeric: true }),
+  );
+  const positiveRules = snapshot.experimentalRules.filter(
+    (rule) => rule.direction === "positive",
+  );
+  const strongestPositive =
+    positiveRules.find((rule) => target?.activeRuleIds.includes(rule.ruleId)) ??
+    positiveRules[0] ??
+    null;
+  const strongestNegative =
+    snapshot.negativeRules.find((rule) => rule.targetId === target?.targetId) ??
+    snapshot.negativeRules[0] ??
+    null;
+  return (
+    <section className="research-v2" aria-label="v2 双轨概率研究">
+      <div className="research-v2-head">
+        <div>
+          <span className="panel-kicker">RESEARCH V2 · IMMUTABLE SHADOW</span>
+          <h3>冻结概率与规律挑战场</h3>
+          <p>目标期 {snapshot.targetIssue} · 运行 {snapshot.runId.slice(0, 12)} · 数据版本 {snapshot.dataQuality.datasetVersion.slice(0, 12)}</p>
+        </div>
+        <span className={`research-tier ${snapshot.evidenceTier}`}>
+          {snapshot.evidenceTier === "verified" ? "已验证" : "影子研究"}
+        </span>
+      </div>
+
+      <div className="research-layer-switch" role="group" aria-label="选择正式层或实验层">
+        <button type="button" className={layer === "formal" ? "active" : ""} onClick={() => setLayer("formal")}>
+          正式预测
+          <small>仅已验证证据</small>
+        </button>
+        <button type="button" className={layer === "experimental" ? "active" : ""} onClick={() => setLayer("experimental")}>
+          研究实验室
+          <small>候选规律，不进入正式概率</small>
+        </button>
+      </div>
+
+      <div className="research-target-tabs" role="group" aria-label="选择研究目标">
+        {RESEARCH_TARGET_TABS.map((item) => (
+          <button
+            type="button"
+            className={target?.targetId === item.id ? "active" : ""}
+            onClick={() => setTargetId(item.id)}
+            key={item.id}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="research-probability-panel">
+        <div className="research-target-summary">
+          <span>{layer === "formal" ? "正式冻结分布" : "实验挑战分布"}</span>
+          <h4>{target?.label}</h4>
+          <p>{target?.conclusion}</p>
+        </div>
+        <div className="research-top3">
+          {ranked.slice(0, 3).map((item, index) => (
+            <article key={item.value}>
+              <span>TOP {index + 1}</span>
+              <strong>{item.label}</strong>
+              <em>{formatResearchPercent(item.probability)}</em>
+              <small>
+                基线 {formatResearchPercent(item.baseline)}
+                {item.deltaPrevious === 0
+                  ? " · 持平"
+                  : ` · 较上期 ${item.deltaPrevious > 0 ? "+" : ""}${formatResearchPercent(item.deltaPrevious)}`}
+              </small>
+            </article>
+          ))}
+        </div>
+        <div className="research-distribution">
+          {ranked.slice(0, target?.family === "number" ? 10 : ranked.length).map((item) => (
+            <div key={item.value}>
+              <span>{item.label}</span>
+              <i><b style={{ width: `${Math.min(item.probability * 100, 100)}%` }} /></i>
+              <strong>{formatResearchPercent(item.probability)}</strong>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="research-funnel">
+        <div><span>生成候选</span><strong>{snapshot.generatedRuleCount.toLocaleString("zh-CN")}</strong></div>
+        <div><span>完整回测</span><strong>{snapshot.fullBacktestRuleCount.toLocaleString("zh-CN")}</strong></div>
+        <div><span>已淘汰资源</span><strong>{formatResearchPercent(snapshot.resourceReductionRate)}</strong></div>
+        <div><span>正式样本</span><strong>{snapshot.dataQuality.formalSampleSize}</strong></div>
+      </div>
+
+      <div className="research-evidence-grid">
+        <ResearchRuleCard title="最强正向候选" rule={strongestPositive} tone="positive" />
+        <ResearchRuleCard title="最强负向 / 降权证据" rule={strongestNegative} tone="negative" />
+      </div>
+
+      <div className="research-model-grid">
+        {snapshot.modelComparison.map((model) => (
+          <article key={model.id}>
+            <div><span>{model.role === "baseline" ? "基线" : model.role === "challenger" ? "挑战者" : "可解释轨"}</span><em>{model.status === "active" ? "运行中" : model.status === "shadow" ? "影子" : "样本不足"}</em></div>
+            <strong>{model.label}</strong>
+            <p>{model.note}</p>
+            <small>{model.window ? `${model.window} 期窗口` : "全历史"} · 样本 {model.sampleSize}</small>
+          </article>
+        ))}
+      </div>
+
+      <div className="research-postmortem">
+        <span className="panel-kicker">PREVIOUS DELTA · POSTMORTEM</span>
+        <h4>{snapshot.previousForecastDelta.summary}</h4>
+        <p>{snapshot.postmortem?.summary ?? "尚无可结算的上一期冻结研究预测；本期结果会在核验后自动评分。"}</p>
+        <small>{snapshot.postmortem?.nextAction ?? snapshot.notice}</small>
+      </div>
+    </section>
+  );
+}
+
+function ResearchRuleCard({
+  title,
+  rule,
+  tone,
+}: {
+  title: string;
+  rule: ResearchRuleEvidence | null;
+  tone: "positive" | "negative";
+}) {
+  return (
+    <article className={`research-rule-card ${tone}`}>
+      <span>{title}</span>
+      {rule ? (
+        <>
+          <h4>{rule.description}</h4>
+          <div>
+            <small>触发 <strong>{rule.support}</strong></small>
+            <small>命中 <strong>{formatResearchPercent(rule.hitRate)}</strong></small>
+            <small>基线 <strong>{formatResearchPercent(rule.baselineRate)}</strong></small>
+            <small>q 值 <strong>{rule.qValue.toFixed(3)}</strong></small>
+          </div>
+          <p>{rule.direction === "negative" ? "只进入排除与降权池，不会反向包装成正向推荐。" : "仍须独立前瞻验证，当前只影响实验层。"}</p>
+        </>
+      ) : (
+        <p>当前样本中没有满足资源筛选和稳定性要求的规则。</p>
+      )}
+    </article>
+  );
+}
+
+function formatResearchPercent(value: number) {
+  const scaled = value * 100;
+  return `${Math.abs(scaled) >= 10 ? scaled.toFixed(1) : scaled.toFixed(2)}%`;
+}
+
 function AnalysisToolbar({ game, windowSize, available, onGame, onWindow }: { game: GameId; windowSize: number; available: number; onGame: (game: GameId) => void; onWindow: (size: number) => void }) {
   return (
     <div className="analysis-toolbar">
       <div className="segmented" role="group" aria-label="彩种">
-        {GAME_IDS.map((item) => <button type="button" className={game === item ? "active" : ""} onClick={() => onGame(item)} key={item}>{GAME_META[item].shortName}</button>)}
+        {VISIBLE_GAME_IDS.map((item) => <button type="button" className={game === item ? "active" : ""} onClick={() => onGame(item)} key={item}>{GAME_META[item].shortName}</button>)}
       </div>
       <div className="window-controls"><span>统计窗口</span>{[10, 30, 50, 100].map((size) => <button type="button" disabled={available < size && size !== 10} className={windowSize === size ? "active" : ""} onClick={() => onWindow(size)} key={size}>近 {size} 期</button>)}</div>
       <span className="sample-count">有效样本 {Math.min(windowSize, available)} 期</span>

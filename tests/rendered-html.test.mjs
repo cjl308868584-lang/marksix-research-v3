@@ -44,12 +44,12 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /号码 12，羊，红波/);
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
-  assert.match(html, /AI 6\+1 多维观察实验室/);
-  assert.match(html, /每个方向独立回测/);
+  assert.match(html, /双轨概率研究实验室/);
+  assert.match(html, /正式层只使用通过验证的证据/);
   assert.match(html, /6\+1 生肖观察/);
   assert.match(html, /三路候选策略/);
   assert.match(html, /6\+1 生肖观察/);
-  assert.match(html, /三路策略共识与冲突/);
+  assert.match(html, /正向证据与负向排除池/);
   assert.match(html, /正码命中/);
   assert.match(html, /九维证据/);
   assert.match(html, /滚动回测/);
@@ -124,7 +124,7 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /已锁定 · 不可篡改/);
   assert.match(dashboard, /全量前瞻复核/);
   assert.match(dashboard, /系统不会只挑命中期展示/);
-  assert.match(dashboard, /String\(payload\.schemaVersion\) !== "4"/);
+  assert.match(dashboard, /String\(payload\.schemaVersion\) !== "5"/);
   assert.match(dashboard, /嵌套走步 · 独立留出验证/);
   assert.match(dashboard, /selectionCount/);
   assert.match(dashboard, /holdoutCount/);
@@ -236,8 +236,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(analyzeRoute, /safety_identifier/);
   assert.match(analyzeRoute, /store: false/);
   assert.match(analyzeRoute, /isSafeModelText/);
-  assert.match(analyzeRoute, /forecast-engine-v5\.0/);
-  assert.match(analyzeRoute, /evidence-synthesis-v5/);
+  assert.match(analyzeRoute, /forecast-engine-v6\.0/);
+  assert.match(analyzeRoute, /evidence-synthesis-v6/);
   assert.match(
     analyzeRoute,
     /loadServerDraws\(\s*game,\s*MAX_HISTORY_DRAWS,\s*analysisCutoff,\s*\)/,
@@ -274,11 +274,11 @@ test("keeps the product implementation free of starter preview artifacts", async
     (analyzeRoute.match(/max_output_tokens:\s*3_600/g) ?? []).length,
     1,
   );
-  assert.match(analyzeRoute, /不能改变服务器决策或生肖观察方向/);
+  assert.match(analyzeRoute, /不能改变服务器决策、概率、证据等级或生肖观察方向/);
   assert.doesNotMatch(analyzeRoute, /request\.headers\.get\("user-agent"\)/);
   assert.match(aiEngine, /buildWalkForwardBacktest/);
   assert.match(aiEngine, /noLookahead: true/);
-  assert.match(aiTypes, /schemaVersion: "4"/);
+  assert.match(aiTypes, /schemaVersion: "5"/);
   assert.match(aiTypes, /nested_holdout_walk_forward/);
   assert.match(aiTypes, /correction: "bonferroni"/);
   assert.match(aiTypes, /averageMainOverlapCI/);
@@ -382,7 +382,9 @@ test("AI endpoint returns a server-locked scientific abstention on stale snapsho
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("cache-control"), "private, no-store");
     const payload = await response.json();
-    assert.equal(payload.schemaVersion, "4");
+    assert.equal(payload.schemaVersion, "5");
+    assert.equal(payload.research.mode, "shadow");
+    assert.ok(Array.isArray(payload.research.targetForecasts));
     assert.equal(payload.dataQuality.sourceMode, "snapshot");
     assert.equal(payload.decision.kind, "abstain");
     assert.equal(payload.decision.scenarioId, null);

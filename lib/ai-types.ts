@@ -1,4 +1,5 @@
 import type { GameId, Wave } from "./lottery";
+import type { ResearchSnapshot } from "./research-v2-types";
 
 export const AI_FOCUS_OPTIONS = [
   { id: "comprehensive", label: "综合" },
@@ -216,7 +217,7 @@ export type AiFallbackReason =
   | "refusal";
 
 export type AiAnalysisResponse = {
-  schemaVersion: "4";
+  schemaVersion: "5";
   requestId: string;
   mode: "ai" | "statistical";
   status: "ok" | "degraded";
@@ -253,6 +254,7 @@ export type AiAnalysisResponse = {
     penalties: string[];
   };
   backtest: AiBacktest;
+  research: ResearchSnapshot;
   risk: {
     randomnessNotice: string;
     noGuarantee: string;
