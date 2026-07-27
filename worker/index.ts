@@ -26,25 +26,26 @@ interface ExecutionContext {
 // const imageConfig: ImageConfig = { dangerouslyAllowSVG: true };
 
 const worker = {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env | undefined, ctx: ExecutionContext): Promise<Response> {
+    const bindings = env ?? ({} as Env);
     const runtime = globalThis as typeof globalThis & {
       __marksixD1?: D1Database;
     };
-    runtime.__marksixD1 = env.DB;
+    runtime.__marksixD1 = bindings.DB;
     const url = new URL(request.url);
 
-    if (url.pathname === "/_vinext/image") {
+    if (url.pathname === "/_vinext/image" && bindings.ASSETS && bindings.IMAGES) {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
       return handleImageOptimization(request, {
-        fetchAsset: (path) => env.ASSETS.fetch(new Request(new URL(path, request.url))),
+        fetchAsset: (path) => bindings.ASSETS.fetch(new Request(new URL(path, request.url))),
         transformImage: async (body, { width, format, quality }) => {
-          const result = await env.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
+          const result = await bindings.IMAGES.input(body).transform(width > 0 ? { width } : {}).output({ format, quality });
           return result.response();
         },
       }, allowedWidths);
     }
 
-    return handler.fetch(request, env, ctx);
+    return handler.fetch(request, bindings, ctx);
   },
 };
 
