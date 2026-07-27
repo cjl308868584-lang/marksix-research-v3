@@ -119,22 +119,12 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const [selectedGame, setSelectedGame] = useState<GameId>("new_macau");
   const [windowSize, setWindowSize] = useState(30);
   const [historyVisible, setHistoryVisible] = useState(20);
-  const [focus, setFocus] = useState<AiFocus>("comprehensive");
   const [now, setNow] = useState(() => new Date(initialNow));
   const [demo, setDemo] = useState(false);
   const [demoSeconds, setDemoSeconds] = useState(3);
   const [revealed, setRevealed] = useState(0);
   const [realReveal, setRealReveal] = useState({ key: "", count: 0 });
-  const [aiReport, setAiReport] = useState<AiAnalysisResponse | null>(null);
-  const [research, setResearch] = useState<ResearchSnapshot | null>(null);
-  const [researchLoading, setResearchLoading] = useState(true);
-  const [aiMode, setAiMode] = useState<AiMode>("idle");
-  const [aiError, setAiError] = useState("");
-  const [aiLoadingStep, setAiLoadingStep] = useState(0);
-  const [activeScenario, setActiveScenario] = useState<AiScenario["id"]>("balanced");
   const [activeSection, setActiveSection] = useState("draws");
-  const aiAbortRef = useRef<AbortController | null>(null);
-  const aiRestoreAbortRef = useRef<AbortController | null>(null);
   const drawGridRef = useRef<HTMLElement | null>(null);
   const refreshInFlightRef = useRef(new Set<string>());
   const drawsRef = useRef(draws);
@@ -143,34 +133,14 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
     drawsRef.current = draws;
   }, [draws]);
 
-  const resetAi = useCallback(() => {
-    aiAbortRef.current?.abort();
-    aiAbortRef.current = null;
-    aiRestoreAbortRef.current?.abort();
-    aiRestoreAbortRef.current = null;
-    setAiReport(null);
-    setAiMode("idle");
-    setAiError("");
-    setAiLoadingStep(0);
-  }, []);
-
   const chooseGame = useCallback((game: GameId) => {
     setSelectedGame(game);
     setHistoryVisible(20);
-    setResearch(null);
-    setResearchLoading(true);
-    resetAi();
-  }, [resetAi]);
+  }, []);
 
   const chooseWindow = useCallback((size: number) => {
     setWindowSize(size);
-    resetAi();
-  }, [resetAi]);
-
-  const chooseFocus = useCallback((item: AiFocus) => {
-    setFocus(item);
-    resetAi();
-  }, [resetAi]);
+  }, []);
 
   const refresh = useCallback(async (
     games: readonly GameId[] = VISIBLE_GAME_IDS,
@@ -302,150 +272,12 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
     return () => window.clearInterval(interval);
   }, [isCurrentResult, realRevealKey]);
 
-  const applyAiReport = useCallback((payload: AiAnalysisResponse) => {
-    setAiReport(payload);
-    setResearch(payload.research);
-    if ([10, 30, 50, 100].includes(payload.dataQuality.requestedWindow)) {
-      setWindowSize(payload.dataQuality.requestedWindow);
-    }
-    setFocus(payload.focus);
-    const decisionScenario = (payload as ScientificReport).decision?.scenarioId;
-    setActiveScenario(
-      decisionScenario ??
-      payload.zodiacObservation?.scenarioId ??
-      payload.synthesis.recommendedScenarioId ??
-      payload.candidateSets[0]?.id ??
-      "balanced",
-    );
-    setAiMode(payload.mode === "ai" ? "ai" : "statistical");
-  }, []);
-
-  const restoreAi = useCallback(async (game: GameId) => {
-    if (aiAbortRef.current) return;
-    aiRestoreAbortRef.current?.abort();
-    const controller = new AbortController();
-    aiRestoreAbortRef.current = controller;
-    setAiError("");
-    setAiMode("restoring");
-    try {
-      const response = await fetch(
-        `/api/analyze?${new URLSearchParams({ game })}`,
-        { cache: "no-store", signal: controller.signal },
-      );
-      if (response.status === 204) {
-        setAiReport(null);
-        setAiMode("idle");
-        return;
-      }
-      const payload = (await response.json()) as AiAnalysisResponse & {
-        error?: string;
-      };
-      if (
-        !response.ok ||
-        String(payload.schemaVersion) !== "5" ||
-        payload.game !== game
-      ) {
-        throw new Error(payload.error || "已保存报告暂时无法读取。");
-      }
-      applyAiReport(payload);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setAiReport(null);
-      setAiMode("idle");
-    } finally {
-      if (aiRestoreAbortRef.current === controller) {
-        aiRestoreAbortRef.current = null;
-      }
-    }
-  }, [applyAiReport]);
-
-  useEffect(() => {
-    const restoreTimer = window.setTimeout(
-      () => void restoreAi(selectedGame),
-      0,
-    );
-    return () => {
-      window.clearTimeout(restoreTimer);
-      aiRestoreAbortRef.current?.abort();
-    };
-  }, [latest.issue, latest.verified, restoreAi, selectedGame]);
-
-  const requestAi = useCallback(async () => {
-    aiRestoreAbortRef.current?.abort();
-    aiAbortRef.current?.abort();
-    const controller = new AbortController();
-    aiAbortRef.current = controller;
-    setAiReport(null);
-    setAiError("");
-    setAiLoadingStep(0);
-    setAiMode("loading");
-    const progress = window.setInterval(
-      () => setAiLoadingStep((current) => Math.min(current + 1, 2)),
-      1_400,
-    );
-    try {
-      const response = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          game: selectedGame,
-          window: windowSize,
-          focus,
-          depth: "standard",
-        }),
-        signal: controller.signal,
-      });
-      const payload = (await response.json()) as AiAnalysisResponse & { error?: string };
-      if (!response.ok || String(payload.schemaVersion) !== "5") {
-        throw new Error(payload.error || "分析服务暂时不可用。");
-      }
-      if (controller.signal.aborted) return;
-      applyAiReport(payload);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") return;
-      setAiError(error instanceof Error ? error.message : "分析服务暂时不可用。");
-      setAiMode("error");
-    } finally {
-      window.clearInterval(progress);
-      if (aiAbortRef.current === controller) aiAbortRef.current = null;
-    }
-  }, [applyAiReport, focus, selectedGame, windowSize]);
-
-  useEffect(() => () => {
-    aiAbortRef.current?.abort();
-    aiRestoreAbortRef.current?.abort();
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void fetch(`/api/research/forecast?game=${selectedGame}`, {
-      cache: "no-store",
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("研究快照暂不可用");
-        return await response.json() as ResearchSnapshot;
-      })
-      .then((snapshot) => {
-        if (snapshot.game === selectedGame) setResearch(snapshot);
-      })
-      .catch((error) => {
-        if (!(error instanceof DOMException && error.name === "AbortError")) {
-          setResearch(null);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setResearchLoading(false);
-      });
-    return () => controller.abort();
-  }, [latest.issue, selectedGame]);
-
   useEffect(() => {
     drawGridRef.current?.scrollTo({ left: 0, behavior: "smooth" });
   }, [selectedGame]);
 
   useEffect(() => {
-    const sections = ["draws", "analysis", "lab", "history"];
+    const sections = ["draws", "analysis", "history"];
     let frame = 0;
     const syncActiveSection = () => {
       window.cancelAnimationFrame(frame);
@@ -499,7 +331,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
         <nav className="topnav" aria-label="主导航">
           <a href="#draws">今日开奖</a>
           <a href="#analysis">多维分析</a>
-          <a href="#lab">AI 实验室</a>
+          <a href="/research">规律研究</a>
           <a href="#history">历史记录</a>
         </nav>
         <div className="time-block" aria-live="polite">
@@ -511,11 +343,11 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
       <main id="top">
         <section className="hero" id="draws">
           <div className="hero-copy">
-            <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · AI RESEARCH</div>
+            <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · RULE RESEARCH</div>
             <h1>让每一期数据<br />都有可解释的结论</h1>
-            <p>香港与新澳门双彩开奖数据实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，形成清晰而克制的 AI 研究报告。</p>
+            <p>香港与新澳门双彩开奖数据实时校验，结合号码、生肖、波色、遗漏、形态与滚动回测，把每条候选规律的证据说清楚。</p>
             <div className="hero-actions">
-              <a className="primary-action" href="#lab">进入 AI 实验室 <span>→</span></a>
+              <a className="primary-action" href="/research">进入规律研究 <span>→</span></a>
               <button className="ghost-action" type="button" onClick={() => { setDemo(false); window.setTimeout(() => setDemo(true), 0); }}>
                 预览开奖动效
               </button>
@@ -606,86 +438,6 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
           </div>
         </section>
 
-        <section className="section-block" id="lab">
-          <div className="ai-lab-header">
-            <SectionHeading
-              eyebrow="AI · RESEARCH ENGINE V2"
-              title="双轨概率研究实验室"
-              description="正式层只使用通过验证的证据；实验层并行研究跨期、位置、生肖、波色、尾数与号码变换规律，并用黑盒模型作为影子挑战者。"
-            />
-            <AiContextBar
-              game={selectedGame}
-              latest={latest}
-              target={liveWindow.target}
-              windowSize={Math.min(windowSize, draws[selectedGame].length)}
-              report={aiReport}
-            />
-          </div>
-          <div className="ai-lab">
-            <div className="ai-intro">
-              <span className="control-label">选择主研维度</span>
-              <div className="focus-tabs" role="group" aria-label="AI 主研维度">
-                {AI_FOCUS_OPTIONS.map((item) => (
-                  <button
-                    type="button"
-                    aria-pressed={focus === item.id}
-                    className={focus === item.id ? "active" : ""}
-                    onClick={() => chooseFocus(item.id)}
-                    key={item.id}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-              <div className="ai-capability-list">
-                <span><i>01</i> 特码 / 正码 / 6+1 全目标</span>
-                <span><i>02</i> 成千规则自动发现与去重</span>
-                <span><i>03</i> 正向证据与负向排除池</span>
-                <span><i>04</i> 快中慢模型与黑盒挑战</span>
-                <span><i>05</i> 冻结、结算、复盘再学习</span>
-              </div>
-              <button
-                className="primary-action ai-button"
-                type="button"
-                onClick={requestAi}
-                disabled={aiMode === "loading" || aiMode === "restoring"}
-              >
-                {aiMode === "restoring"
-                  ? "正在恢复已保存报告…"
-                  : aiMode === "loading"
-                  ? ["正在校验历史数据…", "正在运行嵌套回测…", "大模型正在归纳证据…"][aiLoadingStep]
-                  : aiReport
-                    ? "刷新本期已保存报告"
-                    : "生成 AI 6+1 观察报告"}
-              </button>
-              <p className="microcopy">通过数据核验且 AI 完成的报告会按彩种与目标期保存，刷新页面直接恢复；访问分析页面并取得已核验开奖号时，系统会自动复盘已冻结记录。</p>
-            </div>
-            <AiReport
-              analysis={analysis}
-              report={aiReport}
-              mode={aiMode}
-              focus={focus}
-              game={selectedGame}
-              error={aiError}
-            />
-          </div>
-          <ResearchV2Lab
-            snapshot={research ?? aiReport?.research ?? null}
-            loading={researchLoading}
-          />
-        </section>
-
-        <StrategySection
-          analysis={analysis}
-          report={aiReport}
-          latest={latest}
-          targetDrawAt={liveWindow.target.toISOString()}
-          activeScenario={activeScenario}
-          onScenario={setActiveScenario}
-        />
-
-        {aiReport && <AiEvidenceSection report={aiReport} />}
-
         <section className="history-section section-block" id="history">
           <SectionHeading
             eyebrow="DRAW ARCHIVE"
@@ -709,12 +461,12 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
       <footer>
         <div className="footer-brand">六合智研 <span>MARK SIX INTELLIGENCE</span></div>
         <p>第三方数据研究工具 · 非官方彩票服务 · 不销售彩票 · 不构成投注建议</p>
-        <div className="footer-links"><a href="#analysis">方法说明</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
+        <div className="footer-links"><a href="/research">规律研究</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
       <nav className="mobile-nav" aria-label="手机端快捷导航">
         <a onClick={() => setActiveSection("draws")} className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
         <a onClick={() => setActiveSection("analysis")} className={activeSection === "analysis" ? "active" : ""} aria-current={activeSection === "analysis" ? "page" : undefined} href="#analysis"><span>02</span>统计</a>
-        <a onClick={() => setActiveSection("lab")} className={activeSection === "lab" ? "active" : ""} aria-current={activeSection === "lab" ? "page" : undefined} href="#lab"><span>03</span>AI</a>
+        <a href="/research"><span>03</span>规律</a>
         <a onClick={() => setActiveSection("history")} className={activeSection === "history" ? "active" : ""} aria-current={activeSection === "history" ? "page" : undefined} href="#history"><span>04</span>历史</a>
       </nav>
     </div>

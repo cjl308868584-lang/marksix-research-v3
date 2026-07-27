@@ -35,7 +35,7 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>六合智研｜香港与新澳门开奖及 AI 预测研究<\/title>/i);
+  assert.match(html, /<title>六合智研｜香港与新澳门开奖及规律研究<\/title>/i);
   assert.match(html, /让每一期数据/);
   assert.match(html, /北京时间/);
   assert.match(html, /香港六合彩/);
@@ -44,25 +44,33 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /号码 12，羊，红波/);
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
-  assert.match(html, /双轨概率研究实验室/);
-  assert.match(html, /正式层只使用通过验证的证据/);
-  assert.match(html, /6\+1 生肖观察/);
-  assert.match(html, /三路候选策略/);
-  assert.match(html, /6\+1 生肖观察/);
-  assert.match(html, /正向证据与负向排除池/);
-  assert.match(html, /正码命中/);
-  assert.match(html, /九维证据/);
-  assert.match(html, /滚动回测/);
+  assert.match(html, /进入规律研究/);
+  assert.match(html, /href="\/research"/);
+  assert.doesNotMatch(html, /双轨概率研究实验室/);
+  assert.doesNotMatch(html, /三路候选策略/);
   assert.match(html, /历史开奖记录/);
   assert.match(html, /不构成投注建议/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Your site is taking shape/i);
 });
 
+test("server-renders the dedicated rule research workspace", async () => {
+  const response = await render("/research");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>规律研究中心｜六合智研<\/title>/i);
+  assert.match(html, /逐条研究规律/);
+  assert.match(html, /历史样本、实际命中、随机基线、收缩后提升/);
+  assert.match(html, /新澳门六合彩/);
+  assert.match(html, /香港六合彩/);
+  assert.match(html, /正在读取冻结规律与回测结果/);
+});
+
 test("keeps the product implementation free of starter preview artifacts", async () => {
-  const [page, layout, dashboard, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
+  const [page, layout, dashboard, researchWorkspace, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/LotteryDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../lib/lottery.ts", import.meta.url), "utf8"),
@@ -109,60 +117,22 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /destination-out/);
   assert.match(dashboard, /onLostPointerCapture/);
   assert.match(dashboard, /tabIndex=\{complete \? -1 : 0\}/);
-  assert.match(dashboard, /AI_FOCUS_OPTIONS/);
-  assert.match(dashboard, /AiEvidenceSection/);
-  assert.match(dashboard, /scientific-verdict/);
-  assert.match(dashboard, /统计校准状态/);
-  assert.match(dashboard, /结构观察 · 未证实优势/);
-  assert.match(dashboard, /PrimaryZodiacObservation/);
-  assert.match(dashboard, /ObservationDeck/);
-  assert.match(dashboard, /ObservationConsensus/);
-  assert.match(dashboard, /observationHit/);
-  assert.match(dashboard, /report\.backtest\.decision === "recommend"/);
-  assert.match(dashboard, /scientificReport\.decision\.kind === "observe"/);
-  assert.match(dashboard, /ledgerStatusLabel/);
-  assert.match(dashboard, /已锁定 · 不可篡改/);
-  assert.match(dashboard, /全量前瞻复核/);
-  assert.match(dashboard, /系统不会只挑命中期展示/);
-  assert.match(dashboard, /String\(payload\.schemaVersion\) !== "5"/);
-  assert.match(dashboard, /嵌套走步 · 独立留出验证/);
-  assert.match(dashboard, /selectionCount/);
-  assert.match(dashboard, /holdoutCount/);
-  assert.match(dashboard, /multipleComparisonCount/);
-  assert.match(dashboard, /Bonferroni/);
-  assert.match(dashboard, /averageMainOverlapCI/);
-  assert.match(dashboard, /anyMainOverlapCount/);
-  assert.match(dashboard, /specialExactCount/);
-  assert.match(dashboard, /specialExactCI/);
-  assert.match(dashboard, /zodiacObservation/);
-  assert.match(dashboard, /strategy\.observations/);
-  assert.match(dashboard, /observationComparisonCount/);
-  assert.match(dashboard, /configuration\.trainWindow/);
-  assert.match(dashboard, /dataQuality\.verifiedRatio/);
-  assert.match(dashboard, /report\.model\.name/);
-  assert.match(dashboard, /depth: "standard"/);
-  assert.match(dashboard, /EVIDENCE SYNTHESIS/);
-  assert.match(dashboard, /restoreAi/);
-  assert.match(dashboard, /已恢复存档/);
-  assert.match(dashboard, /OnlineLearningPanel/);
-  assert.match(dashboard, /learningReview/);
-  assert.match(dashboard, /只从下一份报告开始参与判断/);
-  assert.match(dashboard, /actualDrawAt/);
-  assert.match(dashboard, /后续开奖结果不会倒改本期方向/);
-  assert.match(dashboard, /profile\.sourceStatus === "unavailable"/);
-  assert.match(dashboard, /学习库暂不可用/);
-  assert.match(dashboard, /本期未使用在线调权/);
-  assert.doesNotMatch(dashboard, /DEEP REASONING/);
-  assert.doesNotMatch(dashboard, /GPT‑5\.6/);
-  assert.match(dashboard, /ai-recommendation-balls/);
-  assert.match(dashboard, /diversity-strip/);
-  assert.match(dashboard, /uniqueMainNumbers/);
-  assert.match(dashboard, /maxMainOverlap/);
-  assert.match(dashboard, /averageJaccard/);
-  assert.match(dashboard, /strategy-review-result/);
-  assert.match(dashboard, /特码号码/);
-  assert.match(dashboard, /6\+1 生肖命中/);
-  assert.match(dashboard, /结果已返回 · 待交叉核验/);
+  assert.match(dashboard, /href="\/research"/);
+  assert.doesNotMatch(
+    dashboard.slice(
+      dashboard.indexOf("export function LotteryDashboard"),
+      dashboard.indexOf("function Ball"),
+    ),
+    /三路候选策略|双轨概率研究实验室|冻结概率与规律挑战场/,
+  );
+  assert.match(researchWorkspace, /逐条研究规律/);
+  assert.match(researchWorkspace, /wilsonInterval/);
+  assert.match(researchWorkspace, /贝叶斯收缩命中率/);
+  assert.match(researchWorkspace, /5折不劣比例/);
+  assert.match(researchWorkspace, /FDR q 值/);
+  assert.match(researchWorkspace, /currentTriggerMatched/);
+  assert.match(researchWorkspace, /explainSpec/);
+  assert.match(researchWorkspace, /resourceDecisionLabel/);
   assert.match(dashboard, /aria-current=/);
   assert.match(dashboard, /ball-zodiac/);
   assert.match(dashboard, /historyVisible/);
@@ -178,34 +148,14 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.number-cell\.number-wave-red[\s\S]*--number-wave: var\(--red\)/);
   assert.match(styles, /\.number-cell\.number-wave-blue[\s\S]*--number-wave: var\(--blue\)/);
   assert.match(styles, /\.number-cell\.number-wave-green[\s\S]*--number-wave: var\(--green\)/);
-  assert.match(styles, /\.ai-processing p[\s\S]*transform: none/);
-  assert.match(styles, /\.scientific-calibration/);
-  assert.match(styles, /\.scientific-verdict/);
-  assert.match(styles, /\.primary-zodiac-observation/);
-  assert.match(styles, /\.observation-scroll/);
-  assert.match(styles, /\.observation-consensus/);
-  assert.match(styles, /\.strategy-observation-review/);
-  assert.match(styles, /\.forward-ledger-summary/);
-  assert.match(styles, /\.online-learning-panel/);
-  assert.match(styles, /\.online-learning-audit/);
-  assert.match(styles, /\.online-learning-review-items/);
-  assert.match(styles, /\.online-learning-unavailable/);
-  assert.match(styles, /\.calibration-metrics/);
-  assert.match(styles, /\.diversity-strip/);
-  assert.match(styles, /\.backtest-strategy-list/);
-  assert.match(styles, /\.calibration-metrics span,[\s\S]*font-size: 11px/);
-  assert.match(styles, /\.strategy-card:not\(\.active\)[\s\S]*display: block/);
-  assert.match(styles, /\.strategy-grid[\s\S]*scroll-snap-type: x mandatory/);
+  assert.match(styles, /\.rule-research-shell/);
+  assert.match(styles, /\.rule-controls/);
+  assert.match(styles, /\.rule-audit-card/);
+  assert.match(styles, /\.rule-primary-metrics/);
+  assert.match(styles, /\.rule-score-grid/);
   assert.match(styles, /\.topbar[\s\S]*position: sticky/);
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
-  assert.match(
-    styles,
-    /@media \(max-width: 760px\)[\s\S]*\.ai-lab \{[\s\S]*grid-template-columns: minmax\(0, 1fr\)/,
-  );
-  assert.match(
-    styles,
-    /\.ai-intro,\s*\.ai-report \{[\s\S]*max-width: 100%/,
-  );
+  assert.match(styles, /@media \(max-width: 680px\)/);
   assert.match(styles, /max-width: 370px/);
   assert.match(styles, /touch-action: none/);
   assert.match(styles, /\.special-stage-wrap[\s\S]*grid-column: 1 \/ -1/);
