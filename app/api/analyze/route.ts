@@ -783,6 +783,18 @@ async function generateReport({
   } catch (error) {
     const reason =
       error instanceof ProviderFailure ? error.reason : classifyFailure(error);
+    console.warn(
+      "AI provider fallback",
+      JSON.stringify({
+        reason,
+        detail:
+          error instanceof ProviderFailure
+            ? error.message
+            : "unexpected provider failure",
+        model,
+        provider: safeProviderOrigin(baseUrl),
+      }),
+    );
     return {
       ...degrade(base, reason),
       model: {
@@ -791,6 +803,14 @@ async function generateReport({
         latencyMs: Date.now() - startedAt,
       },
     };
+  }
+}
+
+function safeProviderOrigin(baseUrl: string) {
+  try {
+    return new URL(baseUrl).origin;
+  } catch {
+    return "invalid-provider-url";
   }
 }
 
