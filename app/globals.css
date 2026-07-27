@@ -272,7 +272,7 @@
   top: 68px;
   z-index: 10;
   display: grid;
-  grid-template-columns: 1.8fr repeat(5, 1fr);
+  grid-template-columns: 1.8fr repeat(4, 1fr);
   gap: 8px;
   padding: 14px;
   border: 1px solid #2a3032;
@@ -421,6 +421,12 @@
   display: block;
   color: #777e7c;
   font-size: 10px;
+}
+
+.rule-current-signal span {
+  color: #b4aaa0;
+  font-weight: 600;
+  line-height: 1.35;
 }
 
 .rule-current-signal strong {

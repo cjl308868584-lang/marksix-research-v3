@@ -10,7 +10,6 @@ import type {
 } from "../../lib/research-v2-types";
 
 type DirectionFilter = "all" | "positive" | "negative";
-type TriggerFilter = "all" | "triggered" | "not_triggered";
 type FamilyFilter = "all" | ResearchRuleEvidence["family"];
 type SortMode = "evidence" | "hit_rate" | "lift" | "support" | "q_value";
 
@@ -44,7 +43,6 @@ export function ResearchWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [direction, setDirection] = useState<DirectionFilter>("all");
-  const [trigger, setTrigger] = useState<TriggerFilter>("all");
   const [family, setFamily] = useState<FamilyFilter>("all");
   const [target, setTarget] = useState("all");
   const [sort, setSort] = useState<SortMode>("evidence");
@@ -76,7 +74,7 @@ export function ResearchWorkspace() {
     return () => controller.abort();
   }, [game]);
 
-  const rules = useMemo(
+  const allRegisteredRules = useMemo(
     () => snapshot
       ? [
           ...snapshot.verifiedRules,
@@ -85,6 +83,13 @@ export function ResearchWorkspace() {
         ]
       : [],
     [snapshot],
+  );
+
+  const rules = useMemo(
+    () => allRegisteredRules.filter(
+      (rule) => rule.currentTriggerMatched && rule.currentPrediction !== null,
+    ),
+    [allRegisteredRules],
   );
 
   const targets = useMemo(
@@ -98,10 +103,6 @@ export function ResearchWorkspace() {
       .filter((rule) => direction === "all" || rule.direction === direction)
       .filter((rule) => family === "all" || rule.family === family)
       .filter((rule) => target === "all" || rule.targetId === target)
-      .filter((rule) =>
-        trigger === "all" ||
-        (trigger === "triggered" ? rule.currentTriggerMatched : !rule.currentTriggerMatched),
-      )
       .filter((rule) =>
         !normalizedQuery ||
         [
@@ -125,9 +126,8 @@ export function ResearchWorkspace() {
           left.qValue - right.qValue
         );
       });
-  }, [direction, family, query, rules, sort, target, trigger]);
+  }, [direction, family, query, rules, sort, target]);
 
-  const triggeredCount = rules.filter((rule) => rule.currentTriggerMatched).length;
   const positiveCount = rules.filter((rule) => rule.direction === "positive").length;
   const negativeCount = rules.filter((rule) => rule.direction === "negative").length;
   const strictCount = rules.filter(
@@ -150,8 +150,8 @@ export function ResearchWorkspace() {
           <span>RULE DISCOVERY · WALK-FORWARD AUDIT</span>
           <h1>逐条研究规律，<br />不再只看一个预测结果</h1>
           <p>
-            每条规律都公开触发条件、历史样本、实际命中、随机基线、收缩后提升、
-            滚动回测和多重检验结果。未通过验证的规律只作为研究假设。
+            这里只保留已经被最新历史条件触发、能够对下一期输出具体结果的规律。
+            每条都公开目标位置、触发条件、历史命中、随机基线与统计检验。
           </p>
           <div className="rule-game-switch" role="group" aria-label="选择彩种">
             {GAMES.map((item) => (
@@ -193,15 +193,10 @@ export function ResearchWorkspace() {
             </section>
 
             <section className="rule-overview">
-              <div>
-                <span>当前登记规律</span>
-                <strong>{rules.length}</strong>
-                <small>从完整回测结果中保留的代表规律</small>
-              </div>
               <div className="triggered">
-                <span>本期已触发</span>
-                <strong>{triggeredCount}</strong>
-                <small>只表示条件匹配，不代表必然命中</small>
+                <span>下一期可用规律</span>
+                <strong>{rules.length}</strong>
+                <small>未触发、无具体结果的规律已全部隐藏</small>
               </div>
               <div className="positive">
                 <span>正向候选</span>
@@ -214,21 +209,25 @@ export function ResearchWorkspace() {
                 <small>仅用于降权，不包装成反向推荐</small>
               </div>
               <div>
-                <span>严格筛选通过</span>
+                <span>历史门槛通过</span>
                 <strong>{strictCount}</strong>
                 <small>q≤0.10、Brier skill&gt;0、≥70%折不劣</small>
+              </div>
+              <div>
+                <span>覆盖目标</span>
+                <strong>{targets.length}</strong>
+                <small>下一期具体位置与分类目标</small>
               </div>
             </section>
 
             <section className="rule-method-note">
               <div>
-                <span>如何判断一条规律</span>
-                <strong>命中率必须与它自己的精确随机基线比较</strong>
+                <span>当前页面口径</span>
+                <strong>只显示能用于下一期判断的已触发规律</strong>
               </div>
               <p>
-                例如生肖、波色、尾数、位置与 6+1 覆盖的基线并不相同。
-                系统先做贝叶斯收缩，再检查五折滚动表现和 FDR 校正后的 q 值；
-                单看“历史命中过几次”不能证明有效。
+                卡片右侧会完整写明“下一期哪个位置、研究哪个分类、具体结果是什么”。
+                已触发不等于已经证明有效，仍需结合随机基线、滚动回测与 q 值判断证据强弱。
               </p>
             </section>
 
@@ -266,14 +265,6 @@ export function ResearchWorkspace() {
                 </select>
               </label>
               <label>
-                <span>本期状态</span>
-                <select value={trigger} onChange={(event) => setTrigger(event.target.value as TriggerFilter)}>
-                  <option value="all">全部状态</option>
-                  <option value="triggered">本期已触发</option>
-                  <option value="not_triggered">本期未触发</option>
-                </select>
-              </label>
-              <label>
                 <span>排序</span>
                 <select value={sort} onChange={(event) => setSort(event.target.value as SortMode)}>
                   <option value="evidence">综合证据</option>
@@ -287,10 +278,10 @@ export function ResearchWorkspace() {
 
             <div className="rule-result-head">
               <div>
-                <span>规律明细</span>
+                <span>NEXT DRAW · ACTIVE RULES</span>
                 <strong>{visibleRules.length} 条结果</strong>
               </div>
-              <p>默认优先显示本期触发且综合证据较强的规律</p>
+              <p>全部指向目标期 {snapshot.targetIssue}，未触发规律不显示</p>
             </div>
 
             <section className="rule-card-list" aria-live="polite">
@@ -299,7 +290,7 @@ export function ResearchWorkspace() {
               ))}
               {visibleRules.length === 0 && (
                 <div className="rule-empty">
-                  当前筛选条件下没有规律。调整目标、方向或本期状态后再查看。
+                  当前筛选条件下没有可用于下一期的已触发规律。调整目标或方向后再查看。
                 </div>
               )}
             </section>
@@ -345,10 +336,10 @@ function RuleAuditCard({ rule, rank }: { rule: ResearchRuleEvidence; rank: numbe
           </div>
           <h2>{rule.description}</h2>
         </div>
-        <div className={`rule-current-signal ${rule.currentTriggerMatched ? "active" : ""}`}>
-          <span>{rule.currentTriggerMatched ? "本期已触发" : "本期未触发"}</span>
-          <strong>{rule.currentPrediction ?? "—"}</strong>
-          <small>{rule.currentTriggerMatched ? (rule.direction === "negative" ? "本期降权方向" : "本期研究结果") : "不参与本期计算"}</small>
+        <div className="rule-current-signal active">
+          <span>{nextTargetLabel(rule.targetId)}</span>
+          <strong>{displayPrediction(rule)}</strong>
+          <small>{rule.direction === "negative" ? "下一期降权方向" : "下一期研究结果"}</small>
         </div>
       </div>
 
@@ -437,6 +428,25 @@ function targetLabel(value: string) {
   const position = value.match(/^main\.position\.(\d)\.(.+)$/);
   if (position) return `第${position[1]}正码${familyLabel(position[2] as ResearchTargetFamily)}`;
   return value;
+}
+
+function nextTargetLabel(value: string) {
+  const parts = value.split(".");
+  const family = familyLabel(parts.at(-1) as ResearchTargetFamily);
+  if (parts[0] === "special") return `下一期特码 · ${family}`;
+  if (parts[0] === "main" && parts[1] === "position") {
+    return `下一期第${parts[2]}正码 · ${family}`;
+  }
+  if (value.startsWith("draw.6_plus_1")) return `下一期6+1 · ${family}`;
+  if (value.startsWith("main.any")) return `下一期6个正码 · ${family}`;
+  return `下一期 · ${targetLabel(value)}`;
+}
+
+function displayPrediction(rule: ResearchRuleEvidence) {
+  if (!rule.currentPrediction) return "—";
+  return rule.spec.target.family === "number"
+    ? rule.currentPrediction.padStart(2, "0")
+    : rule.currentPrediction;
 }
 
 function fieldLabel(value: string) {

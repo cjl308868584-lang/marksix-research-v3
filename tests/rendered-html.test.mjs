@@ -59,7 +59,7 @@ test("server-renders the dedicated rule research workspace", async () => {
   const html = await response.text();
   assert.match(html, /<title>规律研究中心｜六合智研<\/title>/i);
   assert.match(html, /逐条研究规律/);
-  assert.match(html, /历史样本、实际命中、随机基线、收缩后提升/);
+  assert.match(html, /只保留已经被最新历史条件触发/);
   assert.match(html, /新澳门六合彩/);
   assert.match(html, /香港六合彩/);
   assert.match(html, /正在读取冻结规律与回测结果/);
@@ -131,6 +131,13 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(researchWorkspace, /5折不劣比例/);
   assert.match(researchWorkspace, /FDR q 值/);
   assert.match(researchWorkspace, /currentTriggerMatched/);
+  assert.match(
+    researchWorkspace,
+    /rule\.currentTriggerMatched && rule\.currentPrediction !== null/,
+  );
+  assert.match(researchWorkspace, /下一期第\$\{parts\[2\]\}正码/);
+  assert.match(researchWorkspace, /下一期研究结果/);
+  assert.doesNotMatch(researchWorkspace, /TriggerFilter/);
   assert.match(researchWorkspace, /explainSpec/);
   assert.match(researchWorkspace, /resourceDecisionLabel/);
   assert.match(dashboard, /aria-current=/);
