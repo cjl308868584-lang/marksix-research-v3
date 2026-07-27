@@ -137,6 +137,11 @@ test("keeps the product implementation free of starter preview artifacts", async
   );
   assert.match(researchWorkspace, /下一期第\$\{parts\[2\]\}正码/);
   assert.match(researchWorkspace, /下一期研究结果/);
+  assert.match(researchWorkspace, /buildResearchConsensus/);
+  assert.match(researchWorkspace, /下一期共识概率/);
+  assert.match(researchWorkspace, /applyQuickFilter/);
+  assert.match(researchWorkspace, /一区 01–16 · 二区 17–33 · 三区 34–49/);
+  assert.match(researchWorkspace, /规则加权后的研究概率/);
   assert.doesNotMatch(researchWorkspace, /TriggerFilter/);
   assert.match(researchWorkspace, /explainSpec/);
   assert.match(researchWorkspace, /resourceDecisionLabel/);

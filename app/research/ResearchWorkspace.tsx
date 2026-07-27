@@ -1,7 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { GAME_META, type GameId } from "../../lib/lottery";
+import {
+  buildResearchConsensus,
+  type ResearchConsensus,
+} from "../../lib/research-consensus";
 import type {
   ResearchRuleEvidence,
   ResearchRuleSpec,
@@ -12,6 +16,7 @@ import type {
 type DirectionFilter = "all" | "positive" | "negative";
 type FamilyFilter = "all" | ResearchRuleEvidence["family"];
 type SortMode = "evidence" | "hit_rate" | "lift" | "support" | "q_value";
+type QuickFilter = "all" | "positive" | "negative" | "passed" | "consensus" | "custom";
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
 
@@ -47,6 +52,9 @@ export function ResearchWorkspace() {
   const [target, setTarget] = useState("all");
   const [sort, setSort] = useState<SortMode>("evidence");
   const [query, setQuery] = useState("");
+  const [quickFilter, setQuickFilter] = useState<QuickFilter>("all");
+  const [scopeFilter, setScopeFilter] = useState<string>("all");
+  const resultHeadRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -97,12 +105,26 @@ export function ResearchWorkspace() {
     [rules],
   );
 
+  const consensus = useMemo(
+    () => snapshot
+      ? buildResearchConsensus(rules, snapshot.expectedDrawAt)
+      : [],
+    [rules, snapshot],
+  );
+  const consensusRuleIds = useMemo(
+    () => new Set(consensus.flatMap((item) => item.ruleIds)),
+    [consensus],
+  );
+
   const visibleRules = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase("zh-CN");
     return rules
       .filter((rule) => direction === "all" || rule.direction === direction)
       .filter((rule) => family === "all" || rule.family === family)
       .filter((rule) => target === "all" || rule.targetId === target)
+      .filter((rule) => scopeFilter === "all" || rule.spec.target.scope === scopeFilter)
+      .filter((rule) => quickFilter !== "passed" || passesHistoricalGate(rule))
+      .filter((rule) => quickFilter !== "consensus" || consensusRuleIds.has(rule.ruleId))
       .filter((rule) =>
         !normalizedQuery ||
         [
@@ -126,13 +148,42 @@ export function ResearchWorkspace() {
           left.qValue - right.qValue
         );
       });
-  }, [direction, family, query, rules, sort, target]);
+  }, [consensusRuleIds, direction, family, query, quickFilter, rules, scopeFilter, sort, target]);
 
   const positiveCount = rules.filter((rule) => rule.direction === "positive").length;
   const negativeCount = rules.filter((rule) => rule.direction === "negative").length;
   const strictCount = rules.filter(
-    (rule) => rule.qValue <= 0.1 && rule.brierSkill > 0 && rule.nonWorseFoldRatio >= 0.7,
+    passesHistoricalGate,
   ).length;
+  const consensusRulesCount = consensusRuleIds.size;
+
+  const scrollToResults = () => {
+    window.requestAnimationFrame(() => {
+      resultHeadRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  };
+
+  const applyQuickFilter = (next: QuickFilter) => {
+    setQuickFilter(next);
+    setScopeFilter("all");
+    setTarget("all");
+    setFamily("all");
+    setQuery("");
+    setDirection(
+      next === "positive" ? "positive" : next === "negative" ? "negative" : "all",
+    );
+    scrollToResults();
+  };
+
+  const applyConsensusScope = (item: ResearchConsensus) => {
+    setQuickFilter("custom");
+    setScopeFilter(item.scope);
+    setTarget("all");
+    setFamily("all");
+    setDirection("all");
+    setQuery("");
+    scrollToResults();
+  };
 
   return (
     <div className="rule-research-shell">
@@ -192,42 +243,68 @@ export function ResearchWorkspace() {
               <div><span>完整回测</span><strong>{snapshot.fullBacktestRuleCount.toLocaleString("zh-CN")}</strong></div>
             </section>
 
-            <section className="rule-overview">
-              <div className="triggered">
+            <section className="rule-overview" aria-label="快捷筛选">
+              <button
+                type="button"
+                className={`triggered ${quickFilter === "all" && scopeFilter === "all" ? "active" : ""}`}
+                onClick={() => applyQuickFilter("all")}
+              >
                 <span>下一期可用规律</span>
                 <strong>{rules.length}</strong>
-                <small>未触发、无具体结果的规律已全部隐藏</small>
-              </div>
-              <div className="positive">
+                <small>点击查看全部已触发规律</small>
+              </button>
+              <button
+                type="button"
+                className={`positive ${quickFilter === "positive" ? "active" : ""}`}
+                onClick={() => applyQuickFilter("positive")}
+              >
                 <span>正向候选</span>
                 <strong>{positiveCount}</strong>
-                <small>收缩后高于对应随机基线</small>
-              </div>
-              <div className="negative">
+                <small>点击只看提高权重的规律</small>
+              </button>
+              <button
+                type="button"
+                className={`negative ${quickFilter === "negative" ? "active" : ""}`}
+                onClick={() => applyQuickFilter("negative")}
+              >
                 <span>负向规律</span>
                 <strong>{negativeCount}</strong>
-                <small>仅用于降权，不包装成反向推荐</small>
-              </div>
-              <div>
+                <small>点击只看降低权重的规律</small>
+              </button>
+              <button
+                type="button"
+                className={quickFilter === "passed" ? "active" : ""}
+                onClick={() => applyQuickFilter("passed")}
+              >
                 <span>历史门槛通过</span>
                 <strong>{strictCount}</strong>
-                <small>q≤0.10、Brier skill&gt;0、≥70%折不劣</small>
-              </div>
-              <div>
-                <span>覆盖目标</span>
-                <strong>{targets.length}</strong>
-                <small>下一期具体位置与分类目标</small>
-              </div>
+                <small>点击只看 q≤0.10 等合格规律</small>
+              </button>
+              <button
+                type="button"
+                className={quickFilter === "consensus" ? "active" : ""}
+                onClick={() => applyQuickFilter("consensus")}
+              >
+                <span>参与共识汇总</span>
+                <strong>{consensusRulesCount}</strong>
+                <small>点击查看被合并计算的规律</small>
+              </button>
             </section>
+
+            <ConsensusPanel
+              consensus={consensus}
+              activeScope={scopeFilter}
+              onSelect={applyConsensusScope}
+            />
 
             <section className="rule-method-note">
               <div>
-                <span>当前页面口径</span>
-                <strong>只显示能用于下一期判断的已触发规律</strong>
+                <span>区间口径</span>
+                <strong>一区 01–16 · 二区 17–33 · 三区 34–49</strong>
               </div>
               <p>
-                卡片右侧会完整写明“下一期哪个位置、研究哪个分类、具体结果是什么”。
-                已触发不等于已经证明有效，仍需结合随机基线、滚动回测与 q 值判断证据强弱。
+                “区”只是把01至49分成三段。一区与三区各16个号码，单位置随机基线均为32.7%；
+                二区有17个号码，随机基线为34.7%。它和波色、生肖一样只是号码分类，不代表开奖区域。
               </p>
             </section>
 
@@ -236,20 +313,30 @@ export function ResearchWorkspace() {
                 <span>搜索具体规律</span>
                 <input
                   value={query}
-                  onChange={(event) => setQuery(event.target.value)}
+                  onChange={(event) => {
+                    setQuery(event.target.value);
+                    setQuickFilter("custom");
+                  }}
                   placeholder="例如：第3正码、生肖、镜像号…"
                 />
               </label>
               <label>
                 <span>目标</span>
-                <select value={target} onChange={(event) => setTarget(event.target.value)}>
+                <select value={target} onChange={(event) => {
+                  setTarget(event.target.value);
+                  setScopeFilter("all");
+                  setQuickFilter("custom");
+                }}>
                   <option value="all">全部目标</option>
                   {targets.map((item) => <option value={item} key={item}>{targetLabel(item)}</option>)}
                 </select>
               </label>
               <label>
                 <span>规律类型</span>
-                <select value={family} onChange={(event) => setFamily(event.target.value as FamilyFilter)}>
+                <select value={family} onChange={(event) => {
+                  setFamily(event.target.value as FamilyFilter);
+                  setQuickFilter("custom");
+                }}>
                   <option value="all">全部类型</option>
                   {Object.entries(FAMILY_LABELS).map(([value, label]) => (
                     <option value={value} key={value}>{label}</option>
@@ -258,7 +345,10 @@ export function ResearchWorkspace() {
               </label>
               <label>
                 <span>方向</span>
-                <select value={direction} onChange={(event) => setDirection(event.target.value as DirectionFilter)}>
+                <select value={direction} onChange={(event) => {
+                  setDirection(event.target.value as DirectionFilter);
+                  setQuickFilter("custom");
+                }}>
                   <option value="all">正向与负向</option>
                   <option value="positive">仅正向候选</option>
                   <option value="negative">仅负向规律</option>
@@ -276,7 +366,15 @@ export function ResearchWorkspace() {
               </label>
             </section>
 
-            <div className="rule-result-head">
+            {(quickFilter !== "all" || scopeFilter !== "all" || target !== "all" || family !== "all" || direction !== "all" || query) && (
+              <div className="rule-active-filter">
+                <span>当前筛选</span>
+                <strong>{activeFilterLabel({ quickFilter, scopeFilter, target, family, direction, query })}</strong>
+                <button type="button" onClick={() => applyQuickFilter("all")}>清除筛选</button>
+              </div>
+            )}
+
+            <div className="rule-result-head" ref={resultHeadRef}>
               <div>
                 <span>NEXT DRAW · ACTIVE RULES</span>
                 <strong>{visibleRules.length} 条结果</strong>
@@ -313,13 +411,89 @@ export function ResearchWorkspace() {
   );
 }
 
+function ConsensusPanel({
+  consensus,
+  activeScope,
+  onSelect,
+}: {
+  consensus: ResearchConsensus[];
+  activeScope: string;
+  onSelect: (item: ResearchConsensus) => void;
+}) {
+  return (
+    <section className="rule-consensus" aria-label="下一期共识概率">
+      <div className="rule-consensus-head">
+        <div>
+          <span>RULE-WEIGHTED CONSENSUS</span>
+          <h2>下一期共识概率</h2>
+        </div>
+        <p>
+          将同一位置的尾数、单双、区间、生肖、波色等规则投影到01–49后合并。
+          同方向会叠加，负向会抵消；点击任一位置可筛选下方原始规律。
+        </p>
+      </div>
+      <div className="rule-consensus-grid">
+        {consensus.slice(0, 8).map((item) => {
+          const top = item.topNumbers[0];
+          return (
+            <button
+              type="button"
+              className={activeScope === item.scope ? "active" : ""}
+              onClick={() => onSelect(item)}
+              key={item.scope}
+            >
+              <div className="consensus-card-head">
+                <span>{item.label}</span>
+                <em>{item.positiveRuleCount}正 · {item.negativeRuleCount}负</em>
+              </div>
+              <div className="consensus-primary">
+                <span>最高交集号码</span>
+                <strong>{String(top.number).padStart(2, "0")}</strong>
+                <div>
+                  <b>{percent(top.probability)}</b>
+                  <small>随机 {percent(top.baseline)} · {deltaPoints(top.delta)}</small>
+                </div>
+              </div>
+              <div className="consensus-number-row" aria-label="共识号码前三">
+                {item.topNumbers.slice(0, 3).map((number) => (
+                  <span key={number.number}>
+                    <b>{String(number.number).padStart(2, "0")}</b>
+                    <small>{percent(number.probability)}</small>
+                  </span>
+                ))}
+              </div>
+              <div className="consensus-dimensions">
+                {item.dimensions.slice(0, 3).map((dimension) => (
+                  <span
+                    className={dimension.delta < 0 ? "suppressed" : ""}
+                    key={`${dimension.family}-${dimension.value}`}
+                  >
+                    <b>{dimension.value}</b>
+                    <em>{percent(dimension.probability)}</em>
+                    <small>基线 {percent(dimension.baseline)} · {deltaPoints(dimension.delta)}</small>
+                  </span>
+                ))}
+              </div>
+              <p>{item.explanation}</p>
+              <small className="consensus-filter-action">筛选这 {item.ruleIds.length} 条原始规律 →</small>
+            </button>
+          );
+        })}
+      </div>
+      <div className="rule-consensus-boundary">
+        这里是规则加权后的研究概率，不是官方概率或已验证中奖率。相关规则可能来自相似历史结构；
+        系统已限制单条规则影响，但不能把多条相关规律当作完全独立证据。
+      </div>
+    </section>
+  );
+}
+
 function RuleAuditCard({ rule, rank }: { rule: ResearchRuleEvidence; rank: number }) {
   const [low, high] = wilsonInterval(rule.hits, rule.support);
   const uplift = rule.hitRate - rule.baselineRate;
   const expectedHits = rule.support * rule.baselineRate;
   const targetName = targetLabel(rule.targetId);
-  const meetsHistoricalGate =
-    rule.qValue <= 0.1 && rule.brierSkill > 0 && rule.nonWorseFoldRatio >= 0.7;
+  const meetsHistoricalGate = passesHistoricalGate(rule);
 
   return (
     <article className={`rule-audit-card ${rule.direction}`}>
@@ -404,6 +578,37 @@ function Metric({ label, value, note }: { label: string; value: string; note: st
   return <div><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
 }
 
+function passesHistoricalGate(rule: ResearchRuleEvidence) {
+  return rule.qValue <= 0.1 && rule.brierSkill > 0 && rule.nonWorseFoldRatio >= 0.7;
+}
+
+function activeFilterLabel({
+  quickFilter,
+  scopeFilter,
+  target,
+  family,
+  direction,
+  query,
+}: {
+  quickFilter: QuickFilter;
+  scopeFilter: string;
+  target: string;
+  family: FamilyFilter;
+  direction: DirectionFilter;
+  query: string;
+}) {
+  const labels: string[] = [];
+  if (quickFilter === "passed") labels.push("历史门槛通过");
+  if (quickFilter === "consensus") labels.push("参与共识汇总");
+  if (scopeFilter !== "all") labels.push(nextScopeLabel(scopeFilter));
+  if (target !== "all") labels.push(targetLabel(target));
+  if (family !== "all") labels.push(FAMILY_LABELS[family]);
+  if (direction === "positive") labels.push("正向候选");
+  if (direction === "negative") labels.push("负向规律");
+  if (query) labels.push(`搜索“${query}”`);
+  return labels.join(" · ") || "全部下一期可用规律";
+}
+
 function explainSpec(spec: ResearchRuleSpec) {
   const predicates = spec.predicates.map((item) =>
     `${lagLabel(item.lag)}${fieldLabel(item.field)}的${familyLabel(item.family)}等于“${item.value}”`,
@@ -440,6 +645,14 @@ function nextTargetLabel(value: string) {
   if (value.startsWith("draw.6_plus_1")) return `下一期6+1 · ${family}`;
   if (value.startsWith("main.any")) return `下一期6个正码 · ${family}`;
   return `下一期 · ${targetLabel(value)}`;
+}
+
+function nextScopeLabel(value: string) {
+  if (value === "special") return "下一期 · 特码";
+  if (value.startsWith("main.position.")) {
+    return `下一期 · 第${value.split(".")[2]}正码`;
+  }
+  return value;
 }
 
 function displayPrediction(rule: ResearchRuleEvidence) {
@@ -511,6 +724,10 @@ function percent(value: number) {
 
 function signedPoints(value: number) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)} 个百分点`;
+}
+
+function deltaPoints(value: number) {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(2)}个百分点`;
 }
 
 function signedDecimal(value: number) {
