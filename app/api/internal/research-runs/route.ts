@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getRuntimeEnv } from "../../../../lib/runtime-env";
 import { persistResearchRun } from "../../../../lib/research-v2-store";
 import type { ResearchRunEnvelope } from "../../../../lib/research-v2-types";
 
@@ -12,7 +13,7 @@ export async function POST(request: NextRequest) {
   if (length > MAX_BODY_BYTES) {
     return NextResponse.json({ error: "研究结果过大。" }, { status: 413 });
   }
-  const secret = process.env.RESEARCH_INGEST_SECRET;
+  const secret = getRuntimeEnv("RESEARCH_INGEST_SECRET");
   if (!secret) {
     return NextResponse.json(
       { error: "研究写入服务尚未配置。" },

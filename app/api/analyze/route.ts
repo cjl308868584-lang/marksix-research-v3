@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getRuntimeEnv } from "../../../lib/runtime-env";
 import { buildForecastPack, nextIssue, type ForecastPack } from "../../../lib/ai-engine";
 import {
   assessQualityGate,
@@ -193,10 +194,10 @@ export async function GET(request: NextRequest) {
     currentLearningInput,
   );
 
-  const model = process.env.AI_MODEL || "gpt-5.6-sol";
+  const model = getRuntimeEnv("AI_MODEL") || "gpt-5";
   const reasoning =
     restoreDepth === "deep"
-      ? normalizeReasoning(process.env.AI_REASONING_EFFORT ?? "medium")
+      ? normalizeReasoning(getRuntimeEnv("AI_REASONING_EFFORT") ?? "medium")
       : "low";
   const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
   const targetIssue = resolveTargetIssue(
@@ -357,10 +358,10 @@ export async function POST(request: NextRequest) {
     history.draws,
     onlineLearningInput,
   );
-  const model = process.env.AI_MODEL || "gpt-5.6-sol";
+  const model = getRuntimeEnv("AI_MODEL") || "gpt-5";
   const reasoning =
     depth === "deep"
-      ? normalizeReasoning(process.env.AI_REASONING_EFFORT ?? "medium")
+      ? normalizeReasoning(getRuntimeEnv("AI_REASONING_EFFORT") ?? "medium")
       : "low";
   const [fingerprint, learningStateFingerprint] = await Promise.all([
     buildHistoryFingerprint(history.draws),
@@ -500,8 +501,10 @@ export async function POST(request: NextRequest) {
     decision,
     research,
   });
-  const apiKey = process.env.AI_API_KEY;
-  const baseUrl = (process.env.AI_BASE_URL ?? "https://api.openai.com/v1").replace(/\/$/, "");
+  const apiKey = getRuntimeEnv("AI_API_KEY");
+  const baseUrl = (
+    getRuntimeEnv("AI_BASE_URL") ?? "https://api.openai.com/v1"
+  ).replace(/\/$/, "");
 
   const generation = generateReport({
     base,
@@ -1427,7 +1430,7 @@ async function buildSafetyIdentifier(request: NextRequest) {
       ? request.headers.get("x-forwarded-for")?.split(",")[0]
       : null) ||
     "unknown";
-  const salt = process.env.AI_SAFETY_SALT || "marksix-public-v2";
+  const salt = getRuntimeEnv("AI_SAFETY_SALT") || "marksix-public-v2";
   return `marksix_${(await sha256(`${salt}|${ip}`)).slice(0, 32)}`;
 }
 

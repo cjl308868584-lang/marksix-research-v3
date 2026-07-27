@@ -27,5 +27,11 @@ interface Fetcher {
 declare module "cloudflare:workers" {
   export const env: {
     DB: D1Database;
+    AI_API_KEY?: string;
+    AI_BASE_URL?: string;
+    AI_MODEL?: string;
+    AI_REASONING_EFFORT?: string;
+    AI_SAFETY_SALT?: string;
+    RESEARCH_INGEST_SECRET?: string;
   };
 }
