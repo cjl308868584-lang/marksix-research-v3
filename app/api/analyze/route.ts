@@ -1107,6 +1107,18 @@ async function requestModelAttempt({
   }
 
   if (!response.ok) {
+    if ([400, 404, 405, 422].includes(response.status)) {
+      return requestChatCompatibility({
+        apiKey,
+        baseUrl,
+        model,
+        pack,
+        decision,
+        evidenceByDimension,
+        schema,
+        analysisPack,
+      });
+    }
     if (response.status === 429) {
       const retryAfterMs = retryAfterMilliseconds(
         response.headers.get("retry-after"),
@@ -1174,6 +1186,112 @@ async function requestModelAttempt({
   return {
     synthesis,
     resolvedModel: payload.model || model,
+  };
+}
+
+async function requestChatCompatibility({
+  apiKey,
+  baseUrl,
+  model,
+  pack,
+  decision,
+  evidenceByDimension,
+  schema,
+  analysisPack,
+}: {
+  apiKey: string;
+  baseUrl: string;
+  model: string;
+  pack: ForecastPack;
+  decision: ServerDecision;
+  evidenceByDimension: Map<AiDimensionId, Set<string>>;
+  schema: ReturnType<typeof buildSynthesisSchema>;
+  analysisPack: Record<string, unknown>;
+}): Promise<ModelSynthesisResult> {
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          {
+            role: "system",
+            content:
+              `${SYSTEM_PROMPT}\n只输出一个符合所给 JSON Schema 的 JSON 对象，不要使用 Markdown。`,
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              jsonSchema: schema,
+              analysisPack,
+            }),
+          },
+        ],
+        response_format: { type: "json_object" },
+        max_completion_tokens: 3_600,
+      }),
+      signal: AbortSignal.timeout(40_000),
+    });
+  } catch (error) {
+    if (error instanceof Error && /abort|timeout/i.test(error.name + error.message)) {
+      throw new ProviderFailure("timeout", "provider timeout", true);
+    }
+    throw new ProviderFailure("provider_error", "provider unavailable", true);
+  }
+  if (!response.ok) {
+    if (response.status === 429) {
+      throw new ProviderFailure(
+        "upstream_rate_limited",
+        "provider rate limited",
+        false,
+        retryAfterMilliseconds(response.headers.get("retry-after")),
+      );
+    }
+    throw new ProviderFailure(
+      "provider_error",
+      `provider status ${response.status}`,
+      response.status >= 500,
+    );
+  }
+  const payload = (await response.json().catch(() => null)) as {
+    model?: string;
+    choices?: Array<{
+      message?: {
+        content?: string;
+        refusal?: string | null;
+      };
+    }>;
+  } | null;
+  const message = payload?.choices?.[0]?.message;
+  if (message?.refusal) {
+    throw new ProviderFailure("refusal", "model refusal");
+  }
+  if (!message?.content) {
+    throw new ProviderFailure("invalid_output", "missing structured output", true);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(message.content);
+  } catch {
+    throw new ProviderFailure("invalid_output", "invalid json", true);
+  }
+  const synthesis = validateSynthesis(
+    parsed,
+    pack,
+    evidenceByDimension,
+    decision.scenarioId,
+  );
+  if (!synthesis) {
+    throw new ProviderFailure("invalid_output", "schema validation failed", true);
+  }
+  return {
+    synthesis,
+    resolvedModel: payload?.model || model,
   };
 }
 
