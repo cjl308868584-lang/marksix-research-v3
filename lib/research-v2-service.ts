@@ -5,6 +5,7 @@ import { buildResearchSnapshot } from "./research-v2-engine";
 import {
   readPreviousResearchSnapshot,
   readResearchSnapshot,
+  ensureResearchRuleLedger,
   persistResearchRun,
   settleResearchForecasts,
 } from "./research-v2-store";
@@ -60,6 +61,7 @@ export async function loadResearchEnvelope({
   if (!forceCompute) {
     const stored = await readResearchSnapshot(game, targetIssue);
     if (stored && stored.expectedDrawAt === expectedDrawAt) {
+      await ensureResearchRuleLedger(stored);
       const envelope: ResearchRunEnvelope = {
         snapshot: stored,
         rules: [

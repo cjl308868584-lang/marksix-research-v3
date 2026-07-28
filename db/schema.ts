@@ -232,6 +232,8 @@ export const researchForecasts = sqliteTable(
     snapshotJson: text("snapshot_json").notNull(),
     frozenAt: text("frozen_at").notNull(),
     actualJson: text("actual_json"),
+    reviewVersion: text("review_version"),
+    reviewJson: text("review_json"),
     settledAt: text("settled_at"),
   },
   (table) => [
@@ -245,6 +247,38 @@ export const researchForecasts = sqliteTable(
       table.game,
       table.settledAt,
       table.targetIssue,
+    ),
+  ],
+);
+
+export const researchRuleLedger = sqliteTable(
+  "research_rule_ledger",
+  {
+    ledgerId: text("ledger_id").primaryKey(),
+    runId: text("run_id").notNull(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    ruleId: text("rule_id").notNull(),
+    targetId: text("target_id").notNull(),
+    direction: text("direction").notNull(),
+    predictedValue: text("predicted_value").notNull(),
+    frozenRuleJson: text("frozen_rule_json").notNull(),
+    frozenAt: text("frozen_at").notNull(),
+    actualValue: text("actual_value"),
+    actualNumber: integer("actual_number"),
+    outcome: text("outcome"),
+    directionCorrect: integer("direction_correct", { mode: "boolean" }),
+    scoredAt: text("scored_at"),
+  },
+  (table) => [
+    uniqueIndex("research_rule_ledger_identity_idx").on(
+      table.runId,
+      table.ruleId,
+    ),
+    index("research_rule_ledger_issue_idx").on(
+      table.game,
+      table.targetIssue,
+      table.scoredAt,
     ),
   ],
 );

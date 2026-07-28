@@ -216,6 +216,16 @@ export function ResearchWorkspace() {
               </button>
             ))}
           </div>
+          <nav className="research-view-switch" aria-label="研究页面">
+            <a className="active" href="/research">
+              下一期规律
+              <small>开奖前冻结</small>
+            </a>
+            <a href="/research/review">
+              历史复盘
+              <small>开奖后结算</small>
+            </a>
+          </nav>
         </section>
 
         {loading && (

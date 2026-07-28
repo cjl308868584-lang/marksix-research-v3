@@ -147,6 +147,65 @@ export type ResearchPostmortem = {
   nextAction: string;
 } | null;
 
+export type ResearchRuleReviewOutcome =
+  | "positive_hit"
+  | "positive_miss"
+  | "negative_avoided"
+  | "negative_failed";
+
+export type ResearchRuleReview = {
+  ruleId: string;
+  family: ResearchRuleEvidence["family"];
+  description: string;
+  targetId: ResearchTargetId;
+  targetLabel: string;
+  direction: Extract<ResearchRuleDirection, "positive" | "negative">;
+  prediction: string;
+  actualValue: string;
+  actualNumber: number;
+  outcome: ResearchRuleReviewOutcome;
+  directionCorrect: boolean;
+  baselineSuccessRate: number;
+  historicalHitRate: number;
+  lift: number;
+  brierSkill: number;
+  qValue: number;
+  support: number;
+  passedHistoricalGate: boolean;
+};
+
+export type ResearchReview = {
+  reviewVersion: "research-review-v1";
+  runId: string;
+  game: GameId;
+  targetIssue: string;
+  expectedDrawAt: string;
+  frozenAt: string;
+  settledAt: string;
+  actual: {
+    issue: string;
+    drawAt: string;
+    numbers: number[];
+    special: number;
+    source: string;
+    verified: boolean;
+  };
+  availableRuleCount: number;
+  positiveRuleCount: number;
+  positiveHits: number;
+  negativeRuleCount: number;
+  negativeAvoided: number;
+  passedRuleCount: number;
+  passedRuleCorrect: number;
+  directionalCorrect: number;
+  directionalSuccessRate: number;
+  baselineDirectionalRate: number;
+  directionalLift: number;
+  summary: string;
+  nextAction: string;
+  rules: ResearchRuleReview[];
+};
+
 export type ResearchDataQuality = {
   sampleSize: number;
   formalSampleSize: number;

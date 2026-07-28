@@ -7,6 +7,7 @@ import {
   isValidDraw,
   nextScheduledDraw,
 } from "../../../lib/lottery";
+import { settleResearchForecasts } from "../../../lib/research-v2-store";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +39,7 @@ type LiveSourceResult =
   | { kind: "progress"; progress: LiveDrawProgress | null };
 
 const liveResponseCache = new Map<string, LiveCacheEntry>();
+const settledResearchIssues = new Set<string>();
 
 const HKJC_QUERY = `fragment lotteryDrawsFragment on LotteryDraw {
   id year no openDate closeDate drawDate status
@@ -71,6 +73,7 @@ export async function GET(request: NextRequest) {
         : game === "hk"
           ? await getHongKongDraws(limit)
           : await getNewMacauDraws(limit);
+    await settleLatestResearch(game, result.draws);
     return NextResponse.json(result, {
       headers: {
         "Cache-Control": liveRequest
@@ -93,6 +96,24 @@ export async function GET(request: NextRequest) {
         headers: { "Cache-Control": "private, no-store, max-age=0" },
       },
     );
+  }
+}
+
+async function settleLatestResearch(game: GameId, draws: Draw[]) {
+  const latestVerified = draws.find((draw) => draw.verified);
+  if (!latestVerified) return;
+  const key = `${game}:${latestVerified.issue}`;
+  if (settledResearchIssues.has(key)) return;
+  settledResearchIssues.add(key);
+  const status = await settleResearchForecasts(
+    game,
+    draws,
+    new Date().toISOString(),
+  );
+  if (status !== "ok") settledResearchIssues.delete(key);
+  if (settledResearchIssues.size > 12) {
+    const oldest = settledResearchIssues.values().next().value;
+    if (typeof oldest === "string") settledResearchIssues.delete(oldest);
   }
 }
 

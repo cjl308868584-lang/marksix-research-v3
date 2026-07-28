@@ -3,6 +3,7 @@ import {
   RESEARCH_ENGINE_VERSION,
   RESEARCH_SCHEMA_VERSION,
   RULE_ENGINE_VERSION,
+  type ResearchReview,
   type ResearchRuleEvidence,
   type ResearchRunEnvelope,
   type ResearchSnapshot,
@@ -10,6 +11,11 @@ import {
 } from "./research-v2-types";
 import { getWave, getZodiac, type Draw, type GameId } from "./lottery";
 import { canonicalRuleJson } from "./research-v2-engine";
+import {
+  buildResearchReview,
+  frozenRules,
+  RESEARCH_REVIEW_VERSION,
+} from "./research-review";
 
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: D1Database;
@@ -19,6 +25,13 @@ type ForecastRow = {
   snapshot_json: string;
   frozen_at: string;
   settled_at: string | null;
+};
+
+type ReviewRow = ForecastRow & {
+  run_id: string;
+  target_issue: string;
+  actual_json: string | null;
+  review_json: string | null;
 };
 
 export async function readResearchSnapshot(
@@ -110,9 +123,12 @@ export async function persistResearchRun(
         snapshot.evidenceTier,
         JSON.stringify(snapshot),
         snapshot.generatedAt,
-      )
+    )
       .run();
-    if (Number(inserted.meta?.changes ?? 0) === 0) return "existing";
+    if (Number(inserted.meta?.changes ?? 0) === 0) {
+      await ensureResearchRuleLedger(snapshot);
+      return "existing";
+    }
 
     const statements = [
       db.prepare(
@@ -202,10 +218,27 @@ export async function persistResearchRun(
         ),
       );
     }
+    statements.push(...freezeRuleStatements(db, snapshot));
     for (let index = 0; index < statements.length; index += 80) {
       await db.batch(statements.slice(index, index + 80));
     }
     return "created";
+  } catch {
+    return "unavailable";
+  }
+}
+
+export async function ensureResearchRuleLedger(
+  snapshot: ResearchSnapshot,
+): Promise<"ok" | "unavailable"> {
+  const db = runtime.__marksixD1;
+  if (!db) return "unavailable";
+  try {
+    const statements = freezeRuleStatements(db, snapshot);
+    for (let index = 0; index < statements.length; index += 80) {
+      await db.batch(statements.slice(index, index + 80));
+    }
+    return "ok";
   } catch {
     return "unavailable";
   }
@@ -245,15 +278,38 @@ export async function settleResearchForecasts(
         source: draw.source,
         verified: draw.verified,
       };
+      const review = buildResearchReview(parsed, draw, settledAt);
       const scores = parsed.targetForecasts.map((target) =>
         scoreTarget(target, draw),
       );
       const statements = [
+        ...freezeRuleStatements(db, parsed),
         db.prepare(
           `UPDATE research_forecasts
-           SET actual_json = ?, settled_at = ?
+           SET actual_json = ?, review_version = ?, review_json = ?, settled_at = ?
            WHERE run_id = ? AND settled_at IS NULL`,
-        ).bind(JSON.stringify(actual), settledAt, row.run_id),
+        ).bind(
+          JSON.stringify(actual),
+          RESEARCH_REVIEW_VERSION,
+          JSON.stringify(review),
+          settledAt,
+          row.run_id,
+        ),
+        ...review.rules.map((rule) =>
+          db.prepare(
+            `UPDATE research_rule_ledger
+             SET actual_value = ?, actual_number = ?, outcome = ?,
+                 direction_correct = ?, scored_at = ?
+             WHERE ledger_id = ? AND scored_at IS NULL`,
+          ).bind(
+            rule.actualValue,
+            rule.actualNumber,
+            rule.outcome,
+            rule.directionCorrect ? 1 : 0,
+            settledAt,
+            `${row.run_id}:${rule.ruleId}`,
+          ),
+        ),
         ...scores.map((score) =>
           db.prepare(
             `INSERT OR IGNORE INTO research_forecast_scores (
@@ -276,12 +332,166 @@ export async function settleResearchForecasts(
           ),
         ),
       ];
-      await db.batch(statements);
+      for (let index = 0; index < statements.length; index += 80) {
+        await db.batch(statements.slice(index, index + 80));
+      }
     }
     return "ok";
   } catch {
     return "unavailable";
   }
+}
+
+export async function readResearchReviews(
+  game: GameId,
+  {
+    targetIssue = null,
+    limit = 12,
+  }: { targetIssue?: string | null; limit?: number } = {},
+): Promise<ResearchReview[]> {
+  const db = runtime.__marksixD1;
+  if (!db) return [];
+  const boundedLimit = Math.max(1, Math.min(Math.floor(limit), 24));
+  try {
+    const rows = targetIssue
+      ? await db.prepare(
+        `SELECT run_id, target_issue, snapshot_json, frozen_at, actual_json,
+                review_json, settled_at
+         FROM research_forecasts
+         WHERE game = ? AND target_issue = ? AND settled_at IS NOT NULL
+         ORDER BY frozen_at ASC, run_id ASC
+         LIMIT 1`,
+      ).bind(game, targetIssue).all<ReviewRow>()
+      : await db.prepare(
+        `SELECT run_id, target_issue, snapshot_json, frozen_at, actual_json,
+                review_json, settled_at
+         FROM research_forecasts
+         WHERE game = ? AND settled_at IS NOT NULL
+         ORDER BY expected_draw_at DESC, frozen_at ASC
+         LIMIT ?`,
+      ).bind(game, boundedLimit).all<ReviewRow>();
+    const reviews: ResearchReview[] = [];
+    for (const row of rows.results ?? []) {
+      const stored = parseJson(row.review_json ?? "");
+      if (isResearchReview(stored)) {
+        reviews.push(stored);
+        continue;
+      }
+      const snapshot = parseJson(row.snapshot_json);
+      const actual = parseStoredDraw(game, row.actual_json);
+      if (!isResearchSnapshot(snapshot) || !actual || !row.settled_at) continue;
+      const review = buildResearchReview(snapshot, actual, row.settled_at);
+      reviews.push(review);
+      await persistReviewBackfill(db, snapshot, review, row.actual_json);
+    }
+    return reviews;
+  } catch {
+    return [];
+  }
+}
+
+function freezeRuleStatements(
+  db: D1Database,
+  snapshot: ResearchSnapshot,
+) {
+  return frozenRules(snapshot).map((rule) =>
+    db.prepare(
+      `INSERT OR IGNORE INTO research_rule_ledger (
+         ledger_id, run_id, game, target_issue, rule_id, target_id,
+         direction, predicted_value, frozen_rule_json, frozen_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      `${snapshot.runId}:${rule.ruleId}`,
+      snapshot.runId,
+      snapshot.game,
+      snapshot.targetIssue,
+      rule.ruleId,
+      rule.targetId,
+      rule.direction,
+      rule.currentPrediction,
+      JSON.stringify(rule),
+      snapshot.generatedAt,
+    ),
+  );
+}
+
+async function persistReviewBackfill(
+  db: D1Database,
+  snapshot: ResearchSnapshot,
+  review: ResearchReview,
+  actualJson: string | null,
+) {
+  const statements = [
+    ...freezeRuleStatements(db, snapshot),
+    db.prepare(
+      `UPDATE research_forecasts
+       SET review_version = ?, review_json = ?
+       WHERE run_id = ? AND review_json IS NULL`,
+    ).bind(
+      RESEARCH_REVIEW_VERSION,
+      JSON.stringify(review),
+      snapshot.runId,
+    ),
+    ...review.rules.map((rule) =>
+      db.prepare(
+        `UPDATE research_rule_ledger
+         SET actual_value = ?, actual_number = ?, outcome = ?,
+             direction_correct = ?, scored_at = ?
+         WHERE ledger_id = ? AND scored_at IS NULL`,
+      ).bind(
+        rule.actualValue,
+        rule.actualNumber,
+        rule.outcome,
+        rule.directionCorrect ? 1 : 0,
+        review.settledAt,
+        `${snapshot.runId}:${rule.ruleId}`,
+      ),
+    ),
+  ];
+  if (!actualJson) return;
+  try {
+    for (let index = 0; index < statements.length; index += 80) {
+      await db.batch(statements.slice(index, index + 80));
+    }
+  } catch {
+    // A backfill failure does not hide a review that can be rebuilt
+    // deterministically from the immutable snapshot and settled draw.
+  }
+}
+
+function parseStoredDraw(game: GameId, raw: string | null): Draw | null {
+  const value = parseJson(raw ?? "");
+  if (!value || typeof value !== "object") return null;
+  const draw = value as Partial<Draw>;
+  if (
+    typeof draw.issue !== "string" ||
+    typeof draw.drawAt !== "string" ||
+    !Array.isArray(draw.numbers) ||
+    draw.numbers.length !== 6 ||
+    !draw.numbers.every((number) => Number.isInteger(number)) ||
+    !Number.isInteger(draw.special)
+  ) return null;
+  return {
+    game,
+    issue: draw.issue,
+    drawAt: draw.drawAt,
+    numbers: draw.numbers,
+    special: draw.special as number,
+    source: typeof draw.source === "string" ? draw.source : "已核验开奖",
+    verified: draw.verified === true,
+  };
+}
+
+function isResearchReview(value: unknown): value is ResearchReview {
+  if (!value || typeof value !== "object") return false;
+  const review = value as Partial<ResearchReview>;
+  return (
+    review.reviewVersion === RESEARCH_REVIEW_VERSION &&
+    typeof review.runId === "string" &&
+    typeof review.targetIssue === "string" &&
+    Array.isArray(review.rules) &&
+    typeof review.settledAt === "string"
+  );
 }
 
 function scoreTarget(target: ResearchTargetForecast, draw: Draw) {

@@ -65,12 +65,27 @@ test("server-renders the dedicated rule research workspace", async () => {
   assert.match(html, /正在读取冻结规律与回测结果/);
 });
 
+test("server-renders the immutable period review workspace", async () => {
+  const response = await render("/research/review");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>规律复盘中心｜六合智研<\/title>/i);
+  assert.match(html, /每一期规律/);
+  assert.match(html, /开奖后都要交卷/);
+  assert.match(html, /正在结算并读取每期规律账本/);
+  assert.match(html, /href="\/research"/);
+});
+
 test("keeps the product implementation free of starter preview artifacts", async () => {
-  const [page, layout, dashboard, researchWorkspace, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
+  const [page, layout, dashboard, researchWorkspace, reviewWorkspace, researchStore, reviewEngine, reviewMigration, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/LotteryDashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/research/review/ResearchReviewWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v2-store.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-review.ts", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0004_black_night_nurse.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../lib/lottery.ts", import.meta.url), "utf8"),
@@ -142,9 +157,20 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(researchWorkspace, /applyQuickFilter/);
   assert.match(researchWorkspace, /一区 01–16 · 二区 17–33 · 三区 34–49/);
   assert.match(researchWorkspace, /规则加权后的研究概率/);
+  assert.match(researchWorkspace, /href="\/research\/review"/);
   assert.doesNotMatch(researchWorkspace, /TriggerFilter/);
   assert.match(researchWorkspace, /explainSpec/);
   assert.match(researchWorkspace, /resourceDecisionLabel/);
+  assert.match(reviewWorkspace, /每一期规律/);
+  assert.match(reviewWorkspace, /正向和负向必须分开理解/);
+  assert.match(reviewWorkspace, /负向成功避开/);
+  assert.match(reviewWorkspace, /不可改写账本/);
+  assert.match(reviewEngine, /buildResearchReview/);
+  assert.match(reviewEngine, /negative_avoided/);
+  assert.match(researchStore, /INSERT OR IGNORE INTO research_rule_ledger/);
+  assert.match(researchStore, /review_json/);
+  assert.match(reviewMigration, /CREATE TABLE `research_rule_ledger`/);
+  assert.match(reviewMigration, /ADD `review_json` text/);
   assert.match(dashboard, /aria-current=/);
   assert.match(dashboard, /ball-zodiac/);
   assert.match(dashboard, /historyVisible/);
@@ -165,6 +191,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.rule-audit-card/);
   assert.match(styles, /\.rule-primary-metrics/);
   assert.match(styles, /\.rule-score-grid/);
+  assert.match(styles, /\.review-rule-card/);
+  assert.match(styles, /\.review-ball-row/);
   assert.match(styles, /\.topbar[\s\S]*position: sticky/);
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
   assert.match(styles, /@media \(max-width: 680px\)/);
@@ -191,6 +219,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(lotteryRoute, /isDrawForTarget/);
   assert.match(lotteryRoute, /高频检测已开启/);
   assert.match(lotteryRoute, /已获取本期完整结果/);
+  assert.match(lotteryRoute, /settleLatestResearch/);
+  assert.match(lotteryRoute, /settleResearchForecasts/);
   assert.doesNotMatch(lotteryRoute, /最新一期为 12·11·31·03·44·37 \+ 25/);
   assert.match(analyzeRoute, /AI_API_KEY/);
   assert.match(analyzeRoute, /\/responses/);
