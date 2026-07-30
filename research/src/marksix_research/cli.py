@@ -20,7 +20,10 @@ def main() -> None:
     run.add_argument("--game", choices=("hk", "new_macau"), required=True)
     run.add_argument("--output", required=True)
 
-    publish = subparsers.add_parser("capture", help="freeze the site's current v2 snapshot")
+    publish = subparsers.add_parser(
+        "capture",
+        help="settle the previous v3 forecast, learn, and freeze the next snapshot",
+    )
     publish.add_argument("--site-url", required=True)
     publish.add_argument("--secret", required=True)
     publish.add_argument("--game", choices=("hk", "new_macau"), required=True)
@@ -41,16 +44,11 @@ def main() -> None:
 
 def capture(site_url: str, secret: str, game: str) -> None:
     base = site_url.rstrip("/")
-    with urlopen(f"{base}/api/research/forecast?game={game}", timeout=90) as response:
-        snapshot = json.loads(response.read().decode("utf-8"))
-    snapshot.pop("source", None)
-    rules = [
-        *snapshot.get("verifiedRules", []),
-        *snapshot.get("experimentalRules", []),
-        *snapshot.get("negativeRules", []),
-    ]
     body = json.dumps(
-        {"snapshot": snapshot, "rules": rules, "source": "computed"},
+        {
+            "taskId": f"scheduled-{game}-{int(time.time() // 300)}",
+            "game": game,
+        },
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
@@ -61,7 +59,7 @@ def capture(site_url: str, secret: str, game: str) -> None:
         hashlib.sha256,
     ).hexdigest()
     request = Request(
-        f"{base}/api/internal/research-runs",
+        f"{base}/api/internal/research/settle-and-learn",
         data=body,
         method="POST",
         headers={
@@ -76,4 +74,3 @@ def capture(site_url: str, secret: str, game: str) -> None:
 
 if __name__ == "__main__":
     main()
-

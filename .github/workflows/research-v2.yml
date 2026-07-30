@@ -1,4 +1,4 @@
-name: Research v2 shadow run
+name: Research v3 settle, learn and freeze
 
 on:
   workflow_dispatch:
@@ -9,13 +9,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: research-v2-shadow
+  group: research-v3-learning
   cancel-in-progress: false
 
 jobs:
   research:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 90
     env:
       SITE_URL: ${{ secrets.RESEARCH_SITE_URL }}
       RESEARCH_SECRET: ${{ secrets.RESEARCH_INGEST_SECRET }}
@@ -41,12 +41,11 @@ jobs:
           marksix-research run --history lib/lottery-history.json --game new_macau --output research-artifacts/new_macau.json
       - uses: actions/upload-artifact@v4
         with:
-          name: research-v2-${{ github.run_id }}
+          name: research-v3-${{ github.run_id }}
           path: research-artifacts
           retention-days: 90
-      - name: Freeze current production snapshots
+      - name: Settle, learn and freeze next forecasts
         if: ${{ env.SITE_URL != '' && env.RESEARCH_SECRET != '' }}
         run: |
           marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game hk
           marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game new_macau
-

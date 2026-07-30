@@ -1,4 +1,4 @@
-name: Research v2 fair-random audit
+name: Research v3 fair-random audit
 
 on:
   workflow_dispatch:

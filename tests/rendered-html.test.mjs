@@ -35,7 +35,7 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>六合智研｜香港与新澳门开奖及规律研究<\/title>/i);
+  assert.match(html, /<title>六合智研｜高概率策略与逐期学习<\/title>/i);
   assert.match(html, /让每一期数据/);
   assert.match(html, /北京时间/);
   assert.match(html, /香港六合彩/);
@@ -44,7 +44,7 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /号码 12，羊，红波/);
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
-  assert.match(html, /进入规律研究/);
+  assert.match(html, /进入高概率策略/);
   assert.match(html, /href="\/research"/);
   assert.doesNotMatch(html, /双轨概率研究实验室/);
   assert.doesNotMatch(html, /三路候选策略/);
@@ -57,22 +57,22 @@ test("server-renders the dedicated rule research workspace", async () => {
   const response = await render("/research");
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /<title>规律研究中心｜六合智研<\/title>/i);
-  assert.match(html, /逐条研究规律/);
-  assert.match(html, /只保留已经被最新历史条件触发/);
+  assert.match(html, /<title>高概率策略中心｜六合智研<\/title>/i);
+  assert.match(html, /不猜号码/);
+  assert.match(html, /只研究高概率事件/);
   assert.match(html, /新澳门六合彩/);
   assert.match(html, /香港六合彩/);
-  assert.match(html, /正在读取冻结规律与回测结果/);
+  assert.match(html, /正在读取冻结策略与学习状态/);
 });
 
 test("server-renders the immutable period review workspace", async () => {
   const response = await render("/research/review");
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /<title>规律复盘中心｜六合智研<\/title>/i);
-  assert.match(html, /每一期规律/);
-  assert.match(html, /开奖后都要交卷/);
-  assert.match(html, /正在结算并读取每期规律账本/);
+  assert.match(html, /<title>逐期学习复盘｜六合智研<\/title>/i);
+  assert.match(html, /每期开奖后/);
+  assert.match(html, /模型都必须交卷/);
+  assert.match(html, /正在读取不可变复盘账本/);
   assert.match(html, /href="\/research"/);
 });
 
@@ -140,31 +140,20 @@ test("keeps the product implementation free of starter preview artifacts", async
     ),
     /三路候选策略|双轨概率研究实验室|冻结概率与规律挑战场/,
   );
-  assert.match(researchWorkspace, /逐条研究规律/);
-  assert.match(researchWorkspace, /wilsonInterval/);
-  assert.match(researchWorkspace, /贝叶斯收缩命中率/);
-  assert.match(researchWorkspace, /5折不劣比例/);
-  assert.match(researchWorkspace, /FDR q 值/);
-  assert.match(researchWorkspace, /currentTriggerMatched/);
-  assert.match(
-    researchWorkspace,
-    /rule\.currentTriggerMatched && rule\.currentPrediction !== null/,
-  );
-  assert.match(researchWorkspace, /下一期第\$\{parts\[2\]\}正码/);
-  assert.match(researchWorkspace, /下一期研究结果/);
-  assert.match(researchWorkspace, /buildResearchConsensus/);
-  assert.match(researchWorkspace, /下一期共识概率/);
-  assert.match(researchWorkspace, /applyQuickFilter/);
-  assert.match(researchWorkspace, /一区 01–16 · 二区 17–33 · 三区 34–49/);
-  assert.match(researchWorkspace, /规则加权后的研究概率/);
+  assert.match(researchWorkspace, /不猜号码/);
+  assert.match(researchWorkspace, /下一期固定四项/);
+  assert.match(researchWorkspace, /每期只冻结四项40%/);
+  assert.match(researchWorkspace, /随机基线/);
+  assert.match(researchWorkspace, /Brier skill/);
+  assert.match(researchWorkspace, /逐期开奖学习闭环/);
+  assert.match(researchWorkspace, /快中慢证据/);
+  assert.match(researchWorkspace, /不输出01–49候选/);
   assert.match(researchWorkspace, /href="\/research\/review"/);
-  assert.doesNotMatch(researchWorkspace, /TriggerFilter/);
-  assert.match(researchWorkspace, /explainSpec/);
-  assert.match(researchWorkspace, /resourceDecisionLabel/);
-  assert.match(reviewWorkspace, /每一期规律/);
-  assert.match(reviewWorkspace, /正向和负向必须分开理解/);
-  assert.match(reviewWorkspace, /负向成功避开/);
-  assert.match(reviewWorkspace, /不可改写账本/);
+  assert.doesNotMatch(researchWorkspace, /最高交集号码|共识号码前三/);
+  assert.match(reviewWorkspace, /模型都必须交卷/);
+  assert.match(reviewWorkspace, /误差归因/);
+  assert.match(reviewWorkspace, /模型权重如何变化/);
+  assert.match(reviewWorkspace, /模型是否真的在进步/);
   assert.match(reviewEngine, /buildResearchReview/);
   assert.match(reviewEngine, /negative_avoided/);
   assert.match(researchStore, /INSERT OR IGNORE INTO research_rule_ledger/);

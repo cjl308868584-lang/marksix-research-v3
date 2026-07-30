@@ -19,10 +19,10 @@ export async function loadServerDraws(
   limit: number,
   asOf = new Date(),
 ): Promise<ServerDraws> {
-  const safeLimit = Math.min(Math.max(limit, 10), 160);
+  const safeLimit = Math.min(Math.max(limit, 10), 500);
   const cutoffTime = asOf.getTime();
   try {
-    const pageCount = Math.min(Math.max(Math.ceil(safeLimit / 50), 1), 4);
+    const pageCount = Math.min(Math.max(Math.ceil(safeLimit / 50), 1), 10);
     const dayStep = game === "hk" ? 120 : 50;
     const anchors = Array.from({ length: pageCount }, (_, index) =>
       formatDateParam(new Date(cutoffTime - index * dayStep * 86_400_000)),

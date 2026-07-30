@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchEnvelope } from "../../../../lib/research-v2-service";
-import { readResearchSnapshot } from "../../../../lib/research-v2-store";
+import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
+import { readResearchV3Snapshot } from "../../../../lib/research-v3-store";
 
 export const dynamic = "force-dynamic";
 
@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
   if ("error" in validation) return validation.error;
   const { game, issue } = validation;
   if (issue) {
-    const stored = await readResearchSnapshot(game, issue);
+    const stored = await readResearchV3Snapshot(game, issue);
     if (!stored) {
       return NextResponse.json(
         { error: "未找到该期冻结研究预测。" },
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(stored, { headers: noStore() });
   }
   try {
-    const envelope = await loadResearchEnvelope({ game });
+    const envelope = await loadResearchV3Envelope({ game });
     return NextResponse.json(
       { ...envelope.snapshot, source: envelope.source },
       { headers: noStore() },

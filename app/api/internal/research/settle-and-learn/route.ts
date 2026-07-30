@@ -1,0 +1,106 @@
+import { NextRequest, NextResponse } from "next/server";
+import { GAME_IDS, type GameId } from "../../../../../lib/lottery";
+import { loadResearchV3Envelope } from "../../../../../lib/research-v3-service";
+import { getRuntimeEnv } from "../../../../../lib/runtime-env";
+
+export const dynamic = "force-dynamic";
+
+const MAX_BODY_BYTES = 32 * 1024;
+const SIGNATURE_WINDOW_MS = 5 * 60_000;
+
+type SettleAndLearnRequest = {
+  taskId: string;
+  game: GameId;
+  asOf?: string;
+};
+
+export async function POST(request: NextRequest) {
+  const secret = getRuntimeEnv("RESEARCH_INGEST_SECRET");
+  if (!secret) {
+    return NextResponse.json(
+      { error: "研究学习服务尚未配置。" },
+      { status: 503 },
+    );
+  }
+  const timestamp = request.headers.get("x-research-timestamp");
+  const signature = request.headers.get("x-research-signature");
+  const timestampMs = timestamp ? Number(timestamp) : Number.NaN;
+  if (
+    !timestamp ||
+    !signature ||
+    !Number.isFinite(timestampMs) ||
+    Math.abs(Date.now() - timestampMs) > SIGNATURE_WINDOW_MS
+  ) {
+    return NextResponse.json({ error: "签名已失效。" }, { status: 401 });
+  }
+  const raw = await request.text();
+  if (new TextEncoder().encode(raw).byteLength > MAX_BODY_BYTES) {
+    return NextResponse.json({ error: "任务内容过大。" }, { status: 413 });
+  }
+  const expected = await hmacHex(secret, `${timestamp}.${raw}`);
+  if (!constantTimeEqual(expected, signature.toLowerCase())) {
+    return NextResponse.json({ error: "签名无效。" }, { status: 401 });
+  }
+  let body: SettleAndLearnRequest;
+  try {
+    body = JSON.parse(raw) as SettleAndLearnRequest;
+  } catch {
+    return NextResponse.json({ error: "任务不是有效 JSON。" }, { status: 400 });
+  }
+  if (
+    !/^[a-zA-Z0-9:_-]{8,160}$/.test(body.taskId ?? "") ||
+    !GAME_IDS.includes(body.game) ||
+    (body.asOf && !Number.isFinite(Date.parse(body.asOf)))
+  ) {
+    return NextResponse.json({ error: "任务参数无效。" }, { status: 400 });
+  }
+  try {
+    const envelope = await loadResearchV3Envelope({
+      game: body.game,
+      asOf: body.asOf ? new Date(body.asOf) : new Date(),
+      forceCompute: false,
+    });
+    return NextResponse.json(
+      {
+        status: envelope.source === "stored" ? "existing" : "completed",
+        taskId: body.taskId,
+        runId: envelope.snapshot.runId,
+        targetIssue: envelope.snapshot.targetIssue,
+        immutable: true,
+      },
+      { headers: { "Cache-Control": "private, no-store" } },
+    );
+  } catch {
+    return NextResponse.json(
+      { error: "结算与学习任务暂时失败，上一冠军和冻结预测未被覆盖。" },
+      { status: 503 },
+    );
+  }
+}
+
+async function hmacHex(secret: string, value: string) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const digest = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
+}
+
+function constantTimeEqual(left: string, right: string) {
+  if (left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    difference |= left.charCodeAt(index) ^ right.charCodeAt(index);
+  }
+  return difference === 0;
+}

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchEnvelope } from "../../../../lib/research-v2-service";
-import { readResearchReviews } from "../../../../lib/research-v2-store";
+import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
+import { readResearchV3Reviews } from "../../../../lib/research-v3-store";
 
 export const dynamic = "force-dynamic";
 
@@ -11,14 +11,14 @@ export async function GET(request: NextRequest) {
   const { game, issue, limit } = validation;
 
   try {
-    await loadResearchEnvelope({ game });
+    await loadResearchV3Envelope({ game });
   } catch {
     // Historical reviews remain readable if the live source is temporarily late.
   }
-  const reviews = await readResearchReviews(game, {
-    targetIssue: issue,
-    limit,
-  });
+  const all = await readResearchV3Reviews(game, Math.max(limit, 50));
+  const reviews = issue
+    ? all.filter((review) => review.targetIssue === issue).slice(0, 1)
+    : all.slice(0, limit);
   return NextResponse.json(
     { game, reviews },
     { headers: { "Cache-Control": "private, no-store" } },

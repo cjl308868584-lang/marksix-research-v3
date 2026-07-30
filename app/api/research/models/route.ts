@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchEnvelope } from "../../../../lib/research-v2-service";
+import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
 
 export const dynamic = "force-dynamic";
 
@@ -21,14 +21,21 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "彩种无效。" }, { status: 400 });
   }
   try {
-    const envelope = await loadResearchEnvelope({ game });
+    const envelope = await loadResearchV3Envelope({ game });
     return NextResponse.json(
       {
         game,
         runId: envelope.snapshot.runId,
         dataVersion: envelope.snapshot.dataQuality.datasetVersion,
         modelVersion: envelope.snapshot.modelVersion,
-        models: envelope.snapshot.modelComparison,
+        champion: envelope.snapshot.learningSummary.champion,
+        challenger: envelope.snapshot.learningSummary.challenger,
+        settledForecasts: envelope.snapshot.learningSummary.settledForecasts,
+        models: envelope.snapshot.events.map((event) => ({
+          slot: event.slot,
+          slotLabel: event.slotLabel,
+          experts: event.experts,
+        })),
       },
       { headers: { "Cache-Control": "private, no-store" } },
     );

@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import { ResearchWorkspace } from "./ResearchWorkspace";
 
 export const metadata: Metadata = {
-  title: "规律研究中心",
+  title: "高概率策略中心",
   description:
-    "逐条查看香港与新澳门六合彩候选规律的触发条件、历史命中率、随机基线、提升幅度、统计显著性与滚动回测结果。",
+    "每期固定研究6+1生肖、6+1尾数、指定位置单双和大小，并在开奖后自动复盘、更新模型和冻结下一期策略。",
 };
 
 export default function ResearchPage() {
