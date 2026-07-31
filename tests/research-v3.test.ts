@@ -72,6 +72,8 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
       event.baselineProbability >= 0.4 &&
         event.baselineProbability <= 0.7,
     );
+    assert.ok(event.probability >= event.baselineProbability);
+    assert.ok(event.uplift >= 0);
     assert.notEqual(event.family, "number");
     assert.doesNotMatch(event.predictionLabel, /候选号码|最高交集号码|号码前三/);
     assert.equal(event.experts.length, 4);

@@ -8098,6 +8098,18 @@ footer p {
   text-decoration: none;
 }
 
+.v3-review-empty button {
+  min-height: 42px;
+  margin-top: 16px;
+  padding: 0 18px;
+  border: 1px solid #7d6b39;
+  border-radius: 8px;
+  color: #f0d98f;
+  font: inherit;
+  background: #2b2618;
+  cursor: pointer;
+}
+
 @media (min-width: 720px) {
   .v3-topbar {
     min-height: 66px;

@@ -43,6 +43,15 @@ export async function loadResearchV3Envelope({
   await settleResearchV3Forecasts(game, history.draws, asOf.toISOString());
   const latest = history.draws[0];
   if (!latest) throw new Error("history unavailable");
+  if (!latest.verified) {
+    const frozen =
+      await readResearchV3Snapshot(game, latest.issue) ??
+      await readResearchV3Snapshot(game);
+    if (frozen) {
+      return { snapshot: frozen, source: "stored" };
+    }
+    throw new Error("latest draw is awaiting independent verification");
+  }
   const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
   const targetIssue = nextIssue(latest.issue);
   const cacheKey = [

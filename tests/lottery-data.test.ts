@@ -138,6 +138,7 @@ after(async () => {
 test("history loader cross-verifies the latest issue with an independent endpoint", async () => {
   const originalFetch = globalThis.fetch;
   const marksixUrls: string[] = [];
+  const newMacauUrls: string[] = [];
   const latestIssue = "2026204";
   const history = Array.from({ length: 10 }, (_, index) => {
     const values = Array.from(
@@ -173,6 +174,14 @@ test("history loader cross-verifies the latest issue with an independent endpoin
         openCode: history[0].preDrawCode,
       });
     }
+    if (url.startsWith("https://macaumarksix.com/")) {
+      newMacauUrls.push(url);
+      return Response.json([{
+        expect: latestIssue,
+        openTime: history[0].preDrawTime,
+        openCode: history[0].preDrawCode,
+      }]);
+    }
     return new Response("unexpected upstream", { status: 404 });
   };
 
@@ -187,11 +196,63 @@ test("history loader cross-verifies the latest issue with an independent endpoin
     assert.equal(result.draws[0].issue, latestIssue);
     assert.equal(result.draws[0].verified, true);
     assert.equal(marksixUrls.length, 1);
+    assert.equal(newMacauUrls.length, 1);
     assert.match(marksixUrls[0], /[?&]type=newMacau(?:&|$)/);
     assert.match(result.draws[0].source, /交叉一致/);
     assert.equal(result.draws.slice(1).some((draw) => draw.verified), false);
     assert.match(result.warning ?? "", /独立接口交叉一致校验/);
     assert.equal(result.rejectedFutureCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("new Macau latest result verifies even when the older cross-check is stale", async () => {
+  const originalFetch = globalThis.fetch;
+  const latestIssue = "2026212";
+  const latestCode = "43,32,16,39,19,27,06";
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({
+        errorCode: 0,
+        result: { data: [{
+          preDrawIssue: latestIssue,
+          preDrawTime: "2026-07-31 21:32:32",
+          preDrawCode: latestCode,
+        }] },
+      });
+    }
+    if (url.startsWith("https://api3.marksix6.net/")) {
+      return Response.json({
+        expect: "2026211",
+        openTime: "2026-07-30 21:32:32",
+        openCode: "13,12,39,37,38,08,01",
+      });
+    }
+    if (url.startsWith("https://macaumarksix.com/")) {
+      return Response.json([{
+        expect: latestIssue,
+        openTime: "2026-07-31 21:32:32",
+        openCode: latestCode,
+      }]);
+    }
+    return new Response("unexpected upstream", { status: 404 });
+  };
+
+  try {
+    const result = await loadServerDraws(
+      "new_macau",
+      10,
+      new Date("2026-08-01T00:00:00.000Z"),
+    );
+    assert.equal(result.draws[0].issue, latestIssue);
+    assert.equal(result.draws[0].verified, true);
+    assert.match(result.draws[0].source, /新澳门开奖独立接口/);
   } finally {
     globalThis.fetch = originalFetch;
   }

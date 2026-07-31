@@ -537,8 +537,13 @@ function toEventForecast(
   expectedDrawAt: string,
 ): ResearchEventForecast {
   const { candidate, history } = evaluation;
+  const hasPositiveEdge = evaluation.probability > evaluation.baseline + 1e-9;
+  const displayedProbability = hasPositiveEdge
+    ? evaluation.probability
+    : evaluation.baseline;
   const verifiedCount = draws.filter((draw) => draw.verified).length;
   const historicalGate =
+    hasPositiveEdge &&
     history.sampleSize >= 80 &&
     history.brierSkill > 0 &&
     history.nonWorseFoldRatio >= 0.8 &&
@@ -602,17 +607,17 @@ function toEventForecast(
     family: candidate.family,
     predictedValue: candidate.value,
     predictionLabel: predictionLabel(candidate),
-    probability: evaluation.probability,
+    probability: displayedProbability,
     baselineProbability: evaluation.baseline,
-    uplift: evaluation.probability - evaluation.baseline,
+    uplift: displayedProbability - evaluation.baseline,
     evidenceTier: tier,
     experts,
     ruleContributions: evaluation.contributions,
     history,
     rationale:
-      strongest.contribution >= 0
+      hasPositiveEdge && strongest.contribution >= 0
         ? `${strongest.label}对“${candidate.value}”提供当前最强支持；概率已与随机基线及其他模型加权。`
-        : `现有证据没有形成稳定正优势；该槽位保留研究预测，但概率主动向随机基线收缩。`,
+        : `现有证据没有形成正优势；该槽位只保留精确随机基线，不将负提升包装成预测优势。`,
     warning:
       tier === "verified"
         ? null
@@ -624,17 +629,22 @@ function compareCandidateEvaluation(
   left: CandidateEvaluation,
   right: CandidateEvaluation,
 ) {
+  const leftUplift = left.probability - left.baseline;
+  const rightUplift = right.probability - right.baseline;
+  const leftPositive = leftUplift > 1e-9 ? 1 : 0;
+  const rightPositive = rightUplift > 1e-9 ? 1 : 0;
   const leftScore =
-    Math.max(left.history.brierSkill, -0.2) * 0.5 +
-    left.history.nonWorseFoldRatio * 0.2 +
-    (left.probability - left.baseline) * 2 +
-    left.history.posteriorAdvantage * 0.05;
+    leftUplift * 8 +
+    Math.max(left.history.brierSkill, -0.2) * 0.2 +
+    left.history.nonWorseFoldRatio * 0.1 +
+    left.history.posteriorAdvantage * 0.03;
   const rightScore =
-    Math.max(right.history.brierSkill, -0.2) * 0.5 +
-    right.history.nonWorseFoldRatio * 0.2 +
-    (right.probability - right.baseline) * 2 +
-    right.history.posteriorAdvantage * 0.05;
+    rightUplift * 8 +
+    Math.max(right.history.brierSkill, -0.2) * 0.2 +
+    right.history.nonWorseFoldRatio * 0.1 +
+    right.history.posteriorAdvantage * 0.03;
   return (
+    rightPositive - leftPositive ||
     rightScore - leftScore ||
     right.probability - left.probability ||
     left.candidate.value.localeCompare(right.candidate.value, "zh-Hans-CN")

@@ -35,18 +35,23 @@ export async function loadServerDraws(
       result.status === "fulfilled" ? result.value : [],
     );
     if (!liveDraws.length) throw new Error("history unavailable");
-    const crossCheckByIssue = new Map(
-      crossChecks.map((draw) => [draw.issue, draw]),
-    );
+    const crossCheckByIssue = new Map<string, Draw[]>();
+    crossChecks.forEach((draw) => {
+      const matches = crossCheckByIssue.get(draw.issue) ?? [];
+      matches.push(draw);
+      crossCheckByIssue.set(draw.issue, matches);
+    });
     let verifiedMatches = 0;
     let verificationConflicts = 0;
     const verifiedHistory = uniqueNewest(liveDraws).map((draw) => {
-      const crossCheck = crossCheckByIssue.get(draw.issue);
-      if (!crossCheck) return draw;
-      const agrees =
-        [...crossCheck.numbers, crossCheck.special].join(",") ===
-        [...draw.numbers, draw.special].join(",");
-      if (!agrees) {
+      const candidates = crossCheckByIssue.get(draw.issue) ?? [];
+      if (!candidates.length) return draw;
+      const crossCheck = candidates.find(
+        (candidate) =>
+          [...candidate.numbers, candidate.special].join(",") ===
+          [...draw.numbers, draw.special].join(","),
+      );
+      if (!crossCheck) {
         verificationConflicts += 1;
         return draw;
       }
@@ -154,6 +159,19 @@ function parseDraw(game: GameId, issue: string, drawAt: string, code: string): D
 }
 
 async function fetchLatestCrossCheck(game: GameId): Promise<Draw[]> {
+  const requests = [fetchMarksix6CrossCheck(game)];
+  if (game === "new_macau") {
+    requests.push(fetchNewMacauCrossCheck());
+  }
+  const results = await Promise.allSettled(requests);
+  const draws = results.flatMap((result) =>
+    result.status === "fulfilled" ? result.value : []
+  );
+  if (!draws.length) throw new Error("latest cross-check unavailable");
+  return draws;
+}
+
+async function fetchMarksix6CrossCheck(game: GameId): Promise<Draw[]> {
   const sourceType: Record<GameId, string> = {
     hk: "hk",
     macau: "macau",
@@ -177,6 +195,34 @@ async function fetchLatestCrossCheck(game: GameId): Promise<Draw[]> {
     codes,
   );
   return draw ? [{ ...draw, source: "Marksix6 独立接口" }] : [];
+}
+
+async function fetchNewMacauCrossCheck(): Promise<Draw[]> {
+  const response = await fetchWithTimeout(
+    "https://macaumarksix.com/api/macaujc2.com",
+  );
+  if (!response.ok) throw new Error(`new macau cross-check ${response.status}`);
+  const payload = (await response.json()) as Array<{
+    expect?: string;
+    openTime?: string;
+    openCode?: string;
+  }> | {
+    expect?: string;
+    openTime?: string;
+    openCode?: string;
+  };
+  const items = Array.isArray(payload) ? payload : [payload];
+  return items
+    .map((item) =>
+      parseDraw(
+        "new_macau",
+        item.expect ?? "",
+        item.openTime ?? "",
+        item.openCode ?? "",
+      )
+    )
+    .filter((draw): draw is Draw => Boolean(draw))
+    .map((draw) => ({ ...draw, source: "新澳门开奖独立接口" }));
 }
 
 function uniqueNewest(draws: Draw[]): Draw[] {

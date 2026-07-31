@@ -19,9 +19,11 @@ export function ResearchReviewWorkspace() {
   const [selectedIssue, setSelectedIssue] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     const controller = new AbortController();
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
     setLoading(true);
     setError("");
     setReviews([]);
@@ -52,6 +54,11 @@ export function ResearchReviewWorkspace() {
         setReviews(items);
         setPerformance(summary);
         setSelectedIssue(items[0]?.targetIssue ?? "");
+        if (items.length === 0) {
+          retryTimer = setTimeout(() => {
+            setRefreshKey((value) => value + 1);
+          }, 30_000);
+        }
       })
       .catch((reason) => {
         if (!(reason instanceof DOMException && reason.name === "AbortError")) {
@@ -61,8 +68,11 @@ export function ResearchReviewWorkspace() {
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
-    return () => controller.abort();
-  }, [game]);
+    return () => {
+      controller.abort();
+      if (retryTimer) clearTimeout(retryTimer);
+    };
+  }, [game, refreshKey]);
 
   const review =
     reviews.find((item) => item.targetIssue === selectedIssue) ??
@@ -126,6 +136,12 @@ export function ResearchReviewWorkspace() {
               第一组四项策略开奖并完成双源核验后，这里会自动出现命中、
               概率评分、错误诊断和模型权重变化。
             </p>
+            <button
+              type="button"
+              onClick={() => setRefreshKey((value) => value + 1)}
+            >
+              立即核验并复盘
+            </button>
             <a href="/research">查看下一期冻结策略 →</a>
           </section>
         )}
