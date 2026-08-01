@@ -26,7 +26,11 @@ export async function GET(request: NextRequest) {
       { headers: noStore() },
     );
   } catch (error) {
-    console.error("research forecast unavailable", error);
+    console.error(
+      `research forecast unavailable: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
     return NextResponse.json(
       { error: "研究快照暂不可用。" },
       { status: 503, headers: noStore() },

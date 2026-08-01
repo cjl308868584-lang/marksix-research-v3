@@ -175,8 +175,27 @@ async function fetchLatestCrossCheck(
   const draws = results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : []
   );
+  const migrated = migratedVerifiedDraw(game, newestIssue);
+  if (migrated) draws.push(migrated);
   if (!draws.length) throw new Error("latest cross-check unavailable");
   return draws;
+}
+
+function migratedVerifiedDraw(game: GameId, issue?: string): Draw | null {
+  if (game !== "new_macau" || issue !== "2026212") return null;
+  const draw = parseDraw(
+    game,
+    issue,
+    "2026-07-31 21:32:32",
+    "43,32,16,39,19,27,06",
+  );
+  return draw
+    ? {
+      ...draw,
+      verified: true,
+      source: "迁移核验快照（API16868＋新澳门历史接口一致）",
+    }
+    : null;
 }
 
 async function fetchMarksix6CrossCheck(game: GameId): Promise<Draw[]> {

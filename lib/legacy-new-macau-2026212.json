@@ -1,0 +1,422 @@
+{
+  "schemaVersion": "3",
+  "engineVersion": "high-probability-events-v3.0",
+  "modelVersion": "champion-challenger-v3.0-2ebb2d62",
+  "runId": "rv3_new_macau_2026212_b4bb5f98",
+  "game": "new_macau",
+  "targetIssue": "2026212",
+  "expectedDrawAt": "2026-07-31T13:32:00.000Z",
+  "generatedAt": "2026-07-30T20:06:57.775Z",
+  "frozenAt": "2026-07-30T20:06:57.775Z",
+  "mode": "shadow",
+  "events": [
+    {
+      "eventId": "evt_zodiac_6_plus_1_draw_6_plus_1_龙_e9d10adf",
+      "slot": "zodiac_6_plus_1",
+      "slotLabel": "6+1生肖覆盖",
+      "scope": "draw.6_plus_1",
+      "scopeLabel": "6个正码＋特码",
+      "family": "zodiac",
+      "predictedValue": "龙",
+      "predictionLabel": "下一期6+1至少出现一次龙",
+      "probability": 0.46696149856910196,
+      "baselineProbability": 0.47171930751949265,
+      "uplift": -0.004757808950390685,
+      "evidenceTier": "shadow",
+      "experts": [
+        {
+          "modelId": "baseline",
+          "label": "精确随机基线",
+          "weight": 0.35,
+          "probability": 0.47171930751949265,
+          "status": "active",
+          "note": "永久保留，模型失效时自动回归。"
+        },
+        {
+          "modelId": "interpretable_rules",
+          "label": "快中慢规则集成",
+          "weight": 0.35,
+          "probability": 0.480436110502122,
+          "status": "active",
+          "note": "Beta-Binomial收缩后的40期、120期及全历史后验。"
+        },
+        {
+          "modelId": "logistic",
+          "label": "正则化逻辑回归",
+          "weight": 0.3,
+          "probability": 0.4456903408717896,
+          "status": "shadow",
+          "note": "按时间滚动训练与验证，尚未达到前瞻晋级门槛。"
+        },
+        {
+          "modelId": "black_box",
+          "label": "黑盒挑战者",
+          "weight": 0,
+          "probability": 0.47171930751949265,
+          "status": "blocked",
+          "note": "高质量历史不足1,000期，暂不启用。"
+        }
+      ],
+      "ruleContributions": [
+        {
+          "ruleId": "rv3_zodiac_6_plus_1_draw_6_plus_1_龙_40",
+          "label": "快速40期后验",
+          "direction": "support",
+          "window": 40,
+          "observedRate": 0.55,
+          "baselineRate": 0.47171930751949265,
+          "posteriorRate": 0.5239064358398309,
+          "contribution": 0.05218712832033823,
+          "support": 40
+        },
+        {
+          "ruleId": "rv3_zodiac_6_plus_1_draw_6_plus_1_龙_120",
+          "label": "中速120期后验",
+          "direction": "suppress",
+          "window": 120,
+          "observedRate": 0.4666666666666667,
+          "baselineRate": 0.4717193075194927,
+          "posteriorRate": 0.4673884725027847,
+          "contribution": -0.004330835016708001,
+          "support": 120
+        },
+        {
+          "ruleId": "rv3_zodiac_6_plus_1_draw_6_plus_1_龙_all",
+          "label": "全部历史后验",
+          "direction": "suppress",
+          "window": "all",
+          "observedRate": 0.4028056112224449,
+          "baselineRate": 0.4717193075194927,
+          "posteriorRate": 0.40546124499111724,
+          "contribution": -0.06625806252837546,
+          "support": 499
+        }
+      ],
+      "history": {
+        "sampleSize": 499,
+        "hits": 201,
+        "hitRate": 0.4028056112224449,
+        "expectedHits": 235.38793445222686,
+        "brierSkill": 0.017732053780206147,
+        "logLossSkill": 0.012881319843428773,
+        "nonWorseFoldRatio": 0.8,
+        "calibrationError": 0.009904826357958807,
+        "posteriorAdvantage": 0.0010443491975002939
+      },
+      "rationale": "现有证据没有形成稳定正优势；该槽位保留研究预测，但概率主动向随机基线收缩。",
+      "warning": "尚未完成50次独立前瞻验证，只能作为影子研究结果。"
+    },
+    {
+      "eventId": "evt_tail_6_plus_1_draw_6_plus_1_0尾_e9d10adf",
+      "slot": "tail_6_plus_1",
+      "slotLabel": "6+1尾数覆盖",
+      "scope": "draw.6_plus_1",
+      "scopeLabel": "6个正码＋特码",
+      "family": "tail",
+      "predictedValue": "0尾",
+      "predictionLabel": "下一期6+1至少出现一次0尾",
+      "probability": 0.5057319234788953,
+      "baselineProbability": 0.47171930751949265,
+      "uplift": 0.03401261595940264,
+      "evidenceTier": "challenger",
+      "experts": [
+        {
+          "modelId": "baseline",
+          "label": "精确随机基线",
+          "weight": 0.35,
+          "probability": 0.47171930751949265,
+          "status": "active",
+          "note": "永久保留，模型失效时自动回归。"
+        },
+        {
+          "modelId": "interpretable_rules",
+          "label": "快中慢规则集成",
+          "weight": 0.35,
+          "probability": 0.5108600026023147,
+          "status": "active",
+          "note": "Beta-Binomial收缩后的40期、120期及全历史后验。"
+        },
+        {
+          "modelId": "logistic",
+          "label": "正则化逻辑回归",
+          "weight": 0.3,
+          "probability": 0.5394305497875427,
+          "status": "shadow",
+          "note": "按时间滚动训练与验证，尚未达到前瞻晋级门槛。"
+        },
+        {
+          "modelId": "black_box",
+          "label": "黑盒挑战者",
+          "weight": 0,
+          "probability": 0.47171930751949265,
+          "status": "blocked",
+          "note": "高质量历史不足1,000期，暂不启用。"
+        }
+      ],
+      "ruleContributions": [
+        {
+          "ruleId": "rv3_tail_6_plus_1_draw_6_plus_1_0尾_40",
+          "label": "快速40期后验",
+          "direction": "support",
+          "window": 40,
+          "observedRate": 0.5,
+          "baselineRate": 0.47171930751949265,
+          "posteriorRate": 0.4905731025064976,
+          "contribution": 0.018853794987004957,
+          "support": 40
+        },
+        {
+          "ruleId": "rv3_tail_6_plus_1_draw_6_plus_1_0尾_120",
+          "label": "中速120期后验",
+          "direction": "support",
+          "window": 120,
+          "observedRate": 0.55,
+          "baselineRate": 0.4717193075194927,
+          "posteriorRate": 0.5388170439313561,
+          "contribution": 0.0670977364118634,
+          "support": 120
+        },
+        {
+          "ruleId": "rv3_tail_6_plus_1_draw_6_plus_1_0尾_all",
+          "label": "全部历史后验",
+          "direction": "support",
+          "window": "all",
+          "observedRate": 0.5090180360721442,
+          "baselineRate": 0.4717193075194927,
+          "posteriorRate": 0.5075807054920807,
+          "contribution": 0.03586139797258797,
+          "support": 499
+        }
+      ],
+      "history": {
+        "sampleSize": 499,
+        "hits": 254,
+        "hitRate": 0.5090180360721442,
+        "expectedHits": 235.38793445222686,
+        "brierSkill": 0.00958524636828284,
+        "logLossSkill": 0.006915328245618579,
+        "nonWorseFoldRatio": 1,
+        "calibrationError": 0.04725731015139367,
+        "posteriorAdvantage": 0.9490508472977942
+      },
+      "rationale": "中速120期后验对“0尾”提供当前最强支持；概率已与随机基线及其他模型加权。",
+      "warning": "尚未完成50次独立前瞻验证，只能作为影子研究结果。"
+    },
+    {
+      "eventId": "evt_position_parity_main_position_5_双_e9d10adf",
+      "slot": "position_parity",
+      "slotLabel": "指定位置单双",
+      "scope": "main.position.5",
+      "scopeLabel": "第5正码",
+      "family": "parity",
+      "predictedValue": "双",
+      "predictionLabel": "下一期第5正码：双",
+      "probability": 0.5181791528852461,
+      "baselineProbability": 0.4897959183673469,
+      "uplift": 0.028383234517899147,
+      "evidenceTier": "shadow",
+      "experts": [
+        {
+          "modelId": "baseline",
+          "label": "精确随机基线",
+          "weight": 0.35,
+          "probability": 0.4897959183673469,
+          "status": "active",
+          "note": "永久保留，模型失效时自动回归。"
+        },
+        {
+          "modelId": "interpretable_rules",
+          "label": "快中慢规则集成",
+          "weight": 0.35,
+          "probability": 0.5132707129094414,
+          "status": "active",
+          "note": "Beta-Binomial收缩后的40期、120期及全历史后验。"
+        },
+        {
+          "modelId": "logistic",
+          "label": "正则化逻辑回归",
+          "weight": 0.3,
+          "probability": 0.5570194397945675,
+          "status": "shadow",
+          "note": "按时间滚动训练与验证，尚未达到前瞻晋级门槛。"
+        },
+        {
+          "modelId": "black_box",
+          "label": "黑盒挑战者",
+          "weight": 0,
+          "probability": 0.4897959183673469,
+          "status": "blocked",
+          "note": "高质量历史不足1,000期，暂不启用。"
+        }
+      ],
+      "ruleContributions": [
+        {
+          "ruleId": "rv3_position_parity_main_position_5_双_40",
+          "label": "快速40期后验",
+          "direction": "support",
+          "window": 40,
+          "observedRate": 0.5,
+          "baselineRate": 0.48979591836734687,
+          "posteriorRate": 0.49659863945578225,
+          "contribution": 0.006802721088435382,
+          "support": 40
+        },
+        {
+          "ruleId": "rv3_position_parity_main_position_5_双_120",
+          "label": "中速120期后验",
+          "direction": "support",
+          "window": 120,
+          "observedRate": 0.5416666666666666,
+          "baselineRate": 0.4897959183673477,
+          "posteriorRate": 0.534256559766764,
+          "contribution": 0.0444606413994163,
+          "support": 120
+        },
+        {
+          "ruleId": "rv3_position_parity_main_position_5_双_all",
+          "label": "全部历史后验",
+          "direction": "support",
+          "window": "all",
+          "observedRate": 0.5150300601202404,
+          "baselineRate": 0.48979591836734887,
+          "posteriorRate": 0.5140576461798593,
+          "contribution": 0.024261727812510403,
+          "support": 499
+        }
+      ],
+      "history": {
+        "sampleSize": 499,
+        "hits": 257,
+        "hitRate": 0.5150300601202404,
+        "expectedHits": 244.40816326530708,
+        "brierSkill": 0.017308868531070942,
+        "logLossSkill": 0.012518769828093634,
+        "nonWorseFoldRatio": 0.8,
+        "calibrationError": 0.004746937548290919,
+        "posteriorAdvantage": 0.8658405854173232
+      },
+      "rationale": "中速120期后验对“双”提供当前最强支持；概率已与随机基线及其他模型加权。",
+      "warning": "尚未完成50次独立前瞻验证，只能作为影子研究结果。"
+    },
+    {
+      "eventId": "evt_position_size_special_小_e9d10adf",
+      "slot": "position_size",
+      "slotLabel": "指定位置大小",
+      "scope": "special",
+      "scopeLabel": "特码",
+      "family": "size",
+      "predictedValue": "小",
+      "predictionLabel": "下一期特码：小",
+      "probability": 0.4945092666718872,
+      "baselineProbability": 0.4897959183673469,
+      "uplift": 0.004713348304540288,
+      "evidenceTier": "shadow",
+      "experts": [
+        {
+          "modelId": "baseline",
+          "label": "精确随机基线",
+          "weight": 0.35,
+          "probability": 0.4897959183673469,
+          "status": "active",
+          "note": "永久保留，模型失效时自动回归。"
+        },
+        {
+          "modelId": "interpretable_rules",
+          "label": "快中慢规则集成",
+          "weight": 0.35,
+          "probability": 0.5084585741811176,
+          "status": "active",
+          "note": "Beta-Binomial收缩后的40期、120期及全历史后验。"
+        },
+        {
+          "modelId": "logistic",
+          "label": "正则化逻辑回归",
+          "weight": 0.3,
+          "probability": 0.4837339809330821,
+          "status": "shadow",
+          "note": "按时间滚动训练与验证，尚未达到前瞻晋级门槛。"
+        },
+        {
+          "modelId": "black_box",
+          "label": "黑盒挑战者",
+          "weight": 0,
+          "probability": 0.4897959183673469,
+          "status": "blocked",
+          "note": "高质量历史不足1,000期，暂不启用。"
+        }
+      ],
+      "ruleContributions": [
+        {
+          "ruleId": "rv3_position_size_special_小_40",
+          "label": "快速40期后验",
+          "direction": "support",
+          "window": 40,
+          "observedRate": 0.525,
+          "baselineRate": 0.48979591836734687,
+          "posteriorRate": 0.5132653061224489,
+          "contribution": 0.023469387755102045,
+          "support": 40
+        },
+        {
+          "ruleId": "rv3_position_size_special_小_120",
+          "label": "中速120期后验",
+          "direction": "support",
+          "window": 120,
+          "observedRate": 0.5083333333333333,
+          "baselineRate": 0.4897959183673477,
+          "posteriorRate": 0.5056851311953354,
+          "contribution": 0.01588921282798772,
+          "support": 120
+        },
+        {
+          "ruleId": "rv3_position_size_special_小_all",
+          "label": "全部历史后验",
+          "direction": "support",
+          "window": "all",
+          "observedRate": 0.503006012024048,
+          "baselineRate": 0.48979591836734887,
+          "posteriorRate": 0.5024969525382408,
+          "contribution": 0.012701034170891912,
+          "support": 499
+        }
+      ],
+      "history": {
+        "sampleSize": 499,
+        "hits": 251,
+        "hitRate": 0.503006012024048,
+        "expectedHits": 244.40816326530708,
+        "brierSkill": 0.00003134563044693284,
+        "logLossSkill": 0.00002342318053816239,
+        "nonWorseFoldRatio": 0.8,
+        "calibrationError": 0.016381303031289096,
+        "posteriorAdvantage": 0.7187943466097294
+      },
+      "rationale": "快速40期后验对“小”提供当前最强支持；概率已与随机基线及其他模型加权。",
+      "warning": "尚未完成50次独立前瞻验证，只能作为影子研究结果。"
+    }
+  ],
+  "dataQuality": {
+    "sampleSize": 499,
+    "verifiedSampleSize": 1,
+    "verifiedRatio": 0.002004008016032064,
+    "sourceMode": "live",
+    "oldestIssue": "2025078",
+    "newestIssue": "2026211",
+    "datasetVersion": "data_2ebb2d62",
+    "warnings": [
+      "实时历史源仅返回 499 期。 最新记录已有 1 期通过独立接口交叉一致校验。",
+      "独立核验前瞻样本不足50期，暂不标记已验证优势。"
+    ]
+  },
+  "learningSummary": {
+    "settledForecasts": 0,
+    "champion": "interpretable_rules",
+    "challenger": "logistic",
+    "baselineWeightFloor": 0.25,
+    "fastWindow": 40,
+    "mediumWindow": 120,
+    "message": "等待首期固定四项策略开奖后，开始前瞻学习。"
+  },
+  "notice": "只预测四类40%–70%基线事件；原始号码仅用于计算分类特征，不作为预测输出。"
+}
+

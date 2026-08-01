@@ -2,6 +2,7 @@ import { nextIssue } from "./ai-engine";
 import { loadServerDraws } from "./lottery-data";
 import { GAME_IDS, nextScheduledDraw, type GameId } from "./lottery";
 import { buildResearchV3Snapshot } from "./research-v3-engine";
+import legacyNewMacau2026212 from "./legacy-new-macau-2026212.json";
 import {
   countSettledResearchV3Forecasts,
   ensureResearchV3Store,
@@ -19,6 +20,9 @@ const MAX_RESEARCH_HISTORY = 500;
 const CACHE_TTL_MS = 10 * 60_000;
 const LEGACY_RESEARCH_ORIGIN =
   "https://marksix-intelligence-cn.m308868584.chatgpt.site";
+const LEGACY_SNAPSHOTS = [legacyNewMacau2026212] as unknown as Array<
+  Parameters<typeof persistResearchV3Snapshot>[0]
+>;
 
 const runtime = globalThis as typeof globalThis & {
   __marksixResearchV3Cache?: Map<
@@ -45,7 +49,9 @@ export async function loadResearchV3Envelope({
   const history = await loadServerDraws(game, MAX_RESEARCH_HISTORY, asOf);
   const latest = history.draws[0];
   if (!latest) throw new Error("history unavailable");
-  await ensureResearchV3Store();
+  if (!await ensureResearchV3Store()) {
+    throw new Error("research D1 binding unavailable");
+  }
   await importLegacySnapshot(game, latest.issue);
   await settleResearchV3Forecasts(game, history.draws, asOf.toISOString());
   if (!latest.verified) {
@@ -133,6 +139,13 @@ export async function loadResearchV3Envelope({
 
 async function importLegacySnapshot(game: GameId, issue: string) {
   if (await readResearchV3Snapshot(game, issue)) return;
+  const bundled = LEGACY_SNAPSHOTS.find(
+    (snapshot) => snapshot.game === game && snapshot.targetIssue === issue,
+  );
+  if (bundled) {
+    const result = await persistResearchV3Snapshot(bundled);
+    if (result === "created" || result === "existing") return;
+  }
   try {
     const response = await fetch(
       `${LEGACY_RESEARCH_ORIGIN}/api/research/forecast?game=${game}&issue=${encodeURIComponent(issue)}`,
