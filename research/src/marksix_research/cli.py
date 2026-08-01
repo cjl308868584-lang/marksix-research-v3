@@ -155,17 +155,15 @@ def capture_task_id(game: str, artifact: dict[str, object]) -> str:
     audit = artifact.get("audit")
     audit = audit if isinstance(audit, dict) else {}
     issue = str(audit.get("newestIssue") or "empty")
-    dataset_version = str(audit.get("datasetVersion") or "")
-    if not dataset_version:
-        dataset_version = hashlib.sha256(
-            json.dumps(
-                artifact,
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
-            ).encode("utf-8")
-        ).hexdigest()
-    return f"scheduled-{game}-{issue}-{dataset_version[:20]}"
+    artifact_hash = hashlib.sha256(
+        json.dumps(
+            artifact,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    ).hexdigest()
+    return f"scheduled-{game}-{issue}-{artifact_hash[:20]}"
 
 
 if __name__ == "__main__":

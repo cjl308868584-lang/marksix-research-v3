@@ -28,6 +28,8 @@ class ResearchPipelineTest(unittest.TestCase):
         }
         self.assertNotEqual(first, capture_task_id("new_macau", changed))
         self.assertIn("2026213", first)
+        regenerated = {**artifact, "generatedAt": "2026-08-01T15:58:00Z"}
+        self.assertNotEqual(first, capture_task_id("new_macau", regenerated))
 
     def test_zodiac_matches_known_2026_mapping(self):
         self.assertEqual(zodiac(5, "2026-07-24T21:30:00+08:00"), "虎")
