@@ -76,6 +76,15 @@ test("server-renders the immutable period review workspace", async () => {
   assert.match(html, /href="\/research"/);
 });
 
+test("review API accepts the fifty-period history requested by the review page", async () => {
+  const response = await fetchWorker(
+    "/api/research/reviews?game=new_macau&limit=50",
+  );
+  assert.equal(response.status, 200);
+  const payload = await response.json();
+  assert.deepEqual(payload, { game: "new_macau", reviews: [] });
+});
+
 test("keeps the product implementation free of starter preview artifacts", async () => {
   const [page, layout, dashboard, researchWorkspace, reviewWorkspace, researchStore, reviewEngine, reviewMigration, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

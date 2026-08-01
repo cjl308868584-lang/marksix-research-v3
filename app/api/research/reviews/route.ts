@@ -50,7 +50,7 @@ function validateQuery(request: NextRequest):
     (issue !== null && !/^\d{4,16}$/.test(issue)) ||
     !Number.isInteger(requestedLimit) ||
     requestedLimit < 1 ||
-    requestedLimit > 24
+    requestedLimit > 100
   ) {
     return {
       error: NextResponse.json(
