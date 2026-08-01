@@ -171,11 +171,6 @@ export async function GET(request: NextRequest) {
     MAX_HISTORY_DRAWS,
     asOf,
   );
-  const settlementStatus = await settleForecastLedger(
-    game,
-    history.draws,
-    asOfAt,
-  );
   if (history.draws.length === 0) return noRestoredReport();
   const learningState = await readSettledForecastLearningState(
     game,
@@ -186,9 +181,6 @@ export async function GET(request: NextRequest) {
     samples: learningState.samples,
     sourceStatus: learningState.sourceStatus,
   };
-  if (settlementStatus !== "ok") {
-    currentLearningInput.sourceStatus = "unavailable";
-  }
   const currentLearning = buildOnlineLearningProfile(
     game,
     currentLearningInput,

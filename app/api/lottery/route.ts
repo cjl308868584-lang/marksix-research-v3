@@ -257,26 +257,93 @@ async function getHongKongDraws(limit: number) {
 }
 
 async function getNewMacauDraws(limit: number) {
-  const [historySource, latestSource] = await Promise.allSettled([
+  const [historySource, latestSource, independentLatestSource, independentHistorySource] = await Promise.allSettled([
     fetchApi16868("new_macau", limit),
     fetchMarksixLatest("new_macau"),
+    fetchNewMacauLatest(),
+    fetchNewMacauYearHistory(),
   ]);
   const history = fulfilled(historySource);
-  const latest = fulfilled(latestSource)[0];
+  const latest = fulfilled(latestSource);
+  const independentLatest = fulfilled(independentLatestSource);
+  const independentHistory = fulfilled(independentHistorySource);
   const base = history.length ? history : FALLBACK_DRAWS.new_macau;
-  const merged = mergeLatest(base, latest);
-  const checked = markVerified(merged, [history[0], latest]);
+  const merged = mergeDrawBatches([base, latest, independentLatest]);
+  const checked = markVerified(merged, [
+    ...history,
+    ...latest,
+    ...independentLatest,
+    ...independentHistory,
+  ]);
 
   return {
     game: "new_macau" as const,
     draws: checked.slice(0, limit),
-    live: history.length > 0 || Boolean(latest),
+    live: history.length > 0 || latest.length > 0 || independentLatest.length > 0,
     degraded: history.length === 0,
     message: history.length
       ? `新澳门彩免费历史 API 已接入，当前载入 ${checked.length} 期；最新第 ${checked[0]?.issue ?? "—"} 期。`
       : `新澳门彩实时数据源暂不可达，当前展示最近一次同步的 ${FALLBACK_DRAWS.new_macau.length} 期历史快照。`,
     fetchedAt: new Date().toISOString(),
   };
+}
+
+type NewMacauHistoryPayload = {
+  data?: Array<{
+    expect?: string;
+    openTime?: string;
+    openCode?: string;
+  }>;
+};
+
+async function fetchNewMacauLatest(): Promise<Draw[]> {
+  const response = await fetchWithTimeout("https://macaumarksix.com/api/macaujc2.com");
+  if (!response.ok) throw new Error(`new Macau latest ${response.status}`);
+  const payload = (await response.json()) as NewMacauHistoryPayload["data"] | {
+    expect?: string;
+    openTime?: string;
+    openCode?: string;
+  };
+  const items = Array.isArray(payload) ? payload : [payload];
+  return items
+    .map((item) => parseDraw(
+      "new_macau",
+      item?.expect ?? "",
+      item?.openTime ?? "",
+      item?.openCode ?? "",
+      "新澳门开奖独立接口",
+    ))
+    .filter((draw): draw is Draw => Boolean(draw));
+}
+
+async function fetchNewMacauYearHistory(): Promise<Draw[]> {
+  const year = Number(new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+  }).format(new Date()));
+  const responses = await Promise.allSettled(
+    [year, year - 1].map((value) =>
+      fetchWithTimeout(`https://history.macaumarksix.com/history/macaujc2/y/${value}`)
+    ),
+  );
+  const payloads = await Promise.all(responses.map(async (result) => {
+    if (result.status !== "fulfilled" || !result.value.ok) return [];
+    const payload = (await result.value.json()) as NewMacauHistoryPayload;
+    return payload.data ?? [];
+  }));
+  const draws = payloads.flat()
+    .map((item) => parseDraw(
+      "new_macau",
+      item.expect ?? "",
+      item.openTime ?? "",
+      item.openCode ?? "",
+      "新澳门年度历史独立接口",
+    ))
+    .filter((draw): draw is Draw => Boolean(draw));
+  return [...new Map(draws.map((draw) => [
+    `${draw.issue}:${[...draw.numbers, draw.special].join(",")}`,
+    draw,
+  ])).values()];
 }
 
 async function fetchApi16868(game: GameId, limit: number): Promise<Draw[]> {
@@ -532,12 +599,30 @@ function isProgressForTarget(
 function markVerified(draws: Draw[], observations: Array<Draw | undefined>): Draw[] {
   const valid = observations.filter((item): item is Draw => Boolean(item));
   return draws.map((item) => {
-    const matches = valid.filter(
-      (candidate) =>
-        candidate.issue === item.issue &&
-        [...candidate.numbers, candidate.special].join(",") === [...item.numbers, item.special].join(","),
+    const signature = [...item.numbers, item.special].join(",");
+    const sameIssue = [
+      ...new Map(
+        valid
+          .filter((candidate) => candidate.issue === item.issue)
+          .map((candidate) => [
+            `${candidate.source}:${[...candidate.numbers, candidate.special].join(",")}`,
+            candidate,
+          ]),
+      ).values(),
+    ];
+    const hasConflict = sameIssue.some(
+      (candidate) => [...candidate.numbers, candidate.special].join(",") !== signature,
     );
-    return { ...item, verified: item.verified || matches.length >= 2 };
+    const agreeingSources = new Set([
+      item.source,
+      ...sameIssue
+        .filter((candidate) => [...candidate.numbers, candidate.special].join(",") === signature)
+        .map((candidate) => candidate.source),
+    ]);
+    return {
+      ...item,
+      verified: item.verified || (!hasConflict && agreeingSources.size >= 2),
+    };
   });
 }
 

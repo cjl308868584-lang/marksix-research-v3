@@ -147,6 +147,8 @@ export async function runResearchV3Cycle({
     generatedAt: asOf.toISOString(),
     sourceMode: history.sourceMode,
     sourceWarning: history.warning,
+    missingIssueCount: history.missingIssueCount,
+    conflictCount: history.conflictCount,
     previousWeights,
     ruleStates,
     researchArtifact: pythonArtifact ?? undefined,

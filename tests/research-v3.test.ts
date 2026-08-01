@@ -271,6 +271,50 @@ test("retired rule states are consumed by the next frozen forecast", () => {
   );
 });
 
+test("successful active rule states strengthen their next-forecast contribution", () => {
+  const input = {
+    game: "new_macau" as const,
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  };
+  const before = buildSnapshot(input);
+  const event = before.events.find((item: any) =>
+    item.ruleContributions.some((rule: any) => rule.contribution !== 0)
+  );
+  assert.ok(event);
+  const ruleStates = {
+    [event!.slot]: Object.fromEntries(
+      event!.ruleContributions.map((rule: any) => [
+        rule.ruleId,
+        {
+          ruleId: rule.ruleId,
+          slot: event!.slot,
+          triggers: 20,
+          hits: 20,
+          consecutiveHits: 5,
+          consecutiveMisses: 0,
+          status: "active",
+        },
+      ]),
+    ),
+  };
+  const after = buildSnapshot({ ...input, ruleStates });
+  const afterEvent = after.events.find((item: any) => item.slot === event!.slot);
+  assert.ok(afterEvent);
+  for (const beforeRule of event!.ruleContributions) {
+    const afterRule = afterEvent!.ruleContributions.find(
+      (rule: any) => rule.ruleId === beforeRule.ruleId,
+    );
+    assert.ok(afterRule);
+    assert.ok(
+      Math.abs(afterRule.contribution) >= Math.abs(beforeRule.contribution),
+      "a consistently successful active rule must not be weakened",
+    );
+  }
+});
+
 test("validated Python rule artifacts contribute to the next high-probability event", () => {
   const draws = makeHistory(160);
   const input = {

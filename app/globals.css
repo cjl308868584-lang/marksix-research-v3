@@ -8157,6 +8157,7 @@ footer p {
 @media (max-width: 370px) {
   .v3-shell main { padding-inline: 9px; }
   .v3-topbar { padding-inline: 9px; }
+  .v3-issue-picker { margin-inline: -9px; padding-inline: 9px; }
   .v3-event-card > header { grid-template-columns: 1fr; }
   .v3-probability { text-align: left; }
   .v3-event-kpis strong { font-size: 11px; }

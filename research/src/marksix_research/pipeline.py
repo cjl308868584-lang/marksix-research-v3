@@ -67,8 +67,16 @@ def load_draws(path: str | Path, game: str) -> list[Draw]:
 def audit_dataset(draws: Sequence[Draw]) -> dict[str, Any]:
     issues = [draw.issue for draw in draws]
     duplicates = len(issues) - len(set(issues))
-    numeric = sorted({int(issue) for issue in issues if issue.isdigit()})
-    gaps = sum(max(0, right - left - 1) for left, right in zip(numeric, numeric[1:]))
+    issue_numbers_by_year: dict[str, set[int]] = {}
+    for issue in issues:
+        if not issue.isdigit() or len(issue) < 5:
+            continue
+        issue_numbers_by_year.setdefault(issue[:4], set()).add(int(issue[4:]))
+    gaps = sum(
+        max(0, right - left - 1)
+        for values in issue_numbers_by_year.values()
+        for left, right in zip(sorted(values), sorted(values)[1:])
+    )
     canonical = [
         [draw.issue, draw.draw_at, *draw.numbers, draw.special, draw.verified]
         for draw in draws

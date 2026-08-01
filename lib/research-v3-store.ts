@@ -191,7 +191,7 @@ export async function persistResearchDataset(
            dataset_version, game, generated_at, oldest_issue, newest_issue,
            draw_count, formal_draw_count, missing_issue_count, conflict_count,
            fingerprint, summary_json
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         snapshot.dataQuality.datasetVersion,
         snapshot.game,
@@ -200,11 +200,15 @@ export async function persistResearchDataset(
         snapshot.dataQuality.newestIssue,
         snapshot.dataQuality.sampleSize,
         snapshot.dataQuality.verifiedSampleSize,
+        snapshot.dataQuality.missingIssueCount,
+        snapshot.dataQuality.conflictCount,
         snapshot.dataQuality.datasetVersion,
         JSON.stringify({
           sourceMode: snapshot.dataQuality.sourceMode,
           verifiedRatio: snapshot.dataQuality.verifiedRatio,
           warnings: snapshot.dataQuality.warnings,
+          missingIssueCount: snapshot.dataQuality.missingIssueCount,
+          conflictCount: snapshot.dataQuality.conflictCount,
           usedIssues: ordered.filter((draw) => draw.verified).map((draw) => draw.issue),
         }),
       ),

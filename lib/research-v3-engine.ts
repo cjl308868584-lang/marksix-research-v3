@@ -60,6 +60,8 @@ export function buildResearchV3Snapshot({
   generatedAt = new Date().toISOString(),
   sourceMode = "snapshot",
   sourceWarning = null,
+  missingIssueCount = 0,
+  conflictCount = 0,
   previousWeights = {},
   ruleStates = {},
   researchArtifact,
@@ -74,6 +76,8 @@ export function buildResearchV3Snapshot({
   generatedAt?: string;
   sourceMode?: "live" | "snapshot";
   sourceWarning?: string | null;
+  missingIssueCount?: number;
+  conflictCount?: number;
   previousWeights?: Partial<
     Record<ResearchEventSlot, Partial<Record<ResearchExpertId, number>>>
   >;
@@ -154,6 +158,8 @@ export function buildResearchV3Snapshot({
       sourceMode,
       oldestIssue: chronological[0]?.issue ?? null,
       newestIssue: chronological.at(-1)?.issue ?? null,
+      missingIssueCount,
+      conflictCount,
       datasetVersion,
       warnings: [
         sourceWarning,

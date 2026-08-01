@@ -22,6 +22,8 @@ export type ServerDraws = {
   fetchedAt: string;
   warning: string | null;
   rejectedFutureCount: number;
+  conflictCount: number;
+  missingIssueCount: number;
 };
 
 export async function loadServerDraws(
@@ -53,35 +55,40 @@ export async function loadServerDraws(
       matches.push(draw);
       crossCheckByIssue.set(draw.issue, matches);
     });
-    const crossCheckConsensus = [...crossCheckByIssue.values()].map((candidates) => {
-      const matchingGroup = candidates.find((candidate) => {
-        const signature = [...candidate.numbers, candidate.special].join(",");
-        return candidates.filter(
-          (other) => [...other.numbers, other.special].join(",") === signature,
-        ).length >= 2;
-      });
-      if (!matchingGroup) return candidates[0];
-      const signature = [...matchingGroup.numbers, matchingGroup.special].join(",");
-      const agreeing = candidates.filter(
-        (candidate) => [...candidate.numbers, candidate.special].join(",") === signature,
-      );
+    const crossCheckConsensus = [...crossCheckByIssue.values()].map((rawCandidates) => {
+      const candidates = uniqueBySourceAndResult(rawCandidates);
+      const signatures = new Set(candidates.map(drawSignature));
+      const sources = new Set(candidates.map((candidate) => candidate.source));
+      if (signatures.size !== 1) {
+        return { ...candidates[0], verified: false };
+      }
+      if (sources.size < 2) {
+        return candidates.find((candidate) => candidate.verified) ?? {
+          ...candidates[0],
+          verified: false,
+        };
+      }
       return {
-        ...matchingGroup,
+        ...candidates[0],
         verified: true,
-        source: `${agreeing.map((candidate) => candidate.source).join("＋")} 交叉一致`,
+        source: `${[...sources].join("＋")} 交叉一致`,
       };
     });
     let verifiedMatches = 0;
     let verificationConflicts = 0;
     const verifiedHistory = uniqueNewest(liveDraws).map((draw) => {
-      const candidates = crossCheckByIssue.get(draw.issue) ?? [];
-      if (!candidates.length) return draw;
-      const crossCheck = candidates.find(
-        (candidate) =>
-          [...candidate.numbers, candidate.special].join(",") ===
-          [...draw.numbers, draw.special].join(","),
+      const candidates = uniqueBySourceAndResult(
+        crossCheckByIssue.get(draw.issue) ?? [],
       );
-      if (!crossCheck) {
+      if (!candidates.length) return draw;
+      const signature = drawSignature(draw);
+      const conflicting = candidates.some(
+        (candidate) => drawSignature(candidate) !== signature,
+      );
+      const agreeing = candidates.filter(
+        (candidate) => drawSignature(candidate) === signature,
+      );
+      if (conflicting || !agreeing.length) {
         verificationConflicts += 1;
         return draw;
       }
@@ -89,7 +96,7 @@ export async function loadServerDraws(
       return {
         ...draw,
         verified: true,
-        source: `${draw.source} · ${crossCheck.source} 交叉一致`,
+        source: `${draw.source} · ${agreeing.map((candidate) => candidate.source).join("＋")} 交叉一致`,
       };
     });
     const historyIssues = new Set(verifiedHistory.map((draw) => draw.issue));
@@ -122,6 +129,8 @@ export async function loadServerDraws(
       fetchedAt: asOf.toISOString(),
       warning: warnings.length > 0 ? warnings.join(" ") : null,
       rejectedFutureCount,
+      conflictCount: verificationConflicts,
+      missingIssueCount: countIssueGaps(draws),
     };
   } catch {
     const fallback = FALLBACK_DRAWS[game].filter((draw) =>
@@ -134,8 +143,31 @@ export async function loadServerDraws(
       fetchedAt: asOf.toISOString(),
       warning: "实时历史源暂不可用，本次分析使用最近同步快照。",
       rejectedFutureCount,
+      conflictCount: 0,
+      missingIssueCount: countIssueGaps(fallback),
     };
   }
+}
+
+function countIssueGaps(draws: Draw[]) {
+  const byYear = new Map<string, Set<number>>();
+  for (const draw of draws) {
+    if (!/^\d{7,}$/.test(draw.issue)) continue;
+    const year = draw.issue.slice(0, 4);
+    const sequence = Number(draw.issue.slice(4));
+    if (!Number.isInteger(sequence)) continue;
+    const values = byYear.get(year) ?? new Set<number>();
+    values.add(sequence);
+    byYear.set(year, values);
+  }
+  let gaps = 0;
+  for (const values of byYear.values()) {
+    const ordered = [...values].sort((left, right) => left - right);
+    for (let index = 1; index < ordered.length; index += 1) {
+      gaps += Math.max(0, ordered[index] - ordered[index - 1] - 1);
+    }
+  }
+  return gaps;
 }
 
 async function fetchHistoryPage(game: GameId, date: string): Promise<Draw[]> {
@@ -200,6 +232,7 @@ async function fetchLatestCrossCheck(
   }
   if (game === "new_macau") {
     requests.push(fetchNewMacauCrossCheck());
+    requests.push(fetchNewMacauYearCrossCheck(asOf));
     if (newestIssue) {
       requests.push(fetchNewMacauIssueCrossCheck(newestIssue));
     }
@@ -356,8 +389,15 @@ async function fetchNewMacauIssueCrossCheck(issue: string): Promise<Draw[]> {
     expect?: string;
     openTime?: string;
     openCode?: string;
-  }>;
-  return (Array.isArray(payload) ? payload : [])
+  }> | {
+    data?: Array<{
+      expect?: string;
+      openTime?: string;
+      openCode?: string;
+    }>;
+  };
+  const items = Array.isArray(payload) ? payload : payload.data ?? [];
+  return items
     .map((item) =>
       parseDraw(
         "new_macau",
@@ -368,6 +408,56 @@ async function fetchNewMacauIssueCrossCheck(issue: string): Promise<Draw[]> {
     )
     .filter((draw): draw is Draw => Boolean(draw))
     .map((draw) => ({ ...draw, source: "新澳门历史独立接口" }));
+}
+
+async function fetchNewMacauYearCrossCheck(asOf: Date): Promise<Draw[]> {
+  const year = Number(new Intl.DateTimeFormat("en", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+  }).format(asOf));
+  const responses = await Promise.allSettled(
+    [year, year - 1].map((value) =>
+      fetchWithTimeout(
+        `https://history.macaumarksix.com/history/macaujc2/y/${value}`,
+      )
+    ),
+  );
+  const payloads = await Promise.all(
+    responses.map(async (result) => {
+      if (result.status !== "fulfilled" || !result.value.ok) return [];
+      const payload = (await result.value.json()) as {
+        data?: Array<{
+          expect?: string;
+          openTime?: string;
+          openCode?: string;
+        }>;
+      };
+      return payload.data ?? [];
+    }),
+  );
+  const parsed = payloads.flat()
+    .map((item) =>
+      parseDraw(
+        "new_macau",
+        item.expect ?? "",
+        item.openTime ?? "",
+        item.openCode ?? "",
+      )
+    )
+    .filter((draw): draw is Draw => Boolean(draw))
+    .map((draw) => ({ ...draw, source: "新澳门年度历史独立接口" }));
+  return uniqueBySourceAndResult(parsed);
+}
+
+function uniqueBySourceAndResult(draws: Draw[]): Draw[] {
+  return [...new Map(draws.map((draw) => [
+    `${draw.issue}:${draw.source}:${drawSignature(draw)}`,
+    draw,
+  ])).values()];
+}
+
+function drawSignature(draw: Draw) {
+  return [...draw.numbers, draw.special].join(",");
 }
 
 function uniqueNewest(draws: Draw[]): Draw[] {

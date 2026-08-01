@@ -10,9 +10,25 @@ from marksix_research.pipeline import (
     run_shadow_research,
     zodiac,
 )
+from marksix_research.cli import capture_task_id
 
 
 class ResearchPipelineTest(unittest.TestCase):
+    def test_capture_task_id_is_stable_for_retries_and_changes_with_dataset(self):
+        artifact = {
+            "schemaVersion": "python-shadow-v3",
+            "game": "new_macau",
+            "audit": {"datasetVersion": "a" * 64, "newestIssue": "2026213"},
+        }
+        first = capture_task_id("new_macau", artifact)
+        self.assertEqual(first, capture_task_id("new_macau", dict(artifact)))
+        changed = {
+            **artifact,
+            "audit": {"datasetVersion": "b" * 64, "newestIssue": "2026214"},
+        }
+        self.assertNotEqual(first, capture_task_id("new_macau", changed))
+        self.assertIn("2026213", first)
+
     def test_zodiac_matches_known_2026_mapping(self):
         self.assertEqual(zodiac(5, "2026-07-24T21:30:00+08:00"), "虎")
 
@@ -46,6 +62,27 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(audit["sampleSize"], 2)
         self.assertEqual(audit["formalSampleSize"], 1)
         self.assertEqual(len(audit["datasetVersion"]), 64)
+
+    def test_issue_gap_audit_never_counts_the_year_boundary_as_missing_draws(self):
+        draws = [
+            self._draw("2025212", "2025-12-30T21:32:32+08:00"),
+            self._draw("2025213", "2025-12-31T21:32:32+08:00"),
+            self._draw("2026001", "2026-01-01T21:32:32+08:00"),
+            self._draw("2026003", "2026-01-03T21:32:32+08:00"),
+        ]
+        self.assertEqual(audit_dataset(draws)["numericGapCount"], 1)
+
+    @staticmethod
+    def _draw(issue, draw_at):
+        from marksix_research.pipeline import Draw
+        return Draw(
+            game="new_macau",
+            issue=issue,
+            draw_at=draw_at,
+            numbers=(1, 2, 3, 4, 5, 6),
+            special=7,
+            verified=True,
+        )
 
     def test_user_example_is_in_the_bounded_grammar(self):
         # With fewer than 30 triggers it is generated but correctly excluded

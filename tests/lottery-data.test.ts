@@ -115,6 +115,8 @@ let loadServerDraws: (
   sourceMode: "live" | "snapshot";
   warning: string | null;
   rejectedFutureCount: number;
+  conflictCount: number;
+  missingIssueCount: number;
 }>;
 
 before(async () => {
@@ -436,6 +438,103 @@ test("two agreeing latest sources verify a draw missing from the lagging history
     assert.equal(result.draws[0].issue, latestIssue);
     assert.equal(result.draws[0].verified, true);
     assert.match(result.draws[0].source, /Marksix6.*新澳门开奖独立接口/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("new Macau year history unwraps the documented data envelope and verifies formal samples", async () => {
+  const originalFetch = globalThis.fetch;
+  const rows = Array.from({ length: 40 }, (_, index) => ({
+    expect: String(2026213 - index),
+    openTime: `2026-07-${String(30 - (index % 28)).padStart(2, "0")} 21:32:32`,
+    openCode: [1, 2, 3, 4, 5, 6, 7].map((value) => ((value + index - 1) % 49) + 1).join(","),
+  }));
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({
+        errorCode: 0,
+        result: {
+          data: rows.map((row) => ({
+            preDrawIssue: row.expect,
+            preDrawTime: row.openTime,
+            preDrawCode: row.openCode,
+          })),
+        },
+      });
+    }
+    if (url.includes("/history/macaujc2/y/2026")) {
+      return Response.json({ result: true, code: 200, data: rows });
+    }
+    return new Response("source unavailable", { status: 503 });
+  };
+
+  try {
+    const result = await loadServerDraws(
+      "new_macau",
+      40,
+      new Date("2026-07-30T15:59:00.000Z"),
+    );
+    assert.equal(result.draws.length, 40);
+    assert.ok(result.draws.every((draw) => draw.verified));
+    assert.equal(result.missingIssueCount, 0);
+    assert.equal(result.conflictCount, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("a same-issue source conflict is never promoted to verified consensus", async () => {
+  const originalFetch = globalThis.fetch;
+  const issue = "2026213";
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({ errorCode: 0, result: { data: [{
+        preDrawIssue: issue,
+        preDrawTime: "2026-08-01 21:32:32",
+        preDrawCode: "09,05,12,22,01,15,35",
+      }] } });
+    }
+    if (url.startsWith("https://api3.marksix6.net/")) {
+      return Response.json({
+        expect: issue,
+        openTime: "2026-08-01 21:32:32",
+        openCode: "09,05,12,22,01,15,35",
+      });
+    }
+    if (url.startsWith("https://macaumarksix.com/")) {
+      return Response.json([{
+        expect: issue,
+        openTime: "2026-08-01 21:32:32",
+        openCode: "08,05,12,22,01,15,35",
+      }]);
+    }
+    if (url.startsWith("https://history.macaumarksix.com/")) {
+      return Response.json({ result: true, code: 200, data: [] });
+    }
+    return new Response("unexpected upstream", { status: 404 });
+  };
+
+  try {
+    const result = await loadServerDraws(
+      "new_macau",
+      10,
+      new Date("2026-08-01T14:00:00.000Z"),
+    );
+    assert.equal(result.draws[0].issue, issue);
+    assert.equal(result.draws[0].verified, false);
+    assert.equal(result.conflictCount, 1);
+    assert.match(result.warning ?? "", /跨源结果冲突/);
   } finally {
     globalThis.fetch = originalFetch;
   }

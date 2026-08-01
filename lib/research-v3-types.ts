@@ -147,6 +147,8 @@ export type ResearchV3DataQuality = {
   sourceMode: "live" | "snapshot";
   oldestIssue: string | null;
   newestIssue: string | null;
+  missingIssueCount: number;
+  conflictCount: number;
   datasetVersion: string;
   warnings: string[];
 };

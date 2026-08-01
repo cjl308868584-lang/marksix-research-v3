@@ -86,13 +86,14 @@ test("review API accepts the fifty-period history requested by the review page",
 });
 
 test("public research reads never settle, train, or freeze forecasts", async () => {
-  const [forecastRoute, reviewRoute, modelRoute, rulesRoute, lotteryRoute] =
+  const [forecastRoute, reviewRoute, modelRoute, rulesRoute, lotteryRoute, analyzeRoute] =
     await Promise.all([
       readFile(new URL("../app/api/research/forecast/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/research/reviews/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/research/models/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/research/rules/route.ts", import.meta.url), "utf8"),
       readFile(new URL("../app/api/lottery/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8"),
     ]);
   for (const route of [forecastRoute, reviewRoute, modelRoute, rulesRoute]) {
     assert.doesNotMatch(route, /loadResearchV3Envelope/);
@@ -101,9 +102,14 @@ test("public research reads never settle, train, or freeze forecasts", async () 
   assert.doesNotMatch(lotteryRoute, /settleResearchForecasts/);
   assert.doesNotMatch(lotteryRoute, /settleLatestResearch/);
   assert.match(forecastRoute, /readResearchV3Envelope/);
+  const analyzeGet = analyzeRoute.slice(
+    analyzeRoute.indexOf("export async function GET"),
+    analyzeRoute.indexOf("export async function POST"),
+  );
+  assert.doesNotMatch(analyzeGet, /settleForecastLedger/);
 });
 
-test("the public Hong Kong feed preserves HKJC official verification for every draw", async () => {
+test("public feeds preserve official verification and require conflict-free cross-source agreement", async () => {
   const lotteryRoute = await readFile(
     new URL("../app/api/lottery/route.ts", import.meta.url),
     "utf8",
@@ -114,7 +120,11 @@ test("the public Hong Kong feed preserves HKJC official verification for every d
   );
   assert.match(
     lotteryRoute,
-    /verified: item\.verified \|\| matches\.length >= 2/,
+    /verified: item\.verified \|\| \(!hasConflict && agreeingSources\.size >= 2\)/,
+  );
+  assert.match(
+    lotteryRoute,
+    /history\.macaumarksix\.com\/history\/macaujc2\/y\/\$\{value\}/,
   );
 });
 
@@ -269,6 +279,10 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
   assert.match(styles, /@media \(max-width: 680px\)/);
   assert.match(styles, /max-width: 370px/);
+  assert.match(
+    styles,
+    /@media \(max-width: 370px\)[\s\S]*?\.v3-issue-picker \{ margin-inline: -9px; padding-inline: 9px; \}/,
+  );
   assert.match(styles, /touch-action: none/);
   assert.match(styles, /\.special-stage-wrap[\s\S]*grid-column: 1 \/ -1/);
   assert.match(lotteryLib, /new_macau/);
@@ -322,7 +336,7 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(analyzeRoute, /if \(settlementStatus !== "ok"\)/);
   assert.match(
     analyzeRoute,
-    /currentLearningInput\.sourceStatus = "unavailable"/,
+    /onlineLearningInput\.sourceStatus = "unavailable"/,
   );
   assert.match(
     analyzeRoute,
