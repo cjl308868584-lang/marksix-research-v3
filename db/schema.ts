@@ -494,6 +494,47 @@ export const researchRuleStates = sqliteTable(
   ],
 );
 
+export const researchSettlementClaims = sqliteTable(
+  "research_settlement_claims",
+  {
+    runId: text("run_id").primaryKey(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    status: text("status").notNull(),
+    claimedAt: text("claimed_at").notNull(),
+    completedAt: text("completed_at"),
+    errorMessage: text("error_message"),
+  },
+  (table) => [
+    index("research_settlement_claim_game_idx").on(
+      table.game,
+      table.status,
+      table.claimedAt,
+    ),
+  ],
+);
+
+export const researchTaskRuns = sqliteTable(
+  "research_task_runs",
+  {
+    taskId: text("task_id").primaryKey(),
+    game: text("game").notNull(),
+    requestHash: text("request_hash").notNull(),
+    status: text("status").notNull(),
+    responseJson: text("response_json"),
+    errorMessage: text("error_message"),
+    startedAt: text("started_at").notNull(),
+    completedAt: text("completed_at"),
+  },
+  (table) => [
+    index("research_task_status_idx").on(
+      table.game,
+      table.status,
+      table.startedAt,
+    ),
+  ],
+);
+
 export const researchModelArtifacts = sqliteTable(
   "research_model_artifacts",
   {

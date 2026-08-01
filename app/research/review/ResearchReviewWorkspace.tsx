@@ -140,7 +140,7 @@ export function ResearchReviewWorkspace() {
               type="button"
               onClick={() => setRefreshKey((value) => value + 1)}
             >
-              立即核验并复盘
+              重新读取复盘账本
             </button>
             <a href="/research">查看下一期冻结策略 →</a>
           </section>
@@ -197,7 +197,7 @@ function IssuePicker({
 }) {
   return (
     <section className="v3-issue-picker" aria-label="选择复盘期号">
-      {reviews.slice(0, 12).map((review) => (
+      {reviews.map((review) => (
         <button
           type="button"
           className={selectedIssue === review.targetIssue ? "active" : ""}

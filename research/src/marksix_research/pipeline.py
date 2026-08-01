@@ -150,13 +150,14 @@ def discover_zodiac_rules(
 def run_shadow_research(path: str | Path, game: str) -> dict[str, Any]:
     draws = load_draws(path, game)
     audit = audit_dataset(draws)
-    rules = discover_zodiac_rules(draws)
+    formal_draws = [draw for draw in draws if draw.verified]
+    rules = discover_zodiac_rules(formal_draws)
     full = [item for item in rules if item["resourceDecision"] == "full_backtest"]
     negative = [item for item in rules if item["resourceDecision"] == "negative_pool"]
     generated = 5 * 7 * 7 * (1 + 7 * 12)
-    black_box = _black_box_status(draws)
+    black_box = _black_box_status(formal_draws)
     return {
-        "schemaVersion": "python-shadow-v2",
+        "schemaVersion": "python-shadow-v3",
         "generatedAt": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "game": game,
         "audit": audit,
@@ -275,4 +276,3 @@ def _black_box_status(draws: Sequence[Draw]) -> dict[str, Any]:
         "minimumSampleSize": 2000,
         "models": ["logistic_regression", "hist_gradient_boosting", "river_online"],
     }
-

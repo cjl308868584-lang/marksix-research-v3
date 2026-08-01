@@ -98,10 +98,11 @@ export function buildResearchV3Review(
           ? `冠军保持为${modelLabel(championAfter)}；单期结果只更新权重，不触发模型替换。`
           : `${modelLabel(weightLeaderAfter)}成为本期权重领先者，但未完成连续20期验证，冠军仍为${modelLabel(championBefore)}。`,
     },
-    summary:
-      hits > expectedHits
-        ? `本期固定四项命中 ${hits}/4，高于随机预期 ${expectedHits.toFixed(2)} 项；这只形成一个新前瞻样本。`
-        : `本期固定四项命中 ${hits}/4，不高于随机预期 ${expectedHits.toFixed(2)} 项；模型已降低相关证据权重。`,
+    summary: brier < baselineBrier && logLoss < baselineLogLoss
+      ? `本期固定四项命中 ${hits}/4（随机预期 ${expectedHits.toFixed(2)} 项），概率评分优于随机基线；这只形成一个新前瞻样本。`
+      : hits > expectedHits
+        ? `本期固定四项命中 ${hits}/4，虽高于随机预期 ${expectedHits.toFixed(2)} 项，但概率评分仍低于随机基线；模型不会把偶然命中误判为优势。`
+        : `本期固定四项命中 ${hits}/4，不高于随机预期 ${expectedHits.toFixed(2)} 项，且概率评分未胜过基线；模型已降低相关证据权重。`,
     nextAction:
       "本期结果只写入下一期训练集；冠军是否替换仍由连续前瞻Brier、校准和20期挑战窗口决定。",
   };
@@ -119,6 +120,10 @@ export function buildResearchV3Performance(
     const hits = items.reduce((sum, item) => sum + item.hits, 0);
     const events = items.reduce((sum, item) => sum + item.total, 0);
     const expected = items.reduce((sum, item) => sum + item.expectedHits, 0);
+    const brier = average(items.map((item) => item.brier));
+    const baselineBrier = average(items.map((item) => item.baselineBrier));
+    const logLoss = average(items.map((item) => item.logLoss));
+    const baselineLogLoss = average(items.map((item) => item.baselineLogLoss));
     return {
       issues: items.length,
       hits,
@@ -126,8 +131,8 @@ export function buildResearchV3Performance(
       expected,
       hitRate: hits / Math.max(events, 1),
       baselineHitRate: expected / Math.max(events, 1),
-      brierSkill: average(items.map((item) => item.brierSkill)),
-      logLossSkill: average(items.map((item) => item.logLossSkill)),
+      brierSkill: items.length ? skill(brier, baselineBrier) : 0,
+      logLossSkill: items.length ? skill(logLoss, baselineLogLoss) : 0,
     };
   };
   const all = summarize(ordered);

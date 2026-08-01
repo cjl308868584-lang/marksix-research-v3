@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
 import { readResearchV3Reviews } from "../../../../lib/research-v3-store";
 
 export const dynamic = "force-dynamic";
@@ -10,11 +9,6 @@ export async function GET(request: NextRequest) {
   if ("error" in validation) return validation.error;
   const { game, issue, limit } = validation;
 
-  try {
-    await loadResearchV3Envelope({ game });
-  } catch {
-    // Historical reviews remain readable if the live source is temporarily late.
-  }
   const all = await readResearchV3Reviews(game, Math.max(limit, 50));
   const reviews = issue
     ? all.filter((review) => review.targetIssue === issue).slice(0, 1)

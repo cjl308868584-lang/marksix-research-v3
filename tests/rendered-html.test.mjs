@@ -85,6 +85,64 @@ test("review API accepts the fifty-period history requested by the review page",
   assert.deepEqual(payload, { game: "new_macau", reviews: [] });
 });
 
+test("public research reads never settle, train, or freeze forecasts", async () => {
+  const [forecastRoute, reviewRoute, modelRoute, rulesRoute, lotteryRoute] =
+    await Promise.all([
+      readFile(new URL("../app/api/research/forecast/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/research/reviews/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/research/models/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/research/rules/route.ts", import.meta.url), "utf8"),
+      readFile(new URL("../app/api/lottery/route.ts", import.meta.url), "utf8"),
+    ]);
+  for (const route of [forecastRoute, reviewRoute, modelRoute, rulesRoute]) {
+    assert.doesNotMatch(route, /loadResearchV3Envelope/);
+    assert.doesNotMatch(route, /settleResearchV3Forecasts/);
+  }
+  assert.doesNotMatch(lotteryRoute, /settleResearchV3Forecasts/);
+  assert.match(forecastRoute, /readResearchV3Envelope/);
+});
+
+test("research writes are guarded by task idempotency and a settlement claim", async () => {
+  const [store, internalRoute, schema] = await Promise.all([
+    readFile(new URL("../lib/research-v3-store.ts", import.meta.url), "utf8"),
+    readFile(
+      new URL("../app/api/internal/research/settle-and-learn/route.ts", import.meta.url),
+      "utf8",
+    ),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(store, /INSERT OR IGNORE INTO research_settlement_claims/);
+  assert.match(store, /status = 'completed'/);
+  assert.ok(
+    store.indexOf("claimResearchSettlement") <
+      store.indexOf("INSERT INTO research_rule_states"),
+  );
+  assert.match(internalRoute, /claimResearchTask/);
+  assert.match(internalRoute, /completeResearchTask/);
+  assert.match(schema, /research_settlement_claims/);
+  assert.match(schema, /research_task_runs/);
+});
+
+test("scheduled learning sends Python artifacts and verified-only data through the signed writer", async () => {
+  const [workflow, service, engine, pipeline, store] = await Promise.all([
+    readFile(new URL("../.github/workflows/research-v2.yml", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v3-service.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v3-engine.ts", import.meta.url), "utf8"),
+    readFile(new URL("../research/src/marksix_research/pipeline.py", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v3-store.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /sync-history/);
+  assert.match(workflow, /capture .*--artifact/);
+  assert.match(workflow, /test -n "\$RESEARCH_SECRET"/);
+  assert.match(service, /previous frozen forecasts could not be settled/);
+  assert.match(service, /persistResearchDataset/);
+  assert.match(engine, /draw\.verified === true/);
+  assert.match(pipeline, /formal_draws = \[draw for draw in draws if draw\.verified\]/);
+  assert.match(store, /draw_source_snapshots/);
+  assert.match(store, /dataset_versions/);
+});
+
 test("keeps the product implementation free of starter preview artifacts", async () => {
   const [page, layout, dashboard, researchWorkspace, reviewWorkspace, researchStore, reviewEngine, reviewMigration, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),

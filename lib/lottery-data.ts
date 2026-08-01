@@ -6,6 +6,16 @@ const API_CODES: Record<GameId, number> = {
   new_macau: 10092,
 };
 
+const HKJC_QUERY = `fragment lotteryDrawsFragment on LotteryDraw {
+  id year no openDate closeDate drawDate status
+  drawResult { drawnNo xDrawnNo }
+}
+query marksixResult($lastNDraw: Int, $startDate: String, $endDate: String, $drawType: LotteryDrawType) {
+  lotteryDraws(lastNDraw: $lastNDraw, startDate: $startDate, endDate: $endDate, drawType: $drawType) {
+    ...lotteryDrawsFragment
+  }
+}`;
+
 export type ServerDraws = {
   draws: Draw[];
   sourceMode: "live" | "snapshot";
@@ -166,6 +176,9 @@ async function fetchLatestCrossCheck(
   asOf = new Date(),
 ): Promise<Draw[]> {
   const requests = [fetchMarksix6CrossCheck(game)];
+  if (game === "hk") {
+    requests.push(fetchHkjcCrossCheck(500));
+  }
   if (game === "new_macau") {
     requests.push(fetchNewMacauCrossCheck());
     if (newestIssue) {
@@ -180,6 +193,43 @@ async function fetchLatestCrossCheck(
   if (migrated) draws.push(migrated);
   if (!draws.length) throw new Error("latest cross-check unavailable");
   return draws;
+}
+
+async function fetchHkjcCrossCheck(limit: number): Promise<Draw[]> {
+  const response = await fetchWithTimeout("https://info.cld.hkjc.com/graphql/base/", {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "application/json" },
+    body: JSON.stringify({
+      operationName: "marksixResult",
+      variables: { lastNDraw: limit },
+      query: HKJC_QUERY,
+    }),
+  });
+  if (!response.ok) throw new Error(`HKJC cross-check ${response.status}`);
+  const payload = (await response.json()) as {
+    data?: {
+      lotteryDraws?: Array<{
+        year?: string;
+        no?: number;
+        drawDate?: string;
+        drawResult?: { drawnNo?: number[]; xDrawnNo?: number };
+      }>;
+    };
+  };
+  return (payload.data?.lotteryDraws ?? [])
+    .map((item) => {
+      const date = item.drawDate?.slice(0, 10) ?? "";
+      return parseDraw(
+        "hk",
+        item.year && item.no != null
+          ? `${item.year}${String(item.no).padStart(3, "0")}`
+          : "",
+        date ? `${date} 21:30:00` : "",
+        [...(item.drawResult?.drawnNo ?? []), item.drawResult?.xDrawnNo ?? 0].join(","),
+      );
+    })
+    .filter((draw): draw is Draw => Boolean(draw))
+    .map((draw) => ({ ...draw, verified: true, source: "香港赛马会官方" }));
 }
 
 function migratedVerifiedDraw(game: GameId, asOf: Date): Draw | null {
@@ -290,13 +340,14 @@ function formatDateParam(date: Date) {
   }).format(date);
 }
 
-async function fetchWithTimeout(input: string) {
+async function fetchWithTimeout(input: string, init: RequestInit = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 8_000);
   try {
     return await fetch(input, {
+      ...init,
       cache: "no-store",
-      headers: { accept: "application/json" },
+      headers: { accept: "application/json", ...init.headers },
       signal: controller.signal,
     });
   } finally {

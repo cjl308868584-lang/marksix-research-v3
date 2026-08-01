@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
+import { readResearchV3Envelope } from "../../../../lib/research-v3-service";
 import { readResearchV3Snapshot } from "../../../../lib/research-v3-store";
 
 export const dynamic = "force-dynamic";
@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(stored, { headers: noStore() });
   }
   try {
-    const envelope = await loadResearchV3Envelope({ game });
+    const envelope = await readResearchV3Envelope({ game });
     return NextResponse.json(
       { ...envelope.snapshot, source: envelope.source },
       { headers: noStore() },

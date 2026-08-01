@@ -6,13 +6,18 @@ import legacyNewMacau2026212 from "./legacy-new-macau-2026212.json";
 import {
   countSettledResearchV3Forecasts,
   ensureResearchV3Store,
+  persistResearchDataset,
   persistResearchV3Snapshot,
+  persistResearchPythonArtifact,
   readChampionChallengeState,
   readLatestModelWeights,
+  readLatestResearchPythonArtifact,
+  readResearchRuleStates,
   readResearchV3Snapshot,
   settleResearchV3Forecasts,
 } from "./research-v3-store";
 import type {
+  ResearchPythonArtifact,
   ResearchV3Envelope,
 } from "./research-v3-types";
 
@@ -36,14 +41,27 @@ const cache =
   new Map<string, { expiresAt: number; envelope: ResearchV3Envelope }>();
 runtime.__marksixResearchV3Cache = cache;
 
-export async function loadResearchV3Envelope({
+export async function readResearchV3Envelope({
+  game,
+}: {
+  game: GameId;
+}): Promise<ResearchV3Envelope> {
+  if (!GAME_IDS.includes(game)) throw new Error("unsupported game");
+  const snapshot = await readResearchV3Snapshot(game);
+  if (!snapshot) throw new Error("frozen research snapshot unavailable");
+  return { snapshot, source: "stored", cycleStatus: "existing" };
+}
+
+export async function runResearchV3Cycle({
   game,
   asOf = new Date(),
   forceCompute = false,
+  researchArtifact,
 }: {
   game: GameId;
   asOf?: Date;
   forceCompute?: boolean;
+  researchArtifact?: ResearchPythonArtifact;
 }): Promise<ResearchV3Envelope> {
   if (!GAME_IDS.includes(game)) throw new Error("unsupported game");
   const history = await loadServerDraws(game, MAX_RESEARCH_HISTORY, asOf);
@@ -52,14 +70,35 @@ export async function loadResearchV3Envelope({
   if (!await ensureResearchV3Store()) {
     throw new Error("research D1 binding unavailable");
   }
+  if (researchArtifact) {
+    if (researchArtifact.game !== game) throw new Error("artifact game mismatch");
+    if (researchArtifact.audit.newestIssue !== latest.issue) {
+      throw new Error("python research artifact is stale for latest draw");
+    }
+    const artifactStatus = await persistResearchPythonArtifact(researchArtifact);
+    if (artifactStatus === "invalid" || artifactStatus === "unavailable") {
+      throw new Error("python research artifact unavailable");
+    }
+  }
   await importLegacySnapshot(game, latest.issue);
-  await settleResearchV3Forecasts(game, history.draws, asOf.toISOString());
+  const settlement = await settleResearchV3Forecasts(
+    game,
+    history.draws,
+    asOf.toISOString(),
+  );
+  if (settlement !== "ok") {
+    throw new Error("previous frozen forecasts could not be settled");
+  }
   if (!latest.verified) {
     const frozen =
       await readResearchV3Snapshot(game, latest.issue) ??
       await readResearchV3Snapshot(game);
     if (frozen) {
-      return { snapshot: frozen, source: "stored" };
+      return {
+        snapshot: frozen,
+        source: "stored",
+        cycleStatus: "awaiting_verification",
+      };
     }
     throw new Error("latest draw is awaiting independent verification");
   }
@@ -84,6 +123,7 @@ export async function loadResearchV3Envelope({
       const envelope: ResearchV3Envelope = {
         snapshot: stored,
         source: "stored",
+        cycleStatus: "existing",
       };
       cache.set(cacheKey, {
         expiresAt: Date.now() + CACHE_TTL_MS,
@@ -92,8 +132,10 @@ export async function loadResearchV3Envelope({
       return envelope;
     }
   }
-  const [previousWeights, settledForecasts, challengeState] = await Promise.all([
+  const [previousWeights, ruleStates, pythonArtifact, settledForecasts, challengeState] = await Promise.all([
     readLatestModelWeights(game),
+    readResearchRuleStates(game),
+    readLatestResearchPythonArtifact(game),
     countSettledResearchV3Forecasts(game),
     readChampionChallengeState(game),
   ]);
@@ -106,6 +148,8 @@ export async function loadResearchV3Envelope({
     sourceMode: history.sourceMode,
     sourceWarning: history.warning,
     previousWeights,
+    ruleStates,
+    researchArtifact: pythonArtifact ?? undefined,
     settledForecasts,
     champion: challengeState.champion,
     challenger: challengeState.challenger,
@@ -113,7 +157,12 @@ export async function loadResearchV3Envelope({
   const envelope: ResearchV3Envelope = {
     snapshot,
     source: history.sourceMode === "snapshot" ? "snapshot" : "computed",
+    cycleStatus: "completed",
   };
+  const datasetPersistence = await persistResearchDataset(snapshot, history.draws);
+  if (datasetPersistence !== "ok") {
+    throw new Error("research dataset provenance could not be persisted");
+  }
   const persistence = await persistResearchV3Snapshot(snapshot);
   if (persistence === "existing") {
     const immutable = await readResearchV3Snapshot(game, targetIssue);
@@ -121,6 +170,7 @@ export async function loadResearchV3Envelope({
       const storedEnvelope: ResearchV3Envelope = {
         snapshot: immutable,
         source: "stored",
+        cycleStatus: "existing",
       };
       cache.set(cacheKey, {
         expiresAt: Date.now() + CACHE_TTL_MS,
@@ -128,6 +178,9 @@ export async function loadResearchV3Envelope({
       });
       return storedEnvelope;
     }
+  }
+  if (persistence !== "created") {
+    throw new Error("next frozen forecast could not be persisted");
   }
   cache.set(cacheKey, {
     expiresAt: Date.now() + CACHE_TTL_MS,

@@ -214,6 +214,65 @@ test("history loader cross-verifies the latest issue with an independent endpoin
   }
 });
 
+test("Hong Kong history is formally verified against the official HKJC feed", async () => {
+  const originalFetch = globalThis.fetch;
+  const history = [
+    {
+      preDrawIssue: "2026070",
+      preDrawTime: "2026-07-30 21:30:00",
+      preDrawCode: "1,2,3,4,5,6,7",
+    },
+    {
+      preDrawIssue: "2026069",
+      preDrawTime: "2026-07-28 21:30:00",
+      preDrawCode: "8,9,10,11,12,13,14",
+    },
+  ];
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({ errorCode: 0, result: { data: history } });
+    }
+    if (url.startsWith("https://info.cld.hkjc.com/")) {
+      return Response.json({
+        data: {
+          lotteryDraws: [
+            {
+              year: "2026",
+              no: 70,
+              drawDate: "2026-07-30",
+              drawResult: { drawnNo: [1, 2, 3, 4, 5, 6], xDrawnNo: 7 },
+            },
+            {
+              year: "2026",
+              no: 69,
+              drawDate: "2026-07-28",
+              drawResult: { drawnNo: [8, 9, 10, 11, 12, 13], xDrawnNo: 14 },
+            },
+          ],
+        },
+      });
+    }
+    return new Response("source unavailable", { status: 503 });
+  };
+  try {
+    const result = await loadServerDraws(
+      "hk",
+      10,
+      new Date("2026-08-01T00:00:00.000Z"),
+    );
+    assert.equal(result.draws.length, 2);
+    assert.ok(result.draws.every((draw) => draw.verified));
+    assert.ok(result.draws.every((draw) => /香港赛马会/.test(draw.source)));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("new Macau latest result verifies even when the older cross-check is stale", async () => {
   const originalFetch = globalThis.fetch;
   const latestIssue = "2026212";

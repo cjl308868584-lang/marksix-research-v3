@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
+import { readResearchV3Envelope } from "../../../../lib/research-v3-service";
 import type { ResearchEventSlot } from "../../../../lib/research-v3-types";
 
 export const dynamic = "force-dynamic";
@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
     );
   }
   try {
-    const envelope = await loadResearchV3Envelope({ game });
+    const envelope = await readResearchV3Envelope({ game });
     const rules = envelope.snapshot.events
       .filter((event) => !slot || event.slot === slot)
       .flatMap((event) =>

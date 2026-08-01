@@ -8,7 +8,6 @@ import {
   nextScheduledDraw,
 } from "../../../lib/lottery";
 import { settleResearchForecasts } from "../../../lib/research-v2-store";
-import { settleResearchV3Forecasts } from "../../../lib/research-v3-store";
 
 export const dynamic = "force-dynamic";
 
@@ -107,11 +106,8 @@ async function settleLatestResearch(game: GameId, draws: Draw[]) {
   if (settledResearchIssues.has(key)) return;
   settledResearchIssues.add(key);
   const settledAt = new Date().toISOString();
-  const [legacyStatus, v3Status] = await Promise.all([
-    settleResearchForecasts(game, draws, settledAt),
-    settleResearchV3Forecasts(game, draws, settledAt),
-  ]);
-  if (legacyStatus !== "ok" || v3Status !== "ok") {
+  const legacyStatus = await settleResearchForecasts(game, draws, settledAt);
+  if (legacyStatus !== "ok") {
     settledResearchIssues.delete(key);
   }
   if (settledResearchIssues.size > 12) {

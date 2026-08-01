@@ -7,6 +7,7 @@ from marksix_research.pipeline import (
     audit_dataset,
     discover_zodiac_rules,
     load_draws,
+    run_shadow_research,
     zodiac,
 )
 
@@ -52,7 +53,37 @@ class ResearchPipelineTest(unittest.TestCase):
         rules = discover_zodiac_rules([], min_support=30)
         self.assertEqual(rules, [])
 
+    def test_python_artifact_uses_the_production_ingest_schema(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "draws.json"
+            source.write_text(json.dumps({"new_macau": []}), encoding="utf-8")
+            artifact = run_shadow_research(source, "new_macau")
+        self.assertEqual(artifact["schemaVersion"], "python-shadow-v3")
+        self.assertEqual(artifact["game"], "new_macau")
+        self.assertIn("topPositiveRules", artifact)
+
+    def test_rule_search_never_trains_on_single_source_unverified_draws(self):
+        rows = []
+        for index in range(160):
+            start = index % 43 + 1
+            numbers = list(range(start, start + 7))
+            rows.append({
+                "game": "new_macau",
+                "issue": str(2026001 + index),
+                "drawAt": f"2026-03-{index % 28 + 1:02d}T21:30:00+08:00",
+                "numbers": numbers[:6],
+                "special": numbers[6],
+                "verified": index >= 80,
+            })
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "draws.json"
+            source.write_text(json.dumps({"new_macau": rows}), encoding="utf-8")
+            artifact = run_shadow_research(source, "new_macau")
+        rules = artifact["topPositiveRules"] + artifact["topNegativeRules"]
+        self.assertTrue(rules)
+        self.assertTrue(all(rule["support"] <= 80 for rule in rules))
+        self.assertEqual(artifact["blackBox"]["sampleSize"], 80)
+
 
 if __name__ == "__main__":
     unittest.main()
-

@@ -43,13 +43,70 @@ export type ResearchRuleContribution = {
   ruleId: string;
   label: string;
   direction: "support" | "suppress";
-  window: 40 | 120 | "all";
+  window: 40 | 120 | "all" | "python";
   observedRate: number;
   baselineRate: number;
   posteriorRate: number;
   contribution: number;
   support: number;
 };
+
+export type ResearchPythonRule = {
+  ruleId: string;
+  spec: {
+    family: "position_transfer" | "conditional_transfer";
+    lag: 1 | 2 | 3 | 4 | 5;
+    source: string;
+    target: string;
+    condition: [string, string] | null;
+    familyTarget: "zodiac";
+  };
+  description: string;
+  support: number;
+  hits: number;
+  hitRate: number;
+  baselineRate: number;
+  shrunkenRate: number;
+  pValue: number;
+  qValue: number;
+  direction: "positive" | "negative";
+  resourceDecision: "full_backtest" | "negative_pool";
+};
+
+export type ResearchPythonArtifact = {
+  schemaVersion: "python-shadow-v3";
+  generatedAt: string;
+  game: GameId;
+  audit: {
+    sampleSize: number;
+    formalSampleSize: number;
+    verifiedRatio: number;
+    duplicateIssueCount: number;
+    numericGapCount: number;
+    oldestIssue: string | null;
+    newestIssue: string | null;
+    datasetVersion: string;
+  };
+  resourceFunnel: Record<string, number>;
+  topPositiveRules: ResearchPythonRule[];
+  topNegativeRules: ResearchPythonRule[];
+  blackBox: Record<string, unknown>;
+  formalDecision: string;
+};
+
+export type ResearchRuleState = {
+  ruleId: string;
+  slot: ResearchEventSlot;
+  triggers: number;
+  hits: number;
+  consecutiveHits: number;
+  consecutiveMisses: number;
+  status: "active" | "suppressed" | "retired";
+};
+
+export type ResearchRuleStateMap = Partial<
+  Record<ResearchEventSlot, Record<string, ResearchRuleState>>
+>;
 
 export type ResearchEventHistory = {
   sampleSize: number;
@@ -229,4 +286,5 @@ export type ResearchV3Performance = {
 export type ResearchV3Envelope = {
   snapshot: ResearchV3Snapshot;
   source: "computed" | "stored" | "snapshot";
+  cycleStatus?: "completed" | "existing" | "awaiting_verification";
 };

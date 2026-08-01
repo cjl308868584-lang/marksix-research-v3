@@ -1,4 +1,5 @@
 import type { Draw, GameId } from "./lottery";
+import { isResearchPythonArtifact } from "./research-python-artifact";
 import {
   buildResearchV3Performance,
   buildResearchV3Review,
@@ -11,6 +12,8 @@ import {
   type ResearchEventSlot,
   type ResearchExpertId,
   type ResearchLearningRun,
+  type ResearchPythonArtifact,
+  type ResearchRuleStateMap,
   type ResearchV3Performance,
   type ResearchV3Review,
   type ResearchV3Snapshot,
@@ -116,6 +119,105 @@ export async function persistResearchV3Snapshot(
   }
 }
 
+export async function persistResearchDataset(
+  snapshot: ResearchV3Snapshot,
+  draws: Draw[],
+): Promise<"ok" | "unavailable"> {
+  const db = runtime.__marksixD1;
+  if (!db) return "unavailable";
+  const ordered = [...draws].sort(
+    (left, right) => Date.parse(left.drawAt) - Date.parse(right.drawAt),
+  );
+  try {
+    const statements: D1PreparedStatement[] = [];
+    for (const draw of ordered) {
+      const rawJson = JSON.stringify(draw);
+      const sourceHash = stableRecordHash(rawJson);
+      const grade = sourceGrade(draw);
+      statements.push(
+        db.prepare(
+          `INSERT OR IGNORE INTO draw_source_snapshots (
+             snapshot_id, game, issue, source, source_grade, fetched_at,
+             body_hash, raw_json, status
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          `${draw.game}:${draw.issue}:${sourceHash}`,
+          draw.game,
+          draw.issue,
+          draw.source,
+          grade,
+          snapshot.generatedAt,
+          sourceHash,
+          rawJson,
+          draw.verified ? "consistent" : "unverified",
+        ),
+        db.prepare(
+          `INSERT INTO lottery_draws (
+             draw_id, game, issue, draw_at, main_1, main_2, main_3,
+             main_4, main_5, main_6, special, source_grade, verified,
+             source_hash, available_at, ingested_at, dataset_version
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(draw_id) DO UPDATE SET
+             draw_at = excluded.draw_at,
+             main_1 = excluded.main_1, main_2 = excluded.main_2,
+             main_3 = excluded.main_3, main_4 = excluded.main_4,
+             main_5 = excluded.main_5, main_6 = excluded.main_6,
+             special = excluded.special, source_grade = excluded.source_grade,
+             verified = excluded.verified, source_hash = excluded.source_hash,
+             available_at = excluded.available_at, ingested_at = excluded.ingested_at,
+             dataset_version = excluded.dataset_version
+           WHERE excluded.verified > lottery_draws.verified
+              OR (excluded.verified = lottery_draws.verified
+                  AND excluded.source_hash <> lottery_draws.source_hash)`,
+        ).bind(
+          `${draw.game}:${draw.issue}`,
+          draw.game,
+          draw.issue,
+          draw.drawAt,
+          ...draw.numbers,
+          draw.special,
+          grade,
+          draw.verified ? 1 : 0,
+          sourceHash,
+          draw.drawAt,
+          snapshot.generatedAt,
+          snapshot.dataQuality.datasetVersion,
+        ),
+      );
+    }
+    statements.push(
+      db.prepare(
+        `INSERT OR IGNORE INTO dataset_versions (
+           dataset_version, game, generated_at, oldest_issue, newest_issue,
+           draw_count, formal_draw_count, missing_issue_count, conflict_count,
+           fingerprint, summary_json
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)`,
+      ).bind(
+        snapshot.dataQuality.datasetVersion,
+        snapshot.game,
+        snapshot.generatedAt,
+        snapshot.dataQuality.oldestIssue,
+        snapshot.dataQuality.newestIssue,
+        snapshot.dataQuality.sampleSize,
+        snapshot.dataQuality.verifiedSampleSize,
+        snapshot.dataQuality.datasetVersion,
+        JSON.stringify({
+          sourceMode: snapshot.dataQuality.sourceMode,
+          verifiedRatio: snapshot.dataQuality.verifiedRatio,
+          warnings: snapshot.dataQuality.warnings,
+          usedIssues: ordered.filter((draw) => draw.verified).map((draw) => draw.issue),
+        }),
+      ),
+    );
+    for (let index = 0; index < statements.length; index += 80) {
+      await db.batch(statements.slice(index, index + 80));
+    }
+    return "ok";
+  } catch {
+    return "unavailable";
+  }
+}
+
 export async function settleResearchV3Forecasts(
   game: GameId,
   draws: Draw[],
@@ -157,6 +259,14 @@ export async function settleResearchV3Forecasts(
       const draw = verifiedByIssue.get(parsed.targetIssue);
       if (!draw) continue;
       const review = buildResearchV3Review(parsed, draw, settledAt);
+      const claimed = await claimResearchSettlement(
+        db,
+        parsed.runId,
+        parsed.game,
+        parsed.targetIssue,
+        settledAt,
+      );
+      if (!claimed) continue;
       const statements: D1PreparedStatement[] = [
         db.prepare(
           `UPDATE research_v3_forecasts
@@ -255,6 +365,9 @@ export async function settleResearchV3Forecasts(
         event.ruleContributions.forEach((rule) => {
           const ruleMatched =
             event.actualMatched === (rule.direction === "support");
+          const successBaseline = rule.direction === "support"
+            ? rule.baselineRate
+            : 1 - rule.baselineRate;
           const stateId = `${parsed.game}:${event.slot}:${rule.ruleId}`;
           const previous = stateHistory.get(stateId) ?? {
             recent20: [],
@@ -280,6 +393,8 @@ export async function settleResearchV3Forecasts(
                  recent_20_json = excluded.recent_20_json,
                  recent_50_json = excluded.recent_50_json,
                  status = CASE
+                   WHEN status = 'retired' THEN 'retired'
+                   WHEN excluded.hits = 0 AND consecutive_misses + 1 >= 12 THEN 'retired'
                    WHEN excluded.hits = 0 AND consecutive_misses + 1 >= 5 THEN 'suppressed'
                    WHEN excluded.hits = 1 AND consecutive_hits + 1 >= 3 THEN 'active'
                    ELSE status
@@ -290,8 +405,8 @@ export async function settleResearchV3Forecasts(
               parsed.game,
               event.slot,
               rule.ruleId,
-              rule.baselineRate * 20 + (ruleMatched ? 1 : 0),
-              (1 - rule.baselineRate) * 20 + (ruleMatched ? 0 : 1),
+              successBaseline * 20 + (ruleMatched ? 1 : 0),
+              (1 - successBaseline) * 20 + (ruleMatched ? 0 : 1),
               ruleMatched ? 1 : 0,
               ruleMatched ? 1 : 0,
               ruleMatched ? 0 : 1,
@@ -303,8 +418,29 @@ export async function settleResearchV3Forecasts(
           );
         });
       });
-      for (let index = 0; index < statements.length; index += 80) {
-        await db.batch(statements.slice(index, index + 80));
+      statements.push(
+        db.prepare(
+          `UPDATE research_settlement_claims
+           SET status = 'completed', completed_at = ?, error_message = NULL
+           WHERE run_id = ? AND status = 'processing'`,
+        ).bind(settledAt, parsed.runId),
+      );
+      try {
+        if (statements.length > 100) {
+          throw new Error("settlement transaction exceeds D1 batch limit");
+        }
+        await db.batch(statements);
+      } catch (error) {
+        await db.prepare(
+          `UPDATE research_settlement_claims
+           SET status = 'failed', completed_at = ?, error_message = ?
+           WHERE run_id = ? AND status = 'processing'`,
+        ).bind(
+          settledAt,
+          error instanceof Error ? error.message.slice(0, 500) : "unknown",
+          parsed.runId,
+        ).run();
+        throw error;
       }
     }
     return "ok";
@@ -313,7 +449,147 @@ export async function settleResearchV3Forecasts(
   }
 }
 
+async function claimResearchSettlement(
+  db: D1Database,
+  runId: string,
+  game: GameId,
+  targetIssue: string,
+  claimedAt: string,
+) {
+  const inserted = await db.prepare(
+    `INSERT OR IGNORE INTO research_settlement_claims (
+       run_id, game, target_issue, status, claimed_at
+     ) VALUES (?, ?, ?, 'processing', ?)`,
+  ).bind(runId, game, targetIssue, claimedAt).run();
+  if (Number(inserted.meta?.changes ?? 0) === 1) return true;
+  const leaseCutoff = new Date(Date.parse(claimedAt) - 10 * 60_000).toISOString();
+  const reclaimed = await db.prepare(
+    `UPDATE research_settlement_claims
+     SET status = 'processing', claimed_at = ?, completed_at = NULL,
+         error_message = NULL
+     WHERE run_id = ? AND (
+       status = 'failed' OR (status = 'processing' AND claimed_at < ?)
+     )`,
+  ).bind(claimedAt, runId, leaseCutoff).run();
+  return Number(reclaimed.meta?.changes ?? 0) === 1;
+}
+
+export type ResearchTaskClaim =
+  | { status: "claimed" }
+  | { status: "processing" }
+  | { status: "existing"; response: unknown }
+  | { status: "conflict" }
+  | { status: "unavailable" };
+
+export async function claimResearchTask(input: {
+  taskId: string;
+  game: GameId;
+  requestHash: string;
+  startedAt: string;
+}): Promise<ResearchTaskClaim> {
+  const db = runtime.__marksixD1;
+  if (!db || !await ensureResearchV3Store()) return { status: "unavailable" };
+  try {
+    const inserted = await db.prepare(
+      `INSERT OR IGNORE INTO research_task_runs (
+         task_id, game, request_hash, status, started_at
+       ) VALUES (?, ?, ?, 'processing', ?)`,
+    ).bind(input.taskId, input.game, input.requestHash, input.startedAt).run();
+    if (Number(inserted.meta?.changes ?? 0) === 1) return { status: "claimed" };
+    const row = await db.prepare(
+      `SELECT game, request_hash, status, response_json
+       FROM research_task_runs WHERE task_id = ?`,
+    ).bind(input.taskId).first<{
+      game: string;
+      request_hash: string;
+      status: string;
+      response_json: string | null;
+    }>();
+    if (!row || row.game !== input.game || row.request_hash !== input.requestHash) {
+      return { status: "conflict" };
+    }
+    if (row.status === "completed" && row.response_json) {
+      return { status: "existing", response: parseJson(row.response_json) };
+    }
+    if (row.status === "failed") {
+      const retried = await db.prepare(
+        `UPDATE research_task_runs
+         SET status = 'processing', started_at = ?, completed_at = NULL,
+             response_json = NULL, error_message = NULL
+         WHERE task_id = ? AND status = 'failed'`,
+      ).bind(input.startedAt, input.taskId).run();
+      if (Number(retried.meta?.changes ?? 0) === 1) return { status: "claimed" };
+    }
+    return { status: "processing" };
+  } catch {
+    return { status: "unavailable" };
+  }
+}
+
+export async function completeResearchTask(
+  taskId: string,
+  response: unknown,
+  completedAt: string,
+) {
+  const db = runtime.__marksixD1;
+  if (!db) return false;
+  const result = await db.prepare(
+    `UPDATE research_task_runs
+     SET status = 'completed', response_json = ?, completed_at = ?,
+         error_message = NULL
+     WHERE task_id = ? AND status = 'processing'`,
+  ).bind(JSON.stringify(response), completedAt, taskId).run();
+  return Number(result.meta?.changes ?? 0) === 1;
+}
+
+export async function failResearchTask(
+  taskId: string,
+  errorMessage: string,
+  completedAt: string,
+) {
+  const db = runtime.__marksixD1;
+  if (!db) return;
+  await db.prepare(
+    `UPDATE research_task_runs
+     SET status = 'failed', error_message = ?, completed_at = ?
+     WHERE task_id = ? AND status = 'processing'`,
+  ).bind(errorMessage.slice(0, 500), completedAt, taskId).run();
+}
+
 const RESEARCH_V3_SCHEMA = `
+CREATE TABLE IF NOT EXISTS lottery_draws (
+  draw_id text PRIMARY KEY NOT NULL, game text NOT NULL, issue text NOT NULL,
+  draw_at text NOT NULL, main_1 integer NOT NULL, main_2 integer NOT NULL,
+  main_3 integer NOT NULL, main_4 integer NOT NULL, main_5 integer NOT NULL,
+  main_6 integer NOT NULL, special integer NOT NULL, source_grade text NOT NULL,
+  verified integer NOT NULL DEFAULT 0, source_hash text NOT NULL,
+  available_at text NOT NULL, ingested_at text NOT NULL, dataset_version text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS lottery_draws_game_issue_idx
+  ON lottery_draws (game, issue);
+CREATE INDEX IF NOT EXISTS lottery_draws_game_draw_at_idx
+  ON lottery_draws (game, draw_at);
+CREATE INDEX IF NOT EXISTS lottery_draws_dataset_idx
+  ON lottery_draws (dataset_version);
+CREATE TABLE IF NOT EXISTS draw_source_snapshots (
+  snapshot_id text PRIMARY KEY NOT NULL, game text NOT NULL, issue text NOT NULL,
+  source text NOT NULL, source_grade text NOT NULL, fetched_at text NOT NULL,
+  body_hash text NOT NULL, raw_json text NOT NULL, status text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS draw_source_snapshot_identity_idx
+  ON draw_source_snapshots (game, issue, source, body_hash);
+CREATE INDEX IF NOT EXISTS draw_source_snapshot_issue_idx
+  ON draw_source_snapshots (game, issue);
+CREATE TABLE IF NOT EXISTS dataset_versions (
+  dataset_version text PRIMARY KEY NOT NULL, game text NOT NULL,
+  generated_at text NOT NULL, oldest_issue text, newest_issue text,
+  draw_count integer NOT NULL, formal_draw_count integer NOT NULL,
+  missing_issue_count integer NOT NULL DEFAULT 0,
+  conflict_count integer NOT NULL DEFAULT 0, fingerprint text NOT NULL,
+  summary_json text NOT NULL
+);
+CREATE INDEX IF NOT EXISTS dataset_versions_game_generated_idx
+  ON dataset_versions (game, generated_at);
 CREATE TABLE IF NOT EXISTS research_event_ledger (
   event_id text PRIMARY KEY NOT NULL, run_id text NOT NULL, game text NOT NULL,
   target_issue text NOT NULL, slot text NOT NULL, scope text NOT NULL,
@@ -392,6 +668,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS research_v3_forecast_identity_idx
   ON research_v3_forecasts (game, target_issue);
 CREATE INDEX IF NOT EXISTS research_v3_forecast_unsettled_idx
   ON research_v3_forecasts (game, settled_at, target_issue);
+CREATE TABLE IF NOT EXISTS research_settlement_claims (
+  run_id text PRIMARY KEY NOT NULL, game text NOT NULL, target_issue text NOT NULL,
+  status text NOT NULL, claimed_at text NOT NULL, completed_at text,
+  error_message text
+);
+CREATE INDEX IF NOT EXISTS research_settlement_claim_game_idx
+  ON research_settlement_claims (game, status, claimed_at);
+CREATE TABLE IF NOT EXISTS research_task_runs (
+  task_id text PRIMARY KEY NOT NULL, game text NOT NULL, request_hash text NOT NULL,
+  status text NOT NULL, response_json text, error_message text,
+  started_at text NOT NULL, completed_at text
+);
+CREATE INDEX IF NOT EXISTS research_task_status_idx
+  ON research_task_runs (game, status, started_at);
 `;
 
 export async function readResearchV3Reviews(
@@ -482,6 +772,101 @@ export async function readLatestModelWeights(
   }
 }
 
+export async function readResearchRuleStates(
+  game: GameId,
+): Promise<ResearchRuleStateMap> {
+  const db = runtime.__marksixD1;
+  if (!db) return {};
+  try {
+    const rows = await db.prepare(
+      `SELECT slot, rule_id, triggers, hits, consecutive_hits,
+              consecutive_misses, status
+       FROM research_rule_states
+       WHERE game = ?`,
+    ).bind(game).all<{
+      slot: ResearchEventSlot;
+      rule_id: string;
+      triggers: number;
+      hits: number;
+      consecutive_hits: number;
+      consecutive_misses: number;
+      status: "active" | "suppressed" | "retired";
+    }>();
+    const result: ResearchRuleStateMap = {};
+    for (const row of rows.results ?? []) {
+      result[row.slot] ??= {};
+      result[row.slot]![row.rule_id] = {
+        ruleId: row.rule_id,
+        slot: row.slot,
+        triggers: Number(row.triggers),
+        hits: Number(row.hits),
+        consecutiveHits: Number(row.consecutive_hits),
+        consecutiveMisses: Number(row.consecutive_misses),
+        status: row.status,
+      };
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+export async function persistResearchPythonArtifact(
+  artifact: ResearchPythonArtifact,
+) {
+  if (!isResearchPythonArtifact(artifact)) return "invalid" as const;
+  const db = runtime.__marksixD1;
+  if (!db) return "unavailable" as const;
+  const artifactId = [
+    "python",
+    artifact.game,
+    artifact.schemaVersion,
+    artifact.audit.datasetVersion,
+  ].join(":");
+  try {
+    const result = await db.prepare(
+      `INSERT OR IGNORE INTO research_model_artifacts (
+         artifact_id, game, model_version, kind, role, status,
+         dataset_version, parent_artifact_id, config_json, metrics_json,
+         created_at
+       ) VALUES (?, ?, ?, 'python_rule_search', 'challenger', 'shadow', ?, NULL, ?, ?, ?)`,
+    ).bind(
+      artifactId,
+      artifact.game,
+      `${artifact.schemaVersion}-${artifact.audit.datasetVersion.slice(0, 16)}`,
+      artifact.audit.datasetVersion,
+      JSON.stringify(artifact.resourceFunnel),
+      JSON.stringify(artifact),
+      artifact.generatedAt,
+    ).run();
+    return Number(result.meta?.changes ?? 0) === 1
+      ? "created" as const
+      : "existing" as const;
+  } catch {
+    return "unavailable" as const;
+  }
+}
+
+export async function readLatestResearchPythonArtifact(
+  game: GameId,
+): Promise<ResearchPythonArtifact | null> {
+  const db = runtime.__marksixD1;
+  if (!db) return null;
+  try {
+    const row = await db.prepare(
+      `SELECT metrics_json
+       FROM research_model_artifacts
+       WHERE game = ? AND kind = 'python_rule_search' AND status = 'shadow'
+       ORDER BY created_at DESC, artifact_id DESC
+       LIMIT 1`,
+    ).bind(game).first<{ metrics_json: string }>();
+    const parsed = parseJson(row?.metrics_json ?? "");
+    return isResearchPythonArtifact(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function countSettledResearchV3Forecasts(game: GameId) {
   const db = runtime.__marksixD1;
   if (!db) return 0;
@@ -512,7 +897,7 @@ export async function readChampionChallengeState(game: GameId): Promise<{
   }
   try {
     const rows = await db.prepare(
-      `SELECT mw.target_issue, mw.model_id, mw.probability,
+      `SELECT mw.target_issue, mw.model_id, mw.probability, mw.status,
               es.actual_matched, es.scored_at
        FROM research_model_weights mw
        JOIN research_event_scores es
@@ -524,6 +909,7 @@ export async function readChampionChallengeState(game: GameId): Promise<{
       target_issue: string;
       model_id: ResearchExpertId;
       probability: number;
+      status: string;
       actual_matched: number;
       scored_at: string;
     }>();
@@ -534,7 +920,7 @@ export async function readChampionChallengeState(game: GameId): Promise<{
     }
     const issueSet = new Set(issueOrder);
     const eligible = (rows.results ?? []).filter((row) =>
-      issueSet.has(row.target_issue)
+      issueSet.has(row.target_issue) && row.status !== "blocked"
     );
     const metrics = new Map<
       ResearchExpertId,
@@ -665,11 +1051,7 @@ async function registerModelArtifacts(
       id: `${snapshot.game}:${snapshot.modelVersion}:black-box`,
       kind: "gradient_boosting",
       role: "challenger",
-      status: snapshot.dataQuality.sampleSize < 1_000
-        ? "blocked"
-        : snapshot.learningSummary.champion === "black_box"
-          ? "champion"
-          : "shadow",
+      status: "blocked",
     },
   ].map((model) =>
     db.prepare(
@@ -765,4 +1147,24 @@ function average(values: number[]) {
   return values.length
     ? values.reduce((sum, value) => sum + value, 0) / values.length
     : Number.POSITIVE_INFINITY;
+}
+
+function sourceGrade(draw: Draw) {
+  if (!draw.verified) return "single_source_unverified";
+  return /香港赛马会官方/.test(draw.source)
+    ? "official_verified"
+    : "multi_source_consistent";
+}
+
+function stableRecordHash(value: string) {
+  let left = 2166136261;
+  let right = 2246822507;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    left = Math.imul(left ^ code, 16777619);
+    right = Math.imul(right ^ code, 3266489909);
+  }
+  return [left, right]
+    .map((valuePart) => (valuePart >>> 0).toString(16).padStart(8, "0"))
+    .join("");
 }

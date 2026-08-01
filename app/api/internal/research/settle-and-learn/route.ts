@@ -1,17 +1,25 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../../lib/lottery";
-import { loadResearchV3Envelope } from "../../../../../lib/research-v3-service";
+import { runResearchV3Cycle } from "../../../../../lib/research-v3-service";
+import {
+  claimResearchTask,
+  completeResearchTask,
+  failResearchTask,
+} from "../../../../../lib/research-v3-store";
 import { getRuntimeEnv } from "../../../../../lib/runtime-env";
+import { isResearchPythonArtifact } from "../../../../../lib/research-python-artifact";
+import type { ResearchPythonArtifact } from "../../../../../lib/research-v3-types";
 
 export const dynamic = "force-dynamic";
 
-const MAX_BODY_BYTES = 32 * 1024;
+const MAX_BODY_BYTES = 512 * 1024;
 const SIGNATURE_WINDOW_MS = 5 * 60_000;
 
 type SettleAndLearnRequest = {
   taskId: string;
   game: GameId;
   asOf?: string;
+  researchArtifact?: ResearchPythonArtifact;
 };
 
 export async function POST(request: NextRequest) {
@@ -50,32 +58,111 @@ export async function POST(request: NextRequest) {
   if (
     !/^[a-zA-Z0-9:_-]{8,160}$/.test(body.taskId ?? "") ||
     !GAME_IDS.includes(body.game) ||
-    (body.asOf && !Number.isFinite(Date.parse(body.asOf)))
+    (body.asOf && !Number.isFinite(Date.parse(body.asOf))) ||
+    (body.researchArtifact !== undefined &&
+      (!isResearchPythonArtifact(body.researchArtifact) ||
+        body.researchArtifact.game !== body.game))
   ) {
     return NextResponse.json({ error: "任务参数无效。" }, { status: 400 });
   }
+  const startedAt = new Date().toISOString();
+  const requestHash = await sha256Hex(raw);
+  const claim = await claimResearchTask({
+    taskId: body.taskId,
+    game: body.game,
+    requestHash,
+    startedAt,
+  });
+  if (claim.status === "existing") {
+    return NextResponse.json(claim.response, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  }
+  if (claim.status === "conflict") {
+    return NextResponse.json(
+      { error: "任务编号已被不同请求占用。" },
+      { status: 409 },
+    );
+  }
+  if (claim.status === "processing") {
+    return NextResponse.json(
+      { error: "同一任务正在处理中。" },
+      { status: 409, headers: { "Retry-After": "15" } },
+    );
+  }
+  if (claim.status === "unavailable") {
+    return NextResponse.json(
+      { error: "研究任务账本暂不可用。" },
+      { status: 503 },
+    );
+  }
   try {
-    const envelope = await loadResearchV3Envelope({
+    const envelope = await runResearchV3Cycle({
       game: body.game,
       asOf: body.asOf ? new Date(body.asOf) : new Date(),
       forceCompute: false,
+      researchArtifact: body.researchArtifact,
     });
+    if (envelope.cycleStatus === "awaiting_verification") {
+      await failResearchTask(
+        body.taskId,
+        "latest draw is awaiting independent verification",
+        new Date().toISOString(),
+      );
+      return NextResponse.json(
+        {
+          status: "awaiting_verification",
+          taskId: body.taskId,
+          targetIssue: envelope.snapshot.targetIssue,
+        },
+        {
+          status: 425,
+          headers: {
+            "Cache-Control": "private, no-store",
+            "Retry-After": "60",
+          },
+        },
+      );
+    }
+    const response = {
+      status: envelope.cycleStatus ??
+        (envelope.source === "stored" ? "existing" : "completed"),
+      taskId: body.taskId,
+      runId: envelope.snapshot.runId,
+      targetIssue: envelope.snapshot.targetIssue,
+      immutable: true,
+    };
+    const completed = await completeResearchTask(
+      body.taskId,
+      response,
+      new Date().toISOString(),
+    );
+    if (!completed) throw new Error("research task completion was not persisted");
     return NextResponse.json(
-      {
-        status: envelope.source === "stored" ? "existing" : "completed",
-        taskId: body.taskId,
-        runId: envelope.snapshot.runId,
-        targetIssue: envelope.snapshot.targetIssue,
-        immutable: true,
-      },
+      response,
       { headers: { "Cache-Control": "private, no-store" } },
     );
-  } catch {
+  } catch (error) {
+    await failResearchTask(
+      body.taskId,
+      error instanceof Error ? error.message : "unknown",
+      new Date().toISOString(),
+    );
     return NextResponse.json(
       { error: "结算与学习任务暂时失败，上一冠军和冻结预测未被覆盖。" },
       { status: 503 },
     );
   }
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
+  return Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, "0")
+  ).join("");
 }
 
 async function hmacHex(secret: string, value: string) {

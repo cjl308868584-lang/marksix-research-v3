@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { loadResearchV3Envelope } from "../../../../lib/research-v3-service";
+import { readResearchV3Envelope } from "../../../../lib/research-v3-service";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: "彩种无效。" }, { status: 400 });
   }
   try {
-    const envelope = await loadResearchV3Envelope({ game });
+    const envelope = await readResearchV3Envelope({ game });
     return NextResponse.json(
       {
         game,

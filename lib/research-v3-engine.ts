@@ -15,7 +15,10 @@ import {
   type ResearchEventSlot,
   type ResearchExpertId,
   type ResearchModelWeight,
+  type ResearchPythonArtifact,
   type ResearchRuleContribution,
+  type ResearchRuleState,
+  type ResearchRuleStateMap,
   type ResearchV3Snapshot,
 } from "./research-v3-types";
 
@@ -58,6 +61,8 @@ export function buildResearchV3Snapshot({
   sourceMode = "snapshot",
   sourceWarning = null,
   previousWeights = {},
+  ruleStates = {},
+  researchArtifact,
   settledForecasts = 0,
   champion = "interpretable_rules",
   challenger = "logistic",
@@ -72,10 +77,19 @@ export function buildResearchV3Snapshot({
   previousWeights?: Partial<
     Record<ResearchEventSlot, Partial<Record<ResearchExpertId, number>>>
   >;
+  ruleStates?: ResearchRuleStateMap;
+  researchArtifact?: ResearchPythonArtifact;
   settledForecasts?: number;
   champion?: ResearchExpertId;
   challenger?: ResearchExpertId | null;
 }): ResearchV3Snapshot {
+  const availableDraws = [...draws]
+    .filter(isStructurallyUsable)
+    .sort(
+      (left, right) =>
+        Date.parse(left.drawAt) - Date.parse(right.drawAt) ||
+        left.issue.localeCompare(right.issue, "en", { numeric: true }),
+    );
   const chronological = [...draws]
     .filter(isUsableDraw)
     .sort(
@@ -100,13 +114,15 @@ export function buildResearchV3Snapshot({
           chronological,
           expectedDrawAt,
           previousWeights[slot],
+          ruleStates[slot],
+          researchArtifact,
         )
       )
       .sort(compareCandidateEvaluation);
     return toEventForecast(evaluations[0], chronological, expectedDrawAt);
   }) as ResearchV3Snapshot["events"];
 
-  const verifiedSampleSize = chronological.filter((draw) => draw.verified).length;
+  const verifiedSampleSize = chronological.length;
   const datasetVersion = `data_${stableHash(
     chronological.map((draw) =>
       [draw.issue, draw.drawAt, ...draw.numbers, draw.special, draw.verified].join(
@@ -134,7 +150,7 @@ export function buildResearchV3Snapshot({
     dataQuality: {
       sampleSize: chronological.length,
       verifiedSampleSize,
-      verifiedRatio: verifiedSampleSize / Math.max(chronological.length, 1),
+      verifiedRatio: verifiedSampleSize / Math.max(availableDraws.length, 1),
       sourceMode,
       oldestIssue: chronological[0]?.issue ?? null,
       newestIssue: chronological.at(-1)?.issue ?? null,
@@ -250,6 +266,8 @@ function evaluateCandidate(
   draws: Draw[],
   expectedDrawAt: string,
   priorWeights?: Partial<Record<ResearchExpertId, number>>,
+  priorRuleStates?: Record<string, ResearchRuleState>,
+  researchArtifact?: ResearchPythonArtifact,
 ): CandidateEvaluation {
   const outcomes = draws.map((draw) =>
     actualValues(candidate.scope, candidate.family, draw).has(candidate.value)
@@ -274,23 +292,33 @@ function evaluateCandidate(
     posteriorContribution(candidate, outcomes, baselines, FAST_WINDOW),
     posteriorContribution(candidate, outcomes, baselines, MEDIUM_WINDOW),
     posteriorContribution(candidate, outcomes, baselines, "all"),
-  ];
+    ...pythonRuleContributions(candidate, draws, baseline, researchArtifact),
+  ].map((contribution) =>
+    applyRuleState(contribution, priorRuleStates?.[contribution.ruleId])
+  );
+  const pythonAdjustment = clamp(
+    contributions
+      .filter((contribution) => contribution.window === "python")
+      .reduce((sum, contribution) => sum + contribution.contribution, 0),
+    -0.03,
+    0.03,
+  );
   const rulesProbability = clamp(
     contributions[0].posteriorRate * 0.45 +
       contributions[1].posteriorRate * 0.35 +
-      contributions[2].posteriorRate * 0.2,
+      contributions[2].posteriorRate * 0.2 +
+      pythonAdjustment,
     0.4,
     0.7,
   );
   const logistic = logisticForecast(outcomes, baselines, baseline);
-  const blackBoxProbability =
-    draws.length >= 1_000 ? logistic.probability : baseline;
+  // No production black-box artifact is available yet. Keep this expert at the
+  // exact baseline and zero weight instead of relabelling the logistic model.
+  const blackBoxProbability = baseline;
   const weights = normalizeWeights({
     ...DEFAULT_WEIGHTS,
     ...priorWeights,
-    black_box: draws.length >= 1_000
-      ? (priorWeights?.black_box ?? 0.1)
-      : 0,
+    black_box: 0,
   });
   const probability = clamp(
     weights.baseline * baseline +
@@ -345,6 +373,101 @@ function evaluateCandidate(
     weights,
     history,
     contributions,
+  };
+}
+
+function pythonRuleContributions(
+  candidate: Candidate,
+  draws: Draw[],
+  baseline: number,
+  artifact?: ResearchPythonArtifact,
+): ResearchRuleContribution[] {
+  if (
+    !artifact ||
+    artifact.game !== draws.at(-1)?.game ||
+    candidate.slot !== "zodiac_6_plus_1" ||
+    candidate.family !== "zodiac"
+  ) return [];
+  return [...artifact.topPositiveRules, ...artifact.topNegativeRules]
+    .filter((rule) => rule.qValue <= 0.1)
+    .flatMap((rule) => {
+      const sourceDraw = draws.at(-rule.spec.lag);
+      if (!sourceDraw) return [];
+      if (rule.spec.condition) {
+        const [field, expected] = rule.spec.condition;
+        const conditionNumber = valueAtRulePosition(sourceDraw, field);
+        if (
+          conditionNumber === null ||
+          getZodiac(conditionNumber, sourceDraw.drawAt) !== expected
+        ) return [];
+      }
+      const sourceNumber = valueAtRulePosition(sourceDraw, rule.spec.source);
+      if (
+        sourceNumber === null ||
+        getZodiac(sourceNumber, sourceDraw.drawAt) !== candidate.value
+      ) return [];
+      const rawEdge = rule.direction === "positive"
+        ? rule.shrunkenRate - rule.baselineRate
+        : -(rule.baselineRate - rule.shrunkenRate);
+      const projectedEdge = clamp(rawEdge * 0.25, -0.015, 0.015);
+      if (Math.abs(projectedEdge) <= 1e-9) return [];
+      return [{
+        ruleId: rule.ruleId,
+        label: `Python跨期规则 · ${rule.description}`,
+        direction: projectedEdge > 0 ? "support" as const : "suppress" as const,
+        window: "python" as const,
+        observedRate: rule.hitRate,
+        baselineRate: baseline,
+        posteriorRate: clamp(baseline + projectedEdge, 0, 1),
+        contribution: projectedEdge,
+        support: rule.support,
+      }];
+    })
+    .sort((left, right) =>
+      Math.abs(right.contribution) - Math.abs(left.contribution) ||
+      left.ruleId.localeCompare(right.ruleId, "en")
+    )
+    .slice(0, 5);
+}
+
+function valueAtRulePosition(draw: Draw, position: string) {
+  if (position === "special") return draw.special;
+  const match = /^main\.(\d)$/.exec(position);
+  if (!match) return null;
+  return draw.numbers[Number(match[1]) - 1] ?? null;
+}
+
+function applyRuleState(
+  contribution: ResearchRuleContribution,
+  state?: ResearchRuleState,
+): ResearchRuleContribution {
+  if (!state || state.triggers <= 0) return contribution;
+  if (state.status === "suppressed" || state.status === "retired") {
+    return {
+      ...contribution,
+      posteriorRate: contribution.baselineRate,
+      contribution: 0,
+    };
+  }
+  const successBaseline = contribution.direction === "support"
+    ? contribution.baselineRate
+    : 1 - contribution.baselineRate;
+  const posteriorSuccess =
+    (state.hits + successBaseline * 20) / (state.triggers + 20);
+  const multiplier = clamp(
+    1 + (posteriorSuccess - successBaseline) * 2,
+    0.5,
+    1.25,
+  );
+  const adjusted = contribution.contribution * multiplier;
+  return {
+    ...contribution,
+    posteriorRate: clamp(
+      contribution.baselineRate + adjusted,
+      0,
+      1,
+    ),
+    contribution: adjusted,
   };
 }
 
@@ -548,10 +671,7 @@ function toEventForecast(
     history.brierSkill > 0 &&
     history.nonWorseFoldRatio >= 0.8 &&
     evaluation.probability - evaluation.baseline >= 0.03;
-  const tier =
-    historicalGate && verifiedCount >= 50
-      ? "verified"
-      : historicalGate
+  const tier = historicalGate && verifiedCount >= 50
         ? "challenger"
         : draws.length >= MIN_TRAINING_ROWS
           ? "shadow"
@@ -618,10 +738,7 @@ function toEventForecast(
       hasPositiveEdge && strongest.contribution >= 0
         ? `${strongest.label}对“${candidate.value}”提供当前最强支持；概率已与随机基线及其他模型加权。`
         : `现有证据没有形成正优势；该槽位只保留精确随机基线，不将负提升包装成预测优势。`,
-    warning:
-      tier === "verified"
-        ? null
-        : "尚未完成50次独立前瞻验证，只能作为影子研究结果。",
+    warning: "尚未完成独立前瞻、FDR及随机管线验证，只能作为影子研究结果。",
   };
 }
 
@@ -787,6 +904,10 @@ function binaryLogLoss(outcome: number, probability: number) {
 }
 
 function isUsableDraw(draw: Draw) {
+  return draw.verified === true && isStructurallyUsable(draw);
+}
+
+function isStructurallyUsable(draw: Draw) {
   return (
     Number.isFinite(Date.parse(draw.drawAt)) &&
     draw.numbers.length === 6 &&

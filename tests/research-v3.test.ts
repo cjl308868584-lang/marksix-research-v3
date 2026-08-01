@@ -19,6 +19,8 @@ let buildSnapshot: (input: {
   targetIssue: string;
   expectedDrawAt: string;
   generatedAt: string;
+  ruleStates?: Record<string, Record<string, unknown>>;
+  researchArtifact?: Record<string, unknown>;
 }) => any;
 let baseline: (
   scope: string,
@@ -27,6 +29,8 @@ let baseline: (
   drawAt: string,
 ) => number;
 let buildReview: (snapshot: any, draw: Draw, settledAt: string) => any;
+let buildPerformance: (game: "new_macau", reviews: any[]) => any;
+let zodiacFor: (number: number, drawAt: string) => string;
 
 before(async () => {
   server = await createServer({
@@ -38,9 +42,12 @@ before(async () => {
   });
   const engine = await server.ssrLoadModule("/lib/research-v3-engine.ts") as any;
   const review = await server.ssrLoadModule("/lib/research-v3-review.ts") as any;
+  const lottery = await server.ssrLoadModule("/lib/lottery.ts") as any;
   buildSnapshot = engine.buildResearchV3Snapshot;
   baseline = engine.exactEventBaseline;
   buildReview = review.buildResearchV3Review;
+  buildPerformance = review.buildResearchV3Performance;
+  zodiacFor = lottery.getZodiac;
 });
 
 after(async () => {
@@ -92,6 +99,29 @@ test("coverage and position baselines use exact without-replacement probabilitie
   assert.ok(Math.abs(big - 25 / 49) < 1e-9);
 });
 
+test("unverified history never changes a frozen production forecast", () => {
+  const verified = makeHistory(160).map((draw) => ({ ...draw, verified: true }));
+  const input = {
+    game: "new_macau" as const,
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  };
+  const before = buildSnapshot({ ...input, draws: verified });
+  const poisoned = verified.concat({
+    ...verified.at(-1)!,
+    issue: "2026998",
+    drawAt: "2026-09-29T21:32:32+08:00",
+    numbers: [49, 48, 47, 46, 45, 44],
+    special: 43,
+    source: "单源未核验测试",
+    verified: false,
+  });
+  const after = buildSnapshot({ ...input, draws: poisoned });
+  assert.deepEqual(after.events, before.events);
+  assert.equal(after.dataQuality.sampleSize, before.dataQuality.sampleSize);
+});
+
 test("verified settlement scores frozen events before updating weights", () => {
   const draws = makeHistory(160);
   const snapshot = buildSnapshot({
@@ -137,6 +167,48 @@ test("verified settlement scores frozen events before updating weights", () => {
   }
 });
 
+test("review summary does not call a high hit count an advantage when probability scoring loses", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const draw: Draw = {
+    game: "new_macau",
+    issue: "2026999",
+    drawAt: "2026-10-01T21:32:32+08:00",
+    numbers: [1, 3, 5, 7, 9, 11],
+    special: 13,
+    source: "双源一致测试",
+    verified: true,
+  };
+  snapshot.events = snapshot.events.map((event: any) => ({
+    ...event,
+    probability: 0.4,
+    predictedValue:
+      event.family === "zodiac" ? zodiacFor(1, draw.drawAt)
+        : event.family === "tail" ? "1尾"
+          : event.family === "parity" ? "单"
+            : "小",
+  }));
+  const review = buildReview(snapshot, draw, "2026-10-01T21:35:00+08:00");
+  assert.equal(review.hits, 4);
+  assert.ok(review.brierSkill < 0);
+  assert.match(review.summary, /概率评分.*低于随机基线/);
+});
+
+test("performance skill is calculated from aggregate scores, not an average of ratios", () => {
+  const reviews = [
+    { targetIssue: "1", settledAt: "2026-01-01", hits: 2, total: 4, expectedHits: 2, brier: 0.1, baselineBrier: 0.2, logLoss: 0.4, baselineLogLoss: 0.5, brierSkill: 0.5, logLossSkill: 0.2 },
+    { targetIssue: "2", settledAt: "2026-01-02", hits: 2, total: 4, expectedHits: 2, brier: 0.3, baselineBrier: 0.4, logLoss: 0.8, baselineLogLoss: 1, brierSkill: 0.25, logLossSkill: 0.2 },
+  ];
+  const performance = buildPerformance("new_macau", reviews);
+  assert.ok(Math.abs(performance.brierSkill - (1 - 0.2 / 0.3)) < 1e-12);
+  assert.ok(Math.abs(performance.logLossSkill - 0.2) < 1e-12);
+});
+
 test("a result cannot settle a forecast frozen after draw time", () => {
   const snapshot = buildSnapshot({
     game: "new_macau",
@@ -157,6 +229,120 @@ test("a result cannot settle a forecast frozen after draw time", () => {
   assert.throws(
     () => buildReview(snapshot, draw, "2026-10-01T22:01:00+08:00"),
     /not frozen before/,
+  );
+});
+
+test("retired rule states are consumed by the next frozen forecast", () => {
+  const input = {
+    game: "new_macau" as const,
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  };
+  const before = buildSnapshot(input);
+  const event = before.events[0];
+  const ruleStates = {
+    zodiac_6_plus_1: Object.fromEntries(
+      event.ruleContributions.map((rule: any) => [
+        rule.ruleId,
+        {
+          ruleId: rule.ruleId,
+          slot: event.slot,
+          triggers: 8,
+          hits: 0,
+          consecutiveHits: 0,
+          consecutiveMisses: 8,
+          status: "suppressed",
+        },
+      ]),
+    ),
+  };
+  const after = buildSnapshot({ ...input, ruleStates });
+  const sameCandidate = after.events[0].predictedValue === event.predictedValue;
+  assert.ok(
+    !sameCandidate || after.events[0].probability < event.probability,
+    "a retired rule must either lower its candidate or cause another candidate to win",
+  );
+  assert.ok(
+    after.events[0].ruleContributions.every(
+      (rule: any) => !ruleStates.zodiac_6_plus_1[rule.ruleId] || rule.contribution === 0,
+    ),
+  );
+});
+
+test("validated Python rule artifacts contribute to the next high-probability event", () => {
+  const draws = makeHistory(160);
+  const input = {
+    game: "new_macau" as const,
+    draws,
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  };
+  const selected = buildSnapshot(input).events[0].predictedValue;
+  const positions = ["main.1", "main.2", "main.3", "main.4", "main.5", "main.6", "special"];
+  const matching = Array.from({ length: 5 }, (_, index) => index + 1)
+    .flatMap((lag) => positions.map((source) => ({ lag, source })))
+    .find(({ lag, source }) => {
+      const draw = draws.at(-lag)!;
+      const number = source === "special"
+        ? draw.special
+        : draw.numbers[Number(source.split(".")[1]) - 1];
+      return zodiacFor(number, draw.drawAt) === selected;
+    });
+  assert.ok(matching);
+  const artifact = {
+    schemaVersion: "python-shadow-v3",
+    generatedAt: "2026-09-30T09:00:00.000Z",
+    game: "new_macau",
+    audit: {
+      sampleSize: 160,
+      formalSampleSize: 60,
+      verifiedRatio: 0.375,
+      duplicateIssueCount: 0,
+      numericGapCount: 0,
+      oldestIssue: "2026001",
+      newestIssue: "2026160",
+      datasetVersion: "python-test-data",
+    },
+    resourceFunnel: {
+      generated: 1,
+      eligible: 1,
+      fullBacktest: 1,
+      negativePool: 0,
+      reductionRate: 0,
+    },
+    topPositiveRules: [{
+      ruleId: "python-zodiac-transfer",
+      spec: {
+        family: "position_transfer",
+        lag: matching!.lag,
+        source: matching!.source,
+        target: "main.1",
+        condition: null,
+        familyTarget: "zodiac",
+      },
+      description: "读取前1期特码生肖，预测下期第1正码生肖",
+      support: 120,
+      hits: 24,
+      hitRate: 0.2,
+      baselineRate: 1 / 12,
+      shrunkenRate: 0.18,
+      pValue: 0.001,
+      qValue: 0.01,
+      direction: "positive",
+      resourceDecision: "full_backtest",
+    }],
+    topNegativeRules: [],
+    blackBox: { status: "blocked", reason: "sample_lt_1000" },
+    formalDecision: "baseline_only",
+  };
+  const snapshot = buildSnapshot({ ...input, researchArtifact: artifact });
+  assert.ok(
+    snapshot.events[0].ruleContributions.some(
+      (rule: any) => rule.window === "python" && rule.ruleId === "python-zodiac-transfer",
+    ),
   );
 });
 
