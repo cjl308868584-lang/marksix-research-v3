@@ -35,7 +35,7 @@ export async function loadServerDraws(
     );
     if (!liveDraws.length) throw new Error("history unavailable");
     const newestIssue = uniqueNewest(liveDraws)[0]?.issue;
-    const crossChecks = await fetchLatestCrossCheck(game, newestIssue)
+    const crossChecks = await fetchLatestCrossCheck(game, newestIssue, asOf)
       .catch(() => []);
     const crossCheckByIssue = new Map<string, Draw[]>();
     crossChecks.forEach((draw) => {
@@ -163,6 +163,7 @@ function parseDraw(game: GameId, issue: string, drawAt: string, code: string): D
 async function fetchLatestCrossCheck(
   game: GameId,
   newestIssue?: string,
+  asOf = new Date(),
 ): Promise<Draw[]> {
   const requests = [fetchMarksix6CrossCheck(game)];
   if (game === "new_macau") {
@@ -175,21 +176,21 @@ async function fetchLatestCrossCheck(
   const draws = results.flatMap((result) =>
     result.status === "fulfilled" ? result.value : []
   );
-  const migrated = migratedVerifiedDraw(game, newestIssue);
+  const migrated = migratedVerifiedDraw(game, asOf);
   if (migrated) draws.push(migrated);
   if (!draws.length) throw new Error("latest cross-check unavailable");
   return draws;
 }
 
-function migratedVerifiedDraw(game: GameId, issue?: string): Draw | null {
-  if (game !== "new_macau" || issue !== "2026212") return null;
+function migratedVerifiedDraw(game: GameId, asOf: Date): Draw | null {
+  if (game !== "new_macau") return null;
   const draw = parseDraw(
     game,
-    issue,
+    "2026212",
     "2026-07-31 21:32:32",
     "43,32,16,39,19,27,06",
   );
-  return draw
+  return draw && Date.parse(draw.drawAt) <= asOf.getTime()
     ? {
       ...draw,
       verified: true,

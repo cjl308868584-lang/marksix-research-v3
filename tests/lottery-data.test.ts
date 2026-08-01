@@ -306,3 +306,37 @@ test("the audited 2026212 migration remains verifiable during source outages", a
     globalThis.fetch = originalFetch;
   }
 });
+
+test("the verified 2026212 result advances history even when the primary feed stops at 2026211", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({
+        errorCode: 0,
+        result: { data: [{
+          preDrawIssue: "2026211",
+          preDrawTime: "2026-07-30 21:32:32",
+          preDrawCode: "13,12,39,37,38,08,01",
+        }] },
+      });
+    }
+    return new Response("source unavailable", { status: 503 });
+  };
+
+  try {
+    const result = await loadServerDraws(
+      "new_macau",
+      10,
+      new Date("2026-08-01T00:00:00.000Z"),
+    );
+    assert.equal(result.draws[0].issue, "2026212");
+    assert.equal(result.draws[0].verified, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
