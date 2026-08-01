@@ -331,6 +331,60 @@ test("new Macau latest result verifies even when the older cross-check is stale"
   }
 });
 
+test("two agreeing latest sources verify a draw missing from the lagging history feed", async () => {
+  const originalFetch = globalThis.fetch;
+  const latestIssue = "2026213";
+  const latestCode = "09,05,12,22,01,15,35";
+  globalThis.fetch = async (input) => {
+    const url = typeof input === "string"
+      ? input
+      : input instanceof URL
+        ? input.href
+        : input.url;
+    if (url.startsWith("https://api.api16868.com/")) {
+      return Response.json({
+        errorCode: 0,
+        result: { data: [{
+          preDrawIssue: "2026211",
+          preDrawTime: "2026-07-30 21:32:32",
+          preDrawCode: "13,12,39,37,38,08,01",
+        }] },
+      });
+    }
+    if (url.startsWith("https://api3.marksix6.net/")) {
+      return Response.json({
+        expect: latestIssue,
+        openTime: "2026-08-01 21:32:32",
+        openCode: latestCode,
+      });
+    }
+    if (url.startsWith("https://macaumarksix.com/")) {
+      return Response.json([{
+        expect: latestIssue,
+        openTime: "2026-08-01 21:32:32",
+        openCode: latestCode,
+      }]);
+    }
+    if (url.startsWith("https://history.macaumarksix.com/")) {
+      return Response.json([]);
+    }
+    return new Response("unexpected upstream", { status: 404 });
+  };
+
+  try {
+    const result = await loadServerDraws(
+      "new_macau",
+      10,
+      new Date("2026-08-01T14:00:00.000Z"),
+    );
+    assert.equal(result.draws[0].issue, latestIssue);
+    assert.equal(result.draws[0].verified, true);
+    assert.match(result.draws[0].source, /Marksix6.*新澳门开奖独立接口/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("the audited 2026212 migration remains verifiable during source outages", async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (input) => {

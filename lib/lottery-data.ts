@@ -53,6 +53,24 @@ export async function loadServerDraws(
       matches.push(draw);
       crossCheckByIssue.set(draw.issue, matches);
     });
+    const crossCheckConsensus = [...crossCheckByIssue.values()].map((candidates) => {
+      const matchingGroup = candidates.find((candidate) => {
+        const signature = [...candidate.numbers, candidate.special].join(",");
+        return candidates.filter(
+          (other) => [...other.numbers, other.special].join(",") === signature,
+        ).length >= 2;
+      });
+      if (!matchingGroup) return candidates[0];
+      const signature = [...matchingGroup.numbers, matchingGroup.special].join(",");
+      const agreeing = candidates.filter(
+        (candidate) => [...candidate.numbers, candidate.special].join(",") === signature,
+      );
+      return {
+        ...matchingGroup,
+        verified: true,
+        source: `${agreeing.map((candidate) => candidate.source).join("＋")} 交叉一致`,
+      };
+    });
     let verifiedMatches = 0;
     let verificationConflicts = 0;
     const verifiedHistory = uniqueNewest(liveDraws).map((draw) => {
@@ -77,7 +95,7 @@ export async function loadServerDraws(
     const historyIssues = new Set(verifiedHistory.map((draw) => draw.issue));
     const uniqueLiveDraws = uniqueNewest([
       ...verifiedHistory,
-      ...crossChecks.filter((draw) => !historyIssues.has(draw.issue)),
+      ...crossCheckConsensus.filter((draw) => !historyIssues.has(draw.issue)),
     ]);
     const rejectedFutureCount = uniqueLiveDraws.filter(
       (draw) => !isDrawBeforeCutoff(draw, cutoffTime),
