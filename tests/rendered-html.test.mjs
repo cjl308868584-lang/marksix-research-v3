@@ -98,8 +98,24 @@ test("public research reads never settle, train, or freeze forecasts", async () 
     assert.doesNotMatch(route, /loadResearchV3Envelope/);
     assert.doesNotMatch(route, /settleResearchV3Forecasts/);
   }
-  assert.doesNotMatch(lotteryRoute, /settleResearchV3Forecasts/);
+  assert.doesNotMatch(lotteryRoute, /settleResearchForecasts/);
+  assert.doesNotMatch(lotteryRoute, /settleLatestResearch/);
   assert.match(forecastRoute, /readResearchV3Envelope/);
+});
+
+test("the public Hong Kong feed preserves HKJC official verification for every draw", async () => {
+  const lotteryRoute = await readFile(
+    new URL("../app/api/lottery/route.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    lotteryRoute,
+    /source: "香港赛马会",\s+verified: true,/,
+  );
+  assert.match(
+    lotteryRoute,
+    /verified: item\.verified \|\| matches\.length >= 2/,
+  );
 });
 
 test("research writes are guarded by task idempotency and a settlement claim", async () => {
@@ -275,8 +291,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(lotteryRoute, /isDrawForTarget/);
   assert.match(lotteryRoute, /高频检测已开启/);
   assert.match(lotteryRoute, /已获取本期完整结果/);
-  assert.match(lotteryRoute, /settleLatestResearch/);
-  assert.match(lotteryRoute, /settleResearchForecasts/);
+  assert.doesNotMatch(lotteryRoute, /settleLatestResearch/);
+  assert.doesNotMatch(lotteryRoute, /settleResearchForecasts/);
   assert.doesNotMatch(lotteryRoute, /最新一期为 12·11·31·03·44·37 \+ 25/);
   assert.match(analyzeRoute, /AI_API_KEY/);
   assert.match(analyzeRoute, /\/responses/);
