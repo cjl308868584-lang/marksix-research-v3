@@ -11,6 +11,16 @@ from urllib.request import Request, urlopen
 
 from .pipeline import run_shadow_research
 
+HTTP_HEADERS = {
+    "accept": "application/json",
+    "accept-language": "zh-CN,zh;q=0.9,en;q=0.7",
+    "user-agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+        "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36 "
+        "MarksixResearch/3.0"
+    ),
+}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="marksix-research")
@@ -67,7 +77,7 @@ def sync_history(site_url: str, output_path: str) -> None:
     for game in ("hk", "new_macau"):
         request = Request(
             f"{base}/api/lottery?game={game}&limit=120",
-            headers={"accept": "application/json"},
+            headers={**HTTP_HEADERS, "referer": f"{base}/"},
         )
         with urlopen(request, timeout=90) as response:
             body = json.loads(response.read().decode("utf-8"))
@@ -119,7 +129,10 @@ def capture(
             data=body,
             method="POST",
             headers={
+                **HTTP_HEADERS,
                 "content-type": "application/json",
+                "origin": base,
+                "referer": f"{base}/research",
                 "x-research-timestamp": timestamp,
                 "x-research-signature": signature,
             },
