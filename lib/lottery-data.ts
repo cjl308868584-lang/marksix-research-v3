@@ -196,6 +196,7 @@ async function fetchLatestCrossCheck(
   const requests = [fetchMarksix6CrossCheck(game)];
   if (game === "hk") {
     requests.push(fetchHkjcCrossCheck(500));
+    requests.push(fetchKj1868HongKongCrossCheck());
   }
   if (game === "new_macau") {
     requests.push(fetchNewMacauCrossCheck());
@@ -211,6 +212,31 @@ async function fetchLatestCrossCheck(
   if (migrated) draws.push(migrated);
   if (!draws.length) throw new Error("latest cross-check unavailable");
   return draws;
+}
+
+async function fetchKj1868HongKongCrossCheck(): Promise<Draw[]> {
+  const response = await fetchWithTimeout(
+    "https://www.kj1868.cc/openapi/drawLottery/xg6/last.kj?page=1&pageSize=10",
+  );
+  if (!response.ok) throw new Error(`KJ1868 cross-check ${response.status}`);
+  const payload = (await response.json()) as {
+    status?: string;
+    data?: {
+      data?: Array<{ period?: string; lottery_date?: string; numbers?: string }>;
+    };
+  };
+  if (payload.status !== "10") throw new Error("KJ1868 cross-check response invalid");
+  return (payload.data?.data ?? [])
+    .map((item) =>
+      parseDraw(
+        "hk",
+        item.period ?? "",
+        item.lottery_date ? `${item.lottery_date} 21:30:00` : "",
+        item.numbers ?? "",
+      )
+    )
+    .filter((draw): draw is Draw => Boolean(draw))
+    .map((draw) => ({ ...draw, source: "开奖1868 香港独立接口" }));
 }
 
 async function fetchHkjcCrossCheck(limit: number): Promise<Draw[]> {
