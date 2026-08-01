@@ -18,7 +18,30 @@ import {
 
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: D1Database;
+  __marksixResearchV3SchemaReady?: Promise<void>;
 };
+
+export async function ensureResearchV3Store() {
+  const db = runtime.__marksixD1;
+  if (!db) return false;
+  runtime.__marksixResearchV3SchemaReady ??= initializeResearchV3Schema(db)
+    .catch((error: unknown) => {
+      runtime.__marksixResearchV3SchemaReady = undefined;
+      throw error;
+    });
+  await runtime.__marksixResearchV3SchemaReady;
+  return true;
+}
+
+async function initializeResearchV3Schema(db: D1Database) {
+  const statements = RESEARCH_V3_SCHEMA
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+  for (const statement of statements) {
+    await db.prepare(statement).run();
+  }
+}
 
 type SnapshotRow = {
   run_id: string;
@@ -104,6 +127,7 @@ export async function settleResearchV3Forecasts(
     draws.filter((draw) => draw.verified).map((draw) => [draw.issue, draw]),
   );
   try {
+    await ensureResearchV3Store();
     const stateRows = await db.prepare(
       `SELECT state_id, recent_20_json, recent_50_json
        FROM research_rule_states
@@ -288,6 +312,87 @@ export async function settleResearchV3Forecasts(
     return "unavailable";
   }
 }
+
+const RESEARCH_V3_SCHEMA = `
+CREATE TABLE IF NOT EXISTS research_event_ledger (
+  event_id text PRIMARY KEY NOT NULL, run_id text NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, slot text NOT NULL, scope text NOT NULL,
+  family text NOT NULL, predicted_value text NOT NULL, probability real NOT NULL,
+  baseline_probability real NOT NULL, evidence_tier text NOT NULL,
+  frozen_event_json text NOT NULL, frozen_at text NOT NULL,
+  actual_matched integer, actual_label text, scored_at text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_event_slot_identity_idx
+  ON research_event_ledger (run_id, slot);
+CREATE INDEX IF NOT EXISTS research_event_issue_idx
+  ON research_event_ledger (game, target_issue, scored_at);
+CREATE TABLE IF NOT EXISTS research_event_scores (
+  score_id text PRIMARY KEY NOT NULL, run_id text NOT NULL, event_id text NOT NULL,
+  game text NOT NULL, target_issue text NOT NULL, slot text NOT NULL,
+  probability real NOT NULL, baseline_probability real NOT NULL,
+  actual_matched integer NOT NULL, brier_score real NOT NULL,
+  baseline_brier_score real NOT NULL, log_loss real NOT NULL,
+  baseline_log_loss real NOT NULL, score_json text NOT NULL, scored_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_event_score_identity_idx
+  ON research_event_scores (run_id, event_id);
+CREATE INDEX IF NOT EXISTS research_event_score_game_idx
+  ON research_event_scores (game, target_issue, slot);
+CREATE TABLE IF NOT EXISTS research_learning_runs (
+  learning_run_id text PRIMARY KEY NOT NULL, run_id text NOT NULL,
+  game text NOT NULL, settled_issue text NOT NULL, status text NOT NULL,
+  champion_before text NOT NULL, champion_after text NOT NULL,
+  challenger_promoted integer NOT NULL, drift_detected integer NOT NULL,
+  summary_json text NOT NULL, started_at text NOT NULL, completed_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_learning_run_identity_idx
+  ON research_learning_runs (run_id, settled_issue);
+CREATE INDEX IF NOT EXISTS research_learning_game_idx
+  ON research_learning_runs (game, completed_at);
+CREATE TABLE IF NOT EXISTS research_model_artifacts (
+  artifact_id text PRIMARY KEY NOT NULL, game text NOT NULL,
+  model_version text NOT NULL, kind text NOT NULL, role text NOT NULL,
+  status text NOT NULL, dataset_version text NOT NULL, parent_artifact_id text,
+  config_json text NOT NULL, metrics_json text NOT NULL, created_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_model_artifact_identity_idx
+  ON research_model_artifacts (game, model_version, kind);
+CREATE INDEX IF NOT EXISTS research_model_artifact_status_idx
+  ON research_model_artifacts (game, status, created_at);
+CREATE TABLE IF NOT EXISTS research_model_weights (
+  weight_id text PRIMARY KEY NOT NULL, run_id text NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, slot text NOT NULL, model_id text NOT NULL,
+  weight_before real NOT NULL, weight_after real NOT NULL,
+  probability real NOT NULL, status text NOT NULL, updated_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_model_weight_identity_idx
+  ON research_model_weights (run_id, slot, model_id);
+CREATE INDEX IF NOT EXISTS research_model_weight_latest_idx
+  ON research_model_weights (game, slot, updated_at);
+CREATE TABLE IF NOT EXISTS research_rule_states (
+  state_id text PRIMARY KEY NOT NULL, game text NOT NULL, slot text NOT NULL,
+  rule_id text NOT NULL, posterior_alpha real NOT NULL, posterior_beta real NOT NULL,
+  triggers integer NOT NULL, hits integer NOT NULL, consecutive_hits integer NOT NULL,
+  consecutive_misses integer NOT NULL, recent_20_json text NOT NULL,
+  recent_50_json text NOT NULL, status text NOT NULL, updated_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_rule_state_identity_idx
+  ON research_rule_states (game, slot, rule_id);
+CREATE INDEX IF NOT EXISTS research_rule_state_status_idx
+  ON research_rule_states (game, status, updated_at);
+CREATE TABLE IF NOT EXISTS research_v3_forecasts (
+  run_id text PRIMARY KEY NOT NULL, game text NOT NULL, target_issue text NOT NULL,
+  expected_draw_at text NOT NULL, generated_at text NOT NULL,
+  dataset_version text NOT NULL, engine_version text NOT NULL,
+  model_version text NOT NULL, mode text NOT NULL, snapshot_json text NOT NULL,
+  frozen_at text NOT NULL, actual_json text, review_version text,
+  review_json text, settled_at text
+);
+CREATE UNIQUE INDEX IF NOT EXISTS research_v3_forecast_identity_idx
+  ON research_v3_forecasts (game, target_issue);
+CREATE INDEX IF NOT EXISTS research_v3_forecast_unsettled_idx
+  ON research_v3_forecasts (game, settled_at, target_issue);
+`;
 
 export async function readResearchV3Reviews(
   game: GameId,

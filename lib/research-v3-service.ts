@@ -4,6 +4,7 @@ import { GAME_IDS, nextScheduledDraw, type GameId } from "./lottery";
 import { buildResearchV3Snapshot } from "./research-v3-engine";
 import {
   countSettledResearchV3Forecasts,
+  ensureResearchV3Store,
   persistResearchV3Snapshot,
   readChampionChallengeState,
   readLatestModelWeights,
@@ -16,6 +17,8 @@ import type {
 
 const MAX_RESEARCH_HISTORY = 500;
 const CACHE_TTL_MS = 10 * 60_000;
+const LEGACY_RESEARCH_ORIGIN =
+  "https://marksix-intelligence-cn.m308868584.chatgpt.site";
 
 const runtime = globalThis as typeof globalThis & {
   __marksixResearchV3Cache?: Map<
@@ -40,9 +43,11 @@ export async function loadResearchV3Envelope({
 }): Promise<ResearchV3Envelope> {
   if (!GAME_IDS.includes(game)) throw new Error("unsupported game");
   const history = await loadServerDraws(game, MAX_RESEARCH_HISTORY, asOf);
-  await settleResearchV3Forecasts(game, history.draws, asOf.toISOString());
   const latest = history.draws[0];
   if (!latest) throw new Error("history unavailable");
+  await ensureResearchV3Store();
+  await importLegacySnapshot(game, latest.issue);
+  await settleResearchV3Forecasts(game, history.draws, asOf.toISOString());
   if (!latest.verified) {
     const frozen =
       await readResearchV3Snapshot(game, latest.issue) ??
@@ -124,6 +129,28 @@ export async function loadResearchV3Envelope({
   });
   pruneCache();
   return envelope;
+}
+
+async function importLegacySnapshot(game: GameId, issue: string) {
+  if (await readResearchV3Snapshot(game, issue)) return;
+  try {
+    const response = await fetch(
+      `${LEGACY_RESEARCH_ORIGIN}/api/research/forecast?game=${game}&issue=${encodeURIComponent(issue)}`,
+      { cache: "no-store", headers: { accept: "application/json" } },
+    );
+    if (!response.ok) return;
+    const snapshot = await response.json() as Parameters<
+      typeof persistResearchV3Snapshot
+    >[0];
+    if (
+      snapshot.game !== game ||
+      snapshot.targetIssue !== issue ||
+      Date.parse(snapshot.frozenAt) >= Date.parse(snapshot.expectedDrawAt)
+    ) return;
+    await persistResearchV3Snapshot(snapshot);
+  } catch {
+    // Migration is best effort; live prediction remains available without it.
+  }
 }
 
 function pruneCache() {

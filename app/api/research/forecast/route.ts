@@ -25,7 +25,8 @@ export async function GET(request: NextRequest) {
       { ...envelope.snapshot, source: envelope.source },
       { headers: noStore() },
     );
-  } catch {
+  } catch (error) {
+    console.error("research forecast unavailable", error);
     return NextResponse.json(
       { error: "研究快照暂不可用。" },
       { status: 503, headers: noStore() },

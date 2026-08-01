@@ -182,6 +182,13 @@ test("history loader cross-verifies the latest issue with an independent endpoin
         openCode: history[0].preDrawCode,
       }]);
     }
+    if (url.startsWith("https://history.macaumarksix.com/")) {
+      return Response.json([{
+        expect: latestIssue,
+        openTime: history[0].preDrawTime,
+        openCode: history[0].preDrawCode,
+      }]);
+    }
     return new Response("unexpected upstream", { status: 404 });
   };
 
@@ -235,6 +242,13 @@ test("new Macau latest result verifies even when the older cross-check is stale"
       });
     }
     if (url.startsWith("https://macaumarksix.com/")) {
+      return Response.json([{
+        expect: latestIssue,
+        openTime: "2026-07-31 21:32:32",
+        openCode: latestCode,
+      }]);
+    }
+    if (url.startsWith("https://history.macaumarksix.com/")) {
       return Response.json([{
         expect: latestIssue,
         openTime: "2026-07-31 21:32:32",

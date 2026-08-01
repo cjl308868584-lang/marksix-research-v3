@@ -27,14 +27,16 @@ export async function loadServerDraws(
     const anchors = Array.from({ length: pageCount }, (_, index) =>
       formatDateParam(new Date(cutoffTime - index * dayStep * 86_400_000)),
     );
-    const [pages, crossChecks] = await Promise.all([
-      Promise.allSettled(anchors.map((date) => fetchHistoryPage(game, date))),
-      fetchLatestCrossCheck(game).catch(() => []),
-    ]);
+    const pages = await Promise.allSettled(
+      anchors.map((date) => fetchHistoryPage(game, date)),
+    );
     const liveDraws = pages.flatMap((result) =>
       result.status === "fulfilled" ? result.value : [],
     );
     if (!liveDraws.length) throw new Error("history unavailable");
+    const newestIssue = uniqueNewest(liveDraws)[0]?.issue;
+    const crossChecks = await fetchLatestCrossCheck(game, newestIssue)
+      .catch(() => []);
     const crossCheckByIssue = new Map<string, Draw[]>();
     crossChecks.forEach((draw) => {
       const matches = crossCheckByIssue.get(draw.issue) ?? [];
@@ -158,10 +160,16 @@ function parseDraw(game: GameId, issue: string, drawAt: string, code: string): D
   return isValidDraw(result) ? result : null;
 }
 
-async function fetchLatestCrossCheck(game: GameId): Promise<Draw[]> {
+async function fetchLatestCrossCheck(
+  game: GameId,
+  newestIssue?: string,
+): Promise<Draw[]> {
   const requests = [fetchMarksix6CrossCheck(game)];
   if (game === "new_macau") {
     requests.push(fetchNewMacauCrossCheck());
+    if (newestIssue) {
+      requests.push(fetchNewMacauIssueCrossCheck(newestIssue));
+    }
   }
   const results = await Promise.allSettled(requests);
   const draws = results.flatMap((result) =>
@@ -223,6 +231,29 @@ async function fetchNewMacauCrossCheck(): Promise<Draw[]> {
     )
     .filter((draw): draw is Draw => Boolean(draw))
     .map((draw) => ({ ...draw, source: "新澳门开奖独立接口" }));
+}
+
+async function fetchNewMacauIssueCrossCheck(issue: string): Promise<Draw[]> {
+  const response = await fetchWithTimeout(
+    `https://history.macaumarksix.com/history/macaujc2/expect/${encodeURIComponent(issue)}`,
+  );
+  if (!response.ok) throw new Error(`new macau issue cross-check ${response.status}`);
+  const payload = (await response.json()) as Array<{
+    expect?: string;
+    openTime?: string;
+    openCode?: string;
+  }>;
+  return (Array.isArray(payload) ? payload : [])
+    .map((item) =>
+      parseDraw(
+        "new_macau",
+        item.expect ?? "",
+        item.openTime ?? "",
+        item.openCode ?? "",
+      )
+    )
+    .filter((draw): draw is Draw => Boolean(draw))
+    .map((draw) => ({ ...draw, source: "新澳门历史独立接口" }));
 }
 
 function uniqueNewest(draws: Draw[]): Draw[] {
