@@ -76,3 +76,16 @@ test("an unverified draw preserves the frozen forecast without retrying the task
   assert.match(awaitingBranch, /completeResearchTask/);
   assert.doesNotMatch(awaitingBranch, /failResearchTask|status:\s*425|Retry-After/);
 });
+
+test("unverified latest results bypass settlement until independent verification", async () => {
+  const service = await readFile(
+    new URL("../lib/research-v3-service.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.ok(
+    service.indexOf("if (!latest.verified)") <
+      service.indexOf("settleResearchV3Forecasts("),
+    "an unverified result must not enter settlement or learning",
+  );
+});

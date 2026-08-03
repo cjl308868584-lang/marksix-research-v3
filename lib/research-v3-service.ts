@@ -84,14 +84,6 @@ export async function runResearchV3Cycle({
     }
   }
   await importLegacySnapshot(game, latest.issue);
-  const settlement = await settleResearchV3Forecasts(
-    game,
-    history.draws,
-    asOf.toISOString(),
-  );
-  if (settlement !== "ok") {
-    throw new Error("previous frozen forecasts could not be settled");
-  }
   if (!latest.verified) {
     const frozen =
       await readResearchV3Snapshot(game, latest.issue) ??
@@ -106,6 +98,14 @@ export async function runResearchV3Cycle({
     // A brand-new database has no prior forecast to preserve. Bootstrap the
     // next immutable snapshot from verified history only; the engine excludes
     // the unverified latest draw from every feature and probability estimate.
+  }
+  const settlement = await settleResearchV3Forecasts(
+    game,
+    history.draws,
+    asOf.toISOString(),
+  );
+  if (settlement !== "ok") {
+    throw new Error("previous frozen forecasts could not be settled");
   }
   const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
   const targetIssue = nextIssue(latest.issue);
