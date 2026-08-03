@@ -1,7 +1,10 @@
 import { nextIssue } from "./ai-engine";
 import { loadServerDraws } from "./lottery-data";
 import { GAME_IDS, nextScheduledDraw, type GameId } from "./lottery";
-import { buildResearchV3Snapshot } from "./research-v3-engine";
+import {
+  buildResearchV3Snapshot,
+  researchCycleAction,
+} from "./research-v3-engine";
 import legacyNewMacau2026212 from "./legacy-new-macau-2026212.json";
 import {
   countSettledResearchV3Forecasts,
@@ -24,7 +27,7 @@ import type {
 const MAX_RESEARCH_HISTORY = 500;
 const CACHE_TTL_MS = 10 * 60_000;
 const LEGACY_RESEARCH_ORIGIN =
-  "https://marksix-intelligence-cn.m308868584.chatgpt.site";
+  "https://marksix-research-v3-cn.v308868584.chatgpt.site";
 const LEGACY_SNAPSHOTS = [legacyNewMacau2026212] as unknown as Array<
   Parameters<typeof persistResearchV3Snapshot>[0]
 >;
@@ -93,14 +96,16 @@ export async function runResearchV3Cycle({
     const frozen =
       await readResearchV3Snapshot(game, latest.issue) ??
       await readResearchV3Snapshot(game);
-    if (frozen) {
+    if (researchCycleAction(false, Boolean(frozen)) === "await_verification") {
       return {
-        snapshot: frozen,
+        snapshot: frozen!,
         source: "stored",
         cycleStatus: "awaiting_verification",
       };
     }
-    throw new Error("latest draw is awaiting independent verification");
+    // A brand-new database has no prior forecast to preserve. Bootstrap the
+    // next immutable snapshot from verified history only; the engine excludes
+    // the unverified latest draw from every feature and probability estimate.
   }
   const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
   const targetIssue = nextIssue(latest.issue);
@@ -203,8 +208,12 @@ async function importLegacySnapshot(game: GameId, issue: string) {
   }
   try {
     const response = await fetch(
-      `${LEGACY_RESEARCH_ORIGIN}/api/research/forecast?game=${game}&issue=${encodeURIComponent(issue)}`,
-      { cache: "no-store", headers: { accept: "application/json" } },
+      `${LEGACY_RESEARCH_ORIGIN}/api/research/forecast?game=${game}`,
+      {
+        cache: "no-store",
+        headers: { accept: "application/json" },
+        signal: AbortSignal.timeout(3_000),
+      },
     );
     if (!response.ok) return;
     const snapshot = await response.json() as Parameters<
@@ -212,7 +221,6 @@ async function importLegacySnapshot(game: GameId, issue: string) {
     >[0];
     if (
       snapshot.game !== game ||
-      snapshot.targetIssue !== issue ||
       Date.parse(snapshot.frozenAt) >= Date.parse(snapshot.expectedDrawAt)
     ) return;
     await persistResearchV3Snapshot(snapshot);

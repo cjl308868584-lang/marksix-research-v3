@@ -104,25 +104,22 @@ export async function POST(request: NextRequest) {
       researchArtifact: body.researchArtifact,
     });
     if (envelope.cycleStatus === "awaiting_verification") {
-      await failResearchTask(
+      const response = {
+        status: "awaiting_verification",
+        taskId: body.taskId,
+        runId: envelope.snapshot.runId,
+        targetIssue: envelope.snapshot.targetIssue,
+        immutable: true,
+      };
+      const completed = await completeResearchTask(
         body.taskId,
-        "latest draw is awaiting independent verification",
+        response,
         new Date().toISOString(),
       );
-      return NextResponse.json(
-        {
-          status: "awaiting_verification",
-          taskId: body.taskId,
-          targetIssue: envelope.snapshot.targetIssue,
-        },
-        {
-          status: 425,
-          headers: {
-            "Cache-Control": "private, no-store",
-            "Retry-After": "60",
-          },
-        },
-      );
+      if (!completed) throw new Error("research task completion was not persisted");
+      return NextResponse.json(response, {
+        headers: { "Cache-Control": "private, no-store" },
+      });
     }
     const response = {
       status: envelope.cycleStatus ??

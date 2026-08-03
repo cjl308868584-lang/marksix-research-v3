@@ -33,3 +33,46 @@ test("GitHub deployment workflow uses repository secrets and never embeds creden
   assert.match(workflow, /npm run deploy:cloudflare/);
   assert.doesNotMatch(workflow, /gho_|cfoac_|AI_API_KEY:\s*[^$]/);
 });
+
+test("the Worker hands runtime secrets to server routes", async () => {
+  const worker = await readFile(
+    new URL("../worker/index.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeEnv = await readFile(
+    new URL("../lib/runtime-env.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(worker, /__marksixBindings\s*=\s*bindings/);
+  assert.match(runtimeEnv, /__marksixBindings/);
+});
+
+test("legacy migration cannot block the post-draw learning cycle", async () => {
+  const service = await readFile(
+    new URL("../lib/research-v3-service.ts", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(service, /signal:\s*AbortSignal\.timeout\(3_000\)/);
+  assert.match(
+    service,
+    /https:\/\/marksix-research-v3-cn\.v308868584\.chatgpt\.site/,
+  );
+  assert.match(
+    service,
+    /api\/research\/forecast\?game=\$\{game\}/,
+  );
+});
+
+test("an unverified draw preserves the frozen forecast without retrying the task", async () => {
+  const route = await readFile(
+    new URL("../app/api/internal/research/settle-and-learn/route.ts", import.meta.url),
+    "utf8",
+  );
+
+  const start = route.indexOf('if (envelope.cycleStatus === "awaiting_verification")');
+  const awaitingBranch = route.slice(start, route.indexOf("    const response = {", start + 80));
+  assert.match(awaitingBranch, /completeResearchTask/);
+  assert.doesNotMatch(awaitingBranch, /failResearchTask|status:\s*425|Retry-After/);
+});

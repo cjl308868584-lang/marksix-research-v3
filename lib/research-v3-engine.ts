@@ -33,6 +33,14 @@ const DEFAULT_WEIGHTS: Record<ResearchExpertId, number> = {
   black_box: 0,
 };
 
+export function researchCycleAction(
+  latestVerified: boolean,
+  hasFrozenSnapshot: boolean,
+): "compute" | "await_verification" | "bootstrap" {
+  if (latestVerified) return "compute";
+  return hasFrozenSnapshot ? "await_verification" : "bootstrap";
+}
+
 type Candidate = {
   slot: ResearchEventSlot;
   scope: ResearchEventScope;

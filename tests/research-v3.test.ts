@@ -31,6 +31,10 @@ let baseline: (
 let buildReview: (snapshot: any, draw: Draw, settledAt: string) => any;
 let buildPerformance: (game: "new_macau", reviews: any[]) => any;
 let zodiacFor: (number: number, drawAt: string) => string;
+let cycleAction: (
+  latestVerified: boolean,
+  hasFrozenSnapshot: boolean,
+) => "compute" | "await_verification" | "bootstrap";
 
 before(async () => {
   server = await createServer({
@@ -48,6 +52,13 @@ before(async () => {
   buildReview = review.buildResearchV3Review;
   buildPerformance = review.buildResearchV3Performance;
   zodiacFor = lottery.getZodiac;
+  cycleAction = engine.researchCycleAction;
+});
+
+test("a new database bootstraps a baseline forecast without learning from an unverified latest draw", () => {
+  assert.equal(cycleAction(false, false), "bootstrap");
+  assert.equal(cycleAction(false, true), "await_verification");
+  assert.equal(cycleAction(true, false), "compute");
 });
 
 after(async () => {

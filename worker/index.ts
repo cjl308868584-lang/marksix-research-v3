@@ -30,8 +30,10 @@ const worker = {
     const bindings = env ?? ({} as Env);
     const runtime = globalThis as typeof globalThis & {
       __marksixD1?: D1Database;
+      __marksixBindings?: Record<string, unknown>;
     };
     runtime.__marksixD1 = bindings.DB;
+    runtime.__marksixBindings = bindings as unknown as Record<string, unknown>;
     const url = new URL(request.url);
 
     if (url.pathname === "/_vinext/image" && bindings.ASSETS && bindings.IMAGES) {
