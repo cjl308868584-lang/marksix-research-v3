@@ -36,6 +36,7 @@ let cycleAction: (
   latestVerified: boolean,
   hasFrozenSnapshot: boolean,
 ) => "compute" | "await_verification" | "bootstrap";
+let publicSnapshot: (snapshot: any) => any;
 
 before(async () => {
   server = await createServer({
@@ -54,6 +55,7 @@ before(async () => {
   buildPerformance = review.buildResearchV3Performance;
   zodiacFor = lottery.getZodiac;
   cycleAction = engine.researchCycleAction;
+  publicSnapshot = engine.toPublicResearchV3Snapshot;
 });
 
 test("a new database bootstraps a baseline forecast without learning from an unverified latest draw", () => {
@@ -117,6 +119,29 @@ test("shadow experts remain diagnostic and cannot change the formal probability"
   for (const event of snapshot.events) {
     assert.equal(event.probability, event.baselineProbability);
     assert.equal(event.uplift, 0);
+  }
+});
+
+test("legacy shadow ledgers are projected as baseline formal plus experimental probability", () => {
+  const frozen = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const legacy = structuredClone(frozen);
+  legacy.events = legacy.events.map((event: any) => {
+    const { experimentalProbability: _probability, experimentalUplift: _uplift, ...old } = event;
+    return { ...old, probability: event.baselineProbability + 0.02, uplift: 0.02 };
+  });
+  const projected = publicSnapshot(legacy);
+  assert.equal(legacy.events[0].probability, legacy.events[0].baselineProbability + 0.02);
+  for (const event of projected.events) {
+    assert.equal(event.probability, event.baselineProbability);
+    assert.equal(event.experimentalProbability, event.baselineProbability + 0.02);
+    assert.equal(event.uplift, 0);
+    assert.ok(Math.abs(event.experimentalUplift - 0.02) < 1e-12);
   }
 });
 

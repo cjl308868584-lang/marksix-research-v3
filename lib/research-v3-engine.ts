@@ -41,6 +41,29 @@ export function researchCycleAction(
   return hasFrozenSnapshot ? "await_verification" : "bootstrap";
 }
 
+export function toPublicResearchV3Snapshot(
+  snapshot: ResearchV3Snapshot,
+): ResearchV3Snapshot {
+  const events = snapshot.events.map((event) => {
+    if (typeof event.experimentalProbability === "number") return event;
+    if (event.evidenceTier === "verified") {
+      return {
+        ...event,
+        experimentalProbability: event.probability,
+        experimentalUplift: event.uplift,
+      };
+    }
+    return {
+      ...event,
+      probability: event.baselineProbability,
+      experimentalProbability: event.probability,
+      uplift: 0,
+      experimentalUplift: event.probability - event.baselineProbability,
+    };
+  }) as ResearchV3Snapshot["events"];
+  return { ...snapshot, events };
+}
+
 type Candidate = {
   slot: ResearchEventSlot;
   scope: ResearchEventScope;

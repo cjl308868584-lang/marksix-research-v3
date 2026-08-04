@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
 import { readResearchV3Envelope } from "../../../../lib/research-v3-service";
 import { readResearchV3Snapshot } from "../../../../lib/research-v3-store";
+import { toPublicResearchV3Snapshot } from "../../../../lib/research-v3-engine";
 
 export const dynamic = "force-dynamic";
 
@@ -17,12 +18,12 @@ export async function GET(request: NextRequest) {
         { status: 404, headers: noStore() },
       );
     }
-    return NextResponse.json(stored, { headers: noStore() });
+    return NextResponse.json(toPublicResearchV3Snapshot(stored), { headers: noStore() });
   }
   try {
     const envelope = await readResearchV3Envelope({ game });
     return NextResponse.json(
-      { ...envelope.snapshot, source: envelope.source },
+      { ...toPublicResearchV3Snapshot(envelope.snapshot), source: envelope.source },
       { headers: noStore() },
     );
   } catch (error) {
