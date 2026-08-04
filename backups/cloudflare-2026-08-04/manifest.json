@@ -1,0 +1,24 @@
+{
+  "createdAt": "2026-08-04T13:21:00+08:00",
+  "source": {
+    "worker": "marksix-research-v3",
+    "database": "marksix-research-v3-db",
+    "databaseId": "b55d1eaa-847a-4079-ab17-a140c2ae3345"
+  },
+  "export": {
+    "file": "marksix-research-v3-db.sql",
+    "bytes": 345514,
+    "sha256": "3791584d6303ac3c2ed6452202d7b5370ad3690aa5f39edd16ae0a2bf9bcebd3",
+    "checksumVerified": true
+  },
+  "rowCounts": {
+    "research_event_ledger": 8,
+    "research_event_scores": 4,
+    "research_learning_runs": 1,
+    "research_model_weights": 16,
+    "research_rule_states": 12,
+    "research_task_runs": 11,
+    "research_v3_forecasts": 2,
+    "research_model_artifacts": 10
+  }
+}

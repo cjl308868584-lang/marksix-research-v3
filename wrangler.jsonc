@@ -14,13 +14,6 @@
   "images": {
     "binding": "IMAGES"
   },
-  "d1_databases": [
-    {
-      "binding": "DB",
-      "database_name": "marksix-research-v3-db",
-      "database_id": "b55d1eaa-847a-4079-ab17-a140c2ae3345"
-    }
-  ],
   "observability": {
     "enabled": true
   }
