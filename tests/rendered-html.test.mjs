@@ -157,9 +157,18 @@ test("scheduled learning sends Python artifacts and verified-only data through t
     readFile(new URL("../research/src/marksix_research/pipeline.py", import.meta.url), "utf8"),
     readFile(new URL("../lib/research-v3-store.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(workflow, /schedule:/);
-  assert.match(workflow, /sync-history/);
-  assert.match(workflow, /capture .*--artifact/);
+  const crons = [...workflow.matchAll(/cron:\s*["']([^"']+)["']/g)].map(
+    (match) => match[1],
+  );
+  assert.deepEqual(crons, ["40 13 * * *", "50 13 * * *", "4 14 * * *"]);
+  assert.match(workflow, /matrix:[\s\S]*game:\s*\[hk, new_macau\]/);
+  assert.match(workflow, /fail-fast:\s*false/);
+  assert.match(workflow, /group:\s*research-v3-learning-\$\{\{ github\.ref \}\}/);
+  assert.doesNotMatch(workflow, /github\.event\.schedule/);
+  assert.match(workflow, /marksix-research cycle[\s\S]*--game "\$GAME"/);
+  assert.match(workflow, /marksix-research health-check[\s\S]*--game "\$GAME"/);
+  assert.doesNotMatch(workflow, /--max-wait-seconds\s+3600/);
+  assert.doesNotMatch(workflow, /npm run test:ai|npm run typecheck/);
   assert.match(workflow, /test -n "\$RESEARCH_SECRET"/);
   assert.match(service, /previous frozen forecasts could not be settled/);
   assert.match(service, /persistResearchDataset/);

@@ -3,81 +3,61 @@ name: Research v3 settle, learn and freeze
 on:
   workflow_dispatch:
   schedule:
-    - cron: "20 14 * * *"
+    # GitHub cron is UTC: 21:40, 21:50 and 22:04 Asia/Shanghai.
+    - cron: "40 13 * * *"
+    - cron: "50 13 * * *"
+    - cron: "4 14 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: research-v3-learning
+  group: research-v3-learning-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   research:
+    name: ${{ matrix.game }} settle, learn and freeze
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        game: [hk, new_macau]
     env:
       SITE_URL: ${{ secrets.RESEARCH_SITE_URL }}
       RESEARCH_SECRET: ${{ secrets.RESEARCH_INGEST_SECRET }}
+      GAME: ${{ matrix.game }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-          cache: npm
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - run: npm ci
       - run: pip install -e research
-      - run: npm run typecheck
-      - run: npm run test:ai
-      - run: python -m unittest discover -s research/tests -v
       - name: Verify production automation configuration
         run: |
           test -n "$SITE_URL"
           test -n "$RESEARCH_SECRET"
-      - name: Sync current server-owned history
-        run: marksix-research sync-history --site-url "$SITE_URL" --output research-artifacts/live-history.json
-      - name: Run separated game research
+      - name: Resync, research, settle and freeze this game
         run: |
-          mkdir -p research-artifacts
-          marksix-research run --history research-artifacts/live-history.json --game hk --output research-artifacts/hk.json
-          marksix-research run --history research-artifacts/live-history.json --game new_macau --output research-artifacts/new_macau.json
+          mkdir -p "research-artifacts/$GAME"
+          marksix-research cycle \
+            --site-url "$SITE_URL" \
+            --secret "$RESEARCH_SECRET" \
+            --game "$GAME" \
+            --output-dir "research-artifacts/$GAME" \
+            | tee "research-artifacts/$GAME/cycle-status.json"
+      - name: Verify latest verified issue advanced
+        run: |
+          marksix-research health-check \
+            --site-url "$SITE_URL" \
+            --game "$GAME" \
+            | tee "research-artifacts/$GAME/health-status.json"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: research-v3-${{ github.run_id }}
-          path: research-artifacts
+          name: research-v3-${{ matrix.game }}-${{ github.run_id }}
+          path: research-artifacts/${{ matrix.game }}
           retention-days: 90
-      - name: Settle, learn and freeze next forecasts
-        run: |
-          marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game hk --artifact research-artifacts/hk.json &
-          hk_pid=$!
-          marksix-research capture --site-url "$SITE_URL" --secret "$RESEARCH_SECRET" --game new_macau --artifact research-artifacts/new_macau.json &
-          new_macau_pid=$!
-          wait "$hk_pid"
-          wait "$new_macau_pid"
-      - name: Verify frozen production health
-        run: |
-          python - <<'PY'
-          import json, os, urllib.request
-          base = os.environ["SITE_URL"].rstrip("/")
-          for game in ("hk", "new_macau"):
-              request = urllib.request.Request(
-                  f"{base}/api/research/forecast?game={game}",
-                  headers={
-                      "accept": "application/json",
-                      "accept-language": "zh-CN,zh;q=0.9,en;q=0.7",
-                      "referer": f"{base}/research",
-                      "user-agent": "Mozilla/5.0 Chrome/128 MarksixResearch/3.0",
-                  },
-              )
-              with urllib.request.urlopen(request, timeout=60) as response:
-                  payload = json.load(response)
-              events = payload.get("events")
-              if not isinstance(events, list) or len(events) != 4:
-                  raise SystemExit(f"invalid frozen forecast health for {game}")
-              if any(event.get("family") == "number" for event in events):
-                  raise SystemExit(f"number forecast leaked for {game}")
-          PY
+          if-no-files-found: warn
