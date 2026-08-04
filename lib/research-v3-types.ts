@@ -129,9 +129,13 @@ export type ResearchEventForecast = {
   family: ResearchEventFamily;
   predictedValue: string;
   predictionLabel: string;
+  /** Probability used for immutable scoring and formal performance claims. */
   probability: number;
+  /** Shadow ensemble output; never scored or described as verified advantage. */
+  experimentalProbability: number;
   baselineProbability: number;
   uplift: number;
+  experimentalUplift: number;
   evidenceTier: ResearchEvidenceTier;
   experts: ResearchModelWeight[];
   ruleContributions: ResearchRuleContribution[];

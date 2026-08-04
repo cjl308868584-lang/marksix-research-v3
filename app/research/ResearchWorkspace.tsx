@@ -187,7 +187,7 @@ function EventCard({
         </div>
         <div className="v3-probability">
           <strong>{percent(event.probability)}</strong>
-          <span>模型概率</span>
+          <span>{event.evidenceTier === "verified" ? "正式模型概率" : "正式基线概率"}</span>
         </div>
       </header>
 
@@ -201,6 +201,13 @@ function EventCard({
           {signedPoints(event.uplift)}
         </strong>
       </div>
+
+      {event.evidenceTier !== "verified" && (
+        <div className="v3-baseline-row">
+          <span>影子实验概率 {percent(event.experimentalProbability ?? event.probability)}</span>
+          <strong>{signedPoints(event.experimentalUplift ?? 0)}</strong>
+        </div>
+      )}
 
       <div className="v3-event-kpis">
         <div>

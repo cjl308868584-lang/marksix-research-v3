@@ -76,6 +76,7 @@ export function buildResearchV3Snapshot({
   settledForecasts = 0,
   champion = "interpretable_rules",
   challenger = "logistic",
+  formalChampion = null,
 }: {
   game: GameId;
   draws: Draw[];
@@ -94,6 +95,7 @@ export function buildResearchV3Snapshot({
   settledForecasts?: number;
   champion?: ResearchExpertId;
   challenger?: ResearchExpertId | null;
+  formalChampion?: ResearchExpertId | null;
 }): ResearchV3Snapshot {
   const availableDraws = [...draws]
     .filter(isStructurallyUsable)
@@ -131,7 +133,12 @@ export function buildResearchV3Snapshot({
         )
       )
       .sort(compareCandidateEvaluation);
-    return toEventForecast(evaluations[0], chronological, expectedDrawAt);
+    return toEventForecast(
+      evaluations[0],
+      chronological,
+      expectedDrawAt,
+      formalChampion,
+    );
   }) as ResearchV3Snapshot["events"];
 
   const verifiedSampleSize = chronological.length;
@@ -672,6 +679,7 @@ function toEventForecast(
   evaluation: CandidateEvaluation,
   draws: Draw[],
   expectedDrawAt: string,
+  formalChampion: ResearchExpertId | null,
 ): ResearchEventForecast {
   const { candidate, history } = evaluation;
   const hasPositiveEdge = evaluation.probability > evaluation.baseline + 1e-9;
@@ -685,11 +693,16 @@ function toEventForecast(
     history.brierSkill > 0 &&
     history.nonWorseFoldRatio >= 0.8 &&
     evaluation.probability - evaluation.baseline >= 0.03;
-  const tier = historicalGate && verifiedCount >= 50
+  const tier = formalChampion
+    ? "verified"
+    : historicalGate && verifiedCount >= 50
         ? "challenger"
         : draws.length >= MIN_TRAINING_ROWS
           ? "shadow"
           : "baseline";
+  const formalProbability = formalChampion
+    ? probabilityForExpert(evaluation, formalChampion)
+    : evaluation.baseline;
   const experts: ResearchModelWeight[] = [
     expert(
       "baseline",
@@ -741,19 +754,31 @@ function toEventForecast(
     family: candidate.family,
     predictedValue: candidate.value,
     predictionLabel: predictionLabel(candidate),
-    probability: displayedProbability,
+    probability: formalProbability,
+    experimentalProbability: displayedProbability,
     baselineProbability: evaluation.baseline,
-    uplift: displayedProbability - evaluation.baseline,
+    uplift: formalProbability - evaluation.baseline,
+    experimentalUplift: displayedProbability - evaluation.baseline,
     evidenceTier: tier,
     experts,
     ruleContributions: evaluation.contributions,
     history,
     rationale:
       hasPositiveEdge && strongest.contribution >= 0
-        ? `${strongest.label}对“${candidate.value}”提供当前最强支持；概率已与随机基线及其他模型加权。`
+        ? `${strongest.label}对“${candidate.value}”提供当前最强支持；该结果只进入实验概率，正式概率仍保持随机基线。`
         : `现有证据没有形成正优势；该槽位只保留精确随机基线，不将负提升包装成预测优势。`,
     warning: "尚未完成独立前瞻、FDR及随机管线验证，只能作为影子研究结果。",
   };
+}
+
+function probabilityForExpert(
+  evaluation: CandidateEvaluation,
+  expert: ResearchExpertId,
+) {
+  if (expert === "interpretable_rules") return evaluation.rulesProbability;
+  if (expert === "logistic") return evaluation.logisticProbability;
+  if (expert === "black_box") return evaluation.blackBoxProbability;
+  return evaluation.baseline;
 }
 
 function compareCandidateEvaluation(

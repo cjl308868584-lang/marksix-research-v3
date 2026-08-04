@@ -21,6 +21,7 @@ let buildSnapshot: (input: {
   generatedAt: string;
   ruleStates?: Record<string, Record<string, unknown>>;
   researchArtifact?: Record<string, unknown>;
+  formalChampion?: "baseline" | "interpretable_rules" | "logistic" | "black_box" | null;
 }) => any;
 let baseline: (
   scope: string,
@@ -96,6 +97,41 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
     assert.doesNotMatch(event.predictionLabel, /候选号码|最高交集号码|号码前三/);
     assert.equal(event.experts.length, 4);
   }
+});
+
+test("shadow experts remain diagnostic and cannot change the formal probability", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  assert.equal(snapshot.mode, "shadow");
+  assert.ok(
+    snapshot.events.some((event: any) =>
+      Math.abs(event.experimentalProbability - event.baselineProbability) > 1e-9
+    ),
+    "fixture must contain a non-baseline shadow estimate",
+  );
+  for (const event of snapshot.events) {
+    assert.equal(event.probability, event.baselineProbability);
+    assert.equal(event.uplift, 0);
+  }
+});
+
+test("persisted formal champion evidence makes verified mode reachable", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+    formalChampion: "interpretable_rules",
+  });
+  assert.equal(snapshot.mode, "formal");
+  assert.ok(snapshot.events.every((event: any) => event.evidenceTier === "verified"));
+  assert.ok(snapshot.events.every((event: any) => event.probability === event.experts.find((expert: any) => expert.modelId === "interpretable_rules").probability));
 });
 
 test("coverage and position baselines use exact without-replacement probabilities", () => {
@@ -326,7 +362,7 @@ test("successful active rule states strengthen their next-forecast contribution"
   }
 });
 
-test("validated Python rule artifacts contribute to the next high-probability event", () => {
+test("baseline-only Python artifacts contribute only to the experimental track", () => {
   const draws = makeHistory(160);
   const input = {
     game: "new_macau" as const,
@@ -399,6 +435,9 @@ test("validated Python rule artifacts contribute to the next high-probability ev
       (rule: any) => rule.window === "python" && rule.ruleId === "python-zodiac-transfer",
     ),
   );
+  assert.equal(snapshot.mode, "shadow");
+  assert.equal(snapshot.events[0].probability, snapshot.events[0].baselineProbability);
+  assert.ok(snapshot.events[0].experimentalProbability >= snapshot.events[0].probability);
 });
 
 function makeHistory(count: number): Draw[] {
