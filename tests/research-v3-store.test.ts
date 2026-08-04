@@ -87,6 +87,19 @@ type StoreModule = {
     response: unknown,
     completedAt: string,
   ): Promise<boolean>;
+  evaluateChampionEvidence(rows: Array<{
+    target_issue: string;
+    model_id: "baseline" | "interpretable_rules" | "logistic" | "black_box";
+    probability: number;
+    status: string;
+    actual_matched: number;
+  }>): {
+    champion: string;
+    formalChampion: string | null;
+    sampleIssues: number;
+    confidenceLowerBound: number;
+    randomChampionPercentile: number;
+  };
 };
 let store: StoreModule;
 const testRuntime = globalThis as typeof globalThis & {
@@ -148,3 +161,51 @@ test("concurrent task claims allow exactly one learner and restore the immutable
   });
   assert.equal(conflict.status, "conflict");
 });
+
+test("champion evidence counts independent issues rather than four correlated slots", () => {
+  const rows = championRows(20);
+  const evidence = store.evaluateChampionEvidence(rows);
+  assert.equal(evidence.sampleIssues, 20);
+  assert.equal(evidence.champion, "interpretable_rules");
+  assert.equal(evidence.formalChampion, null);
+});
+
+test("a challenger is verified only after issue-level confidence and random gates pass", () => {
+  const evidence = store.evaluateChampionEvidence(championRows(50));
+  assert.equal(evidence.sampleIssues, 50);
+  assert.equal(evidence.champion, "logistic");
+  assert.equal(evidence.formalChampion, "logistic");
+  assert.ok(evidence.confidenceLowerBound > 0);
+  assert.ok(evidence.randomChampionPercentile >= 0.99);
+});
+
+function championRows(issueCount: number) {
+  return Array.from({ length: issueCount }, (_, issueIndex) =>
+    Array.from({ length: 4 }, (__, slotIndex) => {
+      const actual = (issueIndex + slotIndex) % 2;
+      return ([
+        {
+          target_issue: String(2026001 + issueIndex),
+          model_id: "baseline" as const,
+          probability: 0.5,
+          status: "active",
+          actual_matched: actual,
+        },
+        {
+          target_issue: String(2026001 + issueIndex),
+          model_id: "interpretable_rules" as const,
+          probability: 0.5,
+          status: "active",
+          actual_matched: actual,
+        },
+        {
+          target_issue: String(2026001 + issueIndex),
+          model_id: "logistic" as const,
+          probability: actual ? 0.6 : 0.4,
+          status: "shadow",
+          actual_matched: actual,
+        },
+      ]);
+    }).flat()
+  ).flat();
+}

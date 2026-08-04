@@ -133,8 +133,15 @@ export function buildResearchV3Snapshot({
         )
       )
       .sort(compareCandidateEvaluation);
+    const selectionHistory = outerSelectionHistory(
+      slot,
+      candidates,
+      chronological,
+    );
     return toEventForecast(
-      evaluations[0],
+      selectionHistory
+        ? { ...evaluations[0], history: selectionHistory }
+        : evaluations[0],
       chronological,
       expectedDrawAt,
       formalChampion,
@@ -200,6 +207,100 @@ export function buildResearchV3Snapshot({
     },
     notice:
       "只预测四类40%–70%基线事件；原始号码仅用于计算分类特征，不作为预测输出。",
+  };
+}
+
+function outerSelectionHistory(
+  slot: ResearchEventSlot,
+  candidates: Candidate[],
+  draws: Draw[],
+): ResearchEventHistory | null {
+  if (draws.length < MIN_TRAINING_ROWS + 5) return null;
+  const starts = [0.5, 0.6, 0.7, 0.8, 0.9].map((ratio) =>
+    Math.max(MIN_TRAINING_ROWS, Math.floor(draws.length * ratio))
+  );
+  const outcomes: number[] = [];
+  const predictions: number[] = [];
+  const baselines: number[] = [];
+  const foldSkills: number[] = [];
+  starts.forEach((start, foldIndex) => {
+    const end = foldIndex === starts.length - 1 ? draws.length : starts[foldIndex + 1];
+    if (end <= start) return;
+    const training = draws.slice(0, start);
+    const test = draws.slice(start, end);
+    const selected = candidates
+      .filter((candidate) => candidate.slot === slot)
+      .map((candidate) => evaluateCandidate(candidate, training, test[0].drawAt))
+      .sort(compareCandidateEvaluation)[0];
+    if (!selected) return;
+    const foldOutcomes: number[] = [];
+    const foldPredictions: number[] = [];
+    const foldBaselines: number[] = [];
+    for (const draw of test) {
+      const outcome = actualValues(
+        selected.candidate.scope,
+        selected.candidate.family,
+        draw,
+      ).has(selected.candidate.value) ? 1 : 0;
+      const baseline = exactEventBaseline(
+        selected.candidate.scope,
+        selected.candidate.family,
+        selected.candidate.value,
+        draw.drawAt,
+      );
+      const prediction = clamp(
+        baseline + (selected.probability - selected.baseline),
+        0.4,
+        0.7,
+      );
+      foldOutcomes.push(outcome);
+      foldPredictions.push(prediction);
+      foldBaselines.push(baseline);
+    }
+    const modelBrier = average(
+      foldPredictions.map((probability, index) =>
+        square(probability - foldOutcomes[index])
+      ),
+    );
+    const baselineBrier = average(
+      foldBaselines.map((probability, index) =>
+        square(probability - foldOutcomes[index])
+      ),
+    );
+    foldSkills.push(baselineBrier > 0 ? 1 - modelBrier / baselineBrier : 0);
+    outcomes.push(...foldOutcomes);
+    predictions.push(...foldPredictions);
+    baselines.push(...foldBaselines);
+  });
+  if (!outcomes.length) return null;
+  const hits = outcomes.reduce((sum, outcome) => sum + outcome, 0);
+  const modelBrier = average(
+    predictions.map((probability, index) => square(probability - outcomes[index])),
+  );
+  const baselineBrier = average(
+    baselines.map((probability, index) => square(probability - outcomes[index])),
+  );
+  const modelLogLoss = average(
+    predictions.map((probability, index) => binaryLogLoss(outcomes[index], probability)),
+  );
+  const baselineLogLoss = average(
+    baselines.map((probability, index) => binaryLogLoss(outcomes[index], probability)),
+  );
+  return {
+    sampleSize: outcomes.length,
+    hits,
+    hitRate: hits / outcomes.length,
+    expectedHits: baselines.reduce((sum, baseline) => sum + baseline, 0),
+    brierSkill: baselineBrier > 0 ? 1 - modelBrier / baselineBrier : 0,
+    logLossSkill: baselineLogLoss > 0 ? 1 - modelLogLoss / baselineLogLoss : 0,
+    nonWorseFoldRatio: foldSkills.filter((value) => value >= 0).length /
+      Math.max(foldSkills.length, 1),
+    calibrationError: Math.abs(average(predictions) - average(outcomes)),
+    posteriorAdvantage: probabilityAdvantageProbability(
+      hits,
+      outcomes.length,
+      average(baselines),
+    ),
   };
 }
 

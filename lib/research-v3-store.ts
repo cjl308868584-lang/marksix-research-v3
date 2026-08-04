@@ -262,7 +262,31 @@ export async function settleResearchV3Forecasts(
       if (!isResearchV3Snapshot(parsed)) continue;
       const draw = verifiedByIssue.get(parsed.targetIssue);
       if (!draw) continue;
-      const review = buildResearchV3Review(parsed, draw, settledAt);
+      const preliminaryReview = buildResearchV3Review(parsed, draw, settledAt);
+      const priorEvidenceRows = await readChampionEvidenceRows(db, parsed.game);
+      const currentEvidenceRows: ChampionEvidenceRow[] = preliminaryReview.events
+        .flatMap((event) => event.modelWeightsBefore.map((model) => ({
+          target_issue: parsed.targetIssue,
+          model_id: model.modelId,
+          probability: model.probability,
+          status: model.status,
+          actual_matched: event.actualMatched ? 1 : 0,
+        })));
+      const evaluatedDecision = evaluateChampionEvidence([
+        ...priorEvidenceRows,
+        ...currentEvidenceRows,
+      ]);
+      const persistedChampion = await readPersistedFormalChampion(db, parsed.game);
+      const championDecision = withPersistedChampion(
+        evaluatedDecision,
+        persistedChampion,
+      );
+      const review = buildResearchV3Review(
+        parsed,
+        draw,
+        settledAt,
+        championDecision,
+      );
       const claimed = await claimResearchSettlement(
         db,
         parsed.runId,
@@ -890,6 +914,9 @@ export async function readChampionChallengeState(game: GameId): Promise<{
   champion: ResearchExpertId;
   challenger: ResearchExpertId | null;
   sampleIssues: number;
+  formalChampion: ResearchExpertId | null;
+  confidenceLowerBound: number;
+  randomChampionPercentile: number;
 }> {
   const db = runtime.__marksixD1;
   if (!db) {
@@ -897,100 +924,176 @@ export async function readChampionChallengeState(game: GameId): Promise<{
       champion: "interpretable_rules",
       challenger: "logistic",
       sampleIssues: 0,
+      formalChampion: null,
+      confidenceLowerBound: 0,
+      randomChampionPercentile: 0,
     };
   }
   try {
-    const rows = await db.prepare(
-      `SELECT mw.target_issue, mw.model_id, mw.probability, mw.status,
-              es.actual_matched, es.scored_at
-       FROM research_model_weights mw
-       JOIN research_event_scores es
-         ON es.run_id = mw.run_id AND es.slot = mw.slot
-       WHERE mw.game = ?
-       ORDER BY es.scored_at DESC
-       LIMIT 400`,
-    ).bind(game).all<{
-      target_issue: string;
-      model_id: ResearchExpertId;
-      probability: number;
-      status: string;
-      actual_matched: number;
-      scored_at: string;
-    }>();
-    const issueOrder: string[] = [];
-    for (const row of rows.results ?? []) {
-      if (!issueOrder.includes(row.target_issue)) issueOrder.push(row.target_issue);
-      if (issueOrder.length >= 20) break;
-    }
-    const issueSet = new Set(issueOrder);
-    const eligible = (rows.results ?? []).filter((row) =>
-      issueSet.has(row.target_issue) && row.status !== "blocked"
+    const [rows, persistedChampion] = await Promise.all([
+      readChampionEvidenceRows(db, game),
+      readPersistedFormalChampion(db, game),
+    ]);
+    return withPersistedChampion(
+      evaluateChampionEvidence(rows),
+      persistedChampion,
     );
-    const metrics = new Map<
-      ResearchExpertId,
-      { brier: number[]; probability: number[]; outcome: number[] }
-    >();
-    eligible.forEach((row) => {
-      const group = metrics.get(row.model_id) ?? {
-        brier: [],
-        probability: [],
-        outcome: [],
-      };
-      const outcome = row.actual_matched ? 1 : 0;
-      group.brier.push((row.probability - outcome) ** 2);
-      group.probability.push(row.probability);
-      group.outcome.push(outcome);
-      metrics.set(row.model_id, group);
-    });
-    const score = (model: ResearchExpertId) => {
-      const group = metrics.get(model);
-      return {
-        sample: group?.brier.length ?? 0,
-        brier: average(group?.brier ?? []),
-        calibration: Math.abs(
-          average(group?.probability ?? []) - average(group?.outcome ?? []),
-        ),
-      };
-    };
-    const rules = score("interpretable_rules");
-    const logistic = score("logistic");
-    const blackBox = score("black_box");
-    let champion: ResearchExpertId = "interpretable_rules";
-    if (
-      issueOrder.length >= 20 &&
-      logistic.sample >= 80 &&
-      logistic.brier < rules.brier &&
-      logistic.calibration <= rules.calibration + 0.01
-    ) {
-      champion = "logistic";
-    }
-    if (
-      issueOrder.length >= 20 &&
-      blackBox.sample >= 80 &&
-      blackBox.brier < Math.min(rules.brier, logistic.brier) &&
-      blackBox.calibration <= Math.min(rules.calibration, logistic.calibration) + 0.01
-    ) {
-      champion = "black_box";
-    }
-    const ranked = (
-      ["interpretable_rules", "logistic", "black_box"] as ResearchExpertId[]
-    )
-      .filter((model) => model !== champion && score(model).sample > 0)
-      .sort((left, right) => score(left).brier - score(right).brier);
-    return {
-      champion,
-      challenger: ranked[0] ?? (champion === "logistic"
-        ? "interpretable_rules"
-        : "logistic"),
-      sampleIssues: issueOrder.length,
-    };
   } catch {
     return {
       champion: "interpretable_rules",
       challenger: "logistic",
       sampleIssues: 0,
+      formalChampion: null,
+      confidenceLowerBound: 0,
+      randomChampionPercentile: 0,
     };
   }
+}
+
+async function readChampionEvidenceRows(db: D1Database, game: GameId) {
+  const rows = await db.prepare(
+    `SELECT mw.target_issue, mw.model_id, mw.probability, mw.status,
+            es.actual_matched
+     FROM research_model_weights mw
+     JOIN research_event_scores es
+       ON es.run_id = mw.run_id AND es.slot = mw.slot
+     WHERE mw.game = ?
+     ORDER BY es.scored_at DESC
+     LIMIT 2000`,
+  ).bind(game).all<ChampionEvidenceRow>();
+  return rows.results ?? [];
+}
+
+async function readPersistedFormalChampion(
+  db: D1Database,
+  game: GameId,
+): Promise<ResearchExpertId | null> {
+  const row = await db.prepare(
+    `SELECT champion_after
+     FROM research_learning_runs
+     WHERE game = ? AND challenger_promoted = 1
+     ORDER BY completed_at DESC
+     LIMIT 1`,
+  ).bind(game).first<{ champion_after: ResearchExpertId }>();
+  return row?.champion_after ?? null;
+}
+
+function withPersistedChampion<T extends ReturnType<typeof evaluateChampionEvidence>>(
+  evidence: T,
+  persistedChampion: ResearchExpertId | null,
+) {
+  if (evidence.formalChampion || !persistedChampion) return evidence;
+  return {
+    ...evidence,
+    champion: persistedChampion,
+    formalChampion: persistedChampion,
+  };
+}
+
+type ChampionEvidenceRow = {
+  target_issue: string;
+  model_id: ResearchExpertId;
+  probability: number;
+  status: string;
+  actual_matched: number;
+};
+
+export function evaluateChampionEvidence(rows: ChampionEvidenceRow[]) {
+  const eligible = rows.filter((row) => row.status !== "blocked");
+  const issueIds = [...new Set(eligible.map((row) => row.target_issue))];
+  const byModelIssue = new Map<string, { losses: number[]; probabilities: number[]; outcomes: number[] }>();
+  for (const row of eligible) {
+    const key = `${row.model_id}:${row.target_issue}`;
+    const group = byModelIssue.get(key) ?? { losses: [], probabilities: [], outcomes: [] };
+    const outcome = row.actual_matched ? 1 : 0;
+    group.losses.push((row.probability - outcome) ** 2);
+    group.probabilities.push(row.probability);
+    group.outcomes.push(outcome);
+    byModelIssue.set(key, group);
+  }
+  const issueLosses = (model: ResearchExpertId) => issueIds.flatMap((issue) => {
+    const group = byModelIssue.get(`${model}:${issue}`);
+    return group ? [{ issue, loss: average(group.losses) }] : [];
+  });
+  const calibration = (model: ResearchExpertId) => {
+    const groups = issueIds.flatMap((issue) => {
+      const group = byModelIssue.get(`${model}:${issue}`);
+      return group ? [group] : [];
+    });
+    return Math.abs(
+      average(groups.flatMap((group) => group.probabilities)) -
+        average(groups.flatMap((group) => group.outcomes)),
+    );
+  };
+  const baseline = new Map(issueLosses("baseline").map((row) => [row.issue, row.loss]));
+  const candidates = (["interpretable_rules", "logistic", "black_box"] as ResearchExpertId[])
+    .map((model) => {
+      const differences = issueLosses(model).flatMap((row) => {
+        const baselineLoss = baseline.get(row.issue);
+        return baselineLoss === undefined ? [] : [baselineLoss - row.loss];
+      });
+      const improvement = average(differences);
+      const confidenceLowerBound = meanLowerBound(differences);
+      const randomChampionPercentile = signFlipPercentile(differences);
+      return {
+        model,
+        issues: differences.length,
+        improvement,
+        confidenceLowerBound,
+        randomChampionPercentile,
+        calibration: calibration(model),
+      };
+    })
+    .filter((candidate) => candidate.issues > 0)
+    .sort((left, right) => right.improvement - left.improvement);
+  const best = candidates[0];
+  const baselineCalibration = calibration("baseline");
+  const verified = Boolean(
+    best &&
+      best.issues >= 50 &&
+      best.improvement >= 0.005 &&
+      best.confidenceLowerBound > 0 &&
+      best.randomChampionPercentile >= 0.99 &&
+      best.calibration <= baselineCalibration + 0.01
+  );
+  const champion: ResearchExpertId = verified && best
+    ? best.model
+    : "interpretable_rules";
+  return {
+    champion,
+    challenger: candidates.find((candidate) => candidate.model !== champion)?.model ??
+      (champion === "logistic" ? "interpretable_rules" : "logistic"),
+    sampleIssues: issueIds.length,
+    formalChampion: verified ? champion : null,
+    confidenceLowerBound: best?.confidenceLowerBound ?? 0,
+    randomChampionPercentile: best?.randomChampionPercentile ?? 0,
+  };
+}
+
+function meanLowerBound(values: number[]) {
+  if (values.length < 2) return Number.NEGATIVE_INFINITY;
+  const mean = average(values);
+  const variance = values.reduce((sum, value) => sum + (value - mean) ** 2, 0) /
+    (values.length - 1);
+  return mean - 1.96 * Math.sqrt(variance / values.length);
+}
+
+function signFlipPercentile(values: number[]) {
+  if (!values.length) return 0;
+  const observed = average(values);
+  if (observed <= 0) return 0;
+  let state = 0x6d2b79f5;
+  let atLeastObserved = 0;
+  const simulations = 10_000;
+  for (let simulation = 0; simulation < simulations; simulation += 1) {
+    let sum = 0;
+    for (const value of values) {
+      state = (Math.imul(state ^ (state >>> 15), 1 | state) + 0x9e3779b9) >>> 0;
+      sum += (state & 1) === 0 ? value : -value;
+    }
+    if (sum / values.length >= observed - 1e-12) atLeastObserved += 1;
+  }
+  return 1 - (atLeastObserved + 1) / (simulations + 1);
 }
 
 async function freezeEvents(db: D1Database, snapshot: ResearchV3Snapshot) {

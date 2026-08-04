@@ -9,6 +9,7 @@ import {
   type ResearchV3Performance,
   type ResearchV3Review,
   type ResearchV3Snapshot,
+  type ResearchChampionDecision,
 } from "./research-v3-types";
 
 const LEARNING_RATE = 0.2;
@@ -20,6 +21,7 @@ export function buildResearchV3Review(
   snapshot: ResearchV3Snapshot,
   draw: Draw,
   settledAt: string,
+  championDecision?: ResearchChampionDecision,
 ): ResearchV3Review {
   if (snapshot.game !== draw.game || snapshot.targetIssue !== draw.issue) {
     throw new Error("v3 snapshot and draw do not match");
@@ -47,7 +49,8 @@ export function buildResearchV3Review(
   const weightLeaderAfter = mode(
     events.map((event) => champion(event.modelWeightsAfter)),
   );
-  const championAfter = championBefore;
+  const championAfter = championDecision?.formalChampion ?? championBefore;
+  const challengerPromoted = championAfter !== championBefore;
   const driftDetected = events.some((event) =>
     event.diagnosis.some((item) => item.includes("漂移"))
   );
@@ -91,10 +94,11 @@ export function buildResearchV3Review(
       status: "completed",
       championBefore,
       championAfter,
-      challengerPromoted: false,
+      challengerPromoted,
       driftDetected,
-      summary:
-        weightLeaderAfter === championBefore
+      summary: challengerPromoted
+        ? `${modelLabel(championAfter)}完成${championDecision?.sampleIssues ?? 0}期独立前瞻、置信下界及随机挑战验证，正式晋级为冠军。`
+        : weightLeaderAfter === championBefore
           ? `冠军保持为${modelLabel(championAfter)}；单期结果只更新权重，不触发模型替换。`
           : `${modelLabel(weightLeaderAfter)}成为本期权重领先者，但未完成连续20期验证，冠军仍为${modelLabel(championBefore)}。`,
     },

@@ -224,6 +224,15 @@ export type ResearchLearningRun = {
   summary: string;
 };
 
+export type ResearchChampionDecision = {
+  champion: ResearchExpertId;
+  challenger?: ResearchExpertId | null;
+  formalChampion: ResearchExpertId | null;
+  sampleIssues: number;
+  confidenceLowerBound: number;
+  randomChampionPercentile: number;
+};
+
 export type ResearchV3Review = {
   reviewVersion: typeof RESEARCH_V3_REVIEW_VERSION;
   runId: string;

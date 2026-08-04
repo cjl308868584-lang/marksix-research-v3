@@ -29,7 +29,7 @@ let baseline: (
   value: string,
   drawAt: string,
 ) => number;
-let buildReview: (snapshot: any, draw: Draw, settledAt: string) => any;
+let buildReview: (snapshot: any, draw: Draw, settledAt: string, decision?: any) => any;
 let buildPerformance: (game: "new_macau", reviews: any[]) => any;
 let zodiacFor: (number: number, drawAt: string) => string;
 let cycleAction: (
@@ -134,6 +134,21 @@ test("persisted formal champion evidence makes verified mode reachable", () => {
   assert.ok(snapshot.events.every((event: any) => event.probability === event.experts.find((expert: any) => expert.modelId === "interpretable_rules").probability));
 });
 
+test("reported model history comes only from outer walk-forward selection rows", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  for (const event of snapshot.events) {
+    assert.equal(event.history.sampleSize, 30);
+    assert.ok(event.history.hits <= event.history.sampleSize);
+    assert.ok(event.history.expectedHits > 0);
+  }
+});
+
 test("coverage and position baselines use exact without-replacement probabilities", () => {
   const drawAt = "2026-10-01T21:32:32+08:00";
   const zodiac = baseline("draw.6_plus_1", "zodiac", "鼠", drawAt);
@@ -212,6 +227,36 @@ test("verified settlement scores frozen events before updating weights", () => {
     assert.ok(Number.isFinite(event.brier));
     assert.ok(Number.isFinite(event.logLoss));
   }
+});
+
+test("learning review records a validated champion promotion", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const draw: Draw = {
+    game: "new_macau",
+    issue: "2026999",
+    drawAt: "2026-10-01T21:32:32+08:00",
+    numbers: [1, 12, 23, 34, 45, 49],
+    special: 8,
+    source: "双源一致测试",
+    verified: true,
+  };
+  const review = buildReview(snapshot, draw, "2026-10-01T21:35:00+08:00", {
+    champion: "logistic",
+    formalChampion: "logistic",
+    sampleIssues: 50,
+    confidenceLowerBound: 0.01,
+    randomChampionPercentile: 0.995,
+  });
+  assert.equal(review.learningRun.championBefore, "interpretable_rules");
+  assert.equal(review.learningRun.championAfter, "logistic");
+  assert.equal(review.learningRun.challengerPromoted, true);
+  assert.match(review.learningRun.summary, /完成.*验证|晋级/);
 });
 
 test("review summary does not call a high hit count an advantage when probability scoring loses", () => {

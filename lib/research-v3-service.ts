@@ -160,6 +160,7 @@ export async function runResearchV3Cycle({
     settledForecasts,
     champion: challengeState.champion,
     challenger: challengeState.challenger,
+    formalChampion: challengeState.formalChampion,
   });
   const envelope: ResearchV3Envelope = {
     snapshot,
