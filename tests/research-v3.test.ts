@@ -474,6 +474,7 @@ test("baseline-only Python artifacts contribute only to the experimental track",
     blackBox: { status: "blocked", reason: "sample_lt_1000" },
     formalDecision: "baseline_only",
   };
+  const withoutArtifact = buildSnapshot(input);
   const snapshot = buildSnapshot({ ...input, researchArtifact: artifact });
   assert.ok(
     snapshot.events[0].ruleContributions.some(
@@ -483,6 +484,10 @@ test("baseline-only Python artifacts contribute only to the experimental track",
   assert.equal(snapshot.mode, "shadow");
   assert.equal(snapshot.events[0].probability, snapshot.events[0].baselineProbability);
   assert.ok(snapshot.events[0].experimentalProbability >= snapshot.events[0].probability);
+  const rulesProbability = (value: any) => value.events[0].experts.find(
+    (expert: any) => expert.modelId === "interpretable_rules",
+  ).probability;
+  assert.equal(rulesProbability(snapshot), rulesProbability(withoutArtifact));
 });
 
 function makeHistory(count: number): Draw[] {

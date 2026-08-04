@@ -428,8 +428,12 @@ function evaluateCandidate(
   const rulesProbability = clamp(
     contributions[0].posteriorRate * 0.45 +
       contributions[1].posteriorRate * 0.35 +
-      contributions[2].posteriorRate * 0.2 +
-      pythonAdjustment,
+      contributions[2].posteriorRate * 0.2,
+    0.4,
+    0.7,
+  );
+  const experimentalRulesProbability = clamp(
+    rulesProbability + pythonAdjustment,
     0.4,
     0.7,
   );
@@ -444,7 +448,7 @@ function evaluateCandidate(
   });
   const probability = clamp(
     weights.baseline * baseline +
-      weights.interpretable_rules * rulesProbability +
+      weights.interpretable_rules * experimentalRulesProbability +
       weights.logistic * logistic.probability +
       weights.black_box * blackBoxProbability,
     0.4,
