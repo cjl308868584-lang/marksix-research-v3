@@ -160,13 +160,18 @@ test("scheduled learning sends Python artifacts and verified-only data through t
   const crons = [...workflow.matchAll(/cron:\s*["']([^"']+)["']/g)].map(
     (match) => match[1],
   );
-  assert.deepEqual(crons, ["40 13 * * *", "50 13 * * *", "4 14 * * *"]);
+  assert.deepEqual(crons, [
+    "40,45,50,55 13 * * *",
+    "0,5,10,15,20,25,30 14 * * *",
+  ]);
   assert.match(workflow, /matrix:[\s\S]*game:\s*\[hk, new_macau\]/);
   assert.match(workflow, /fail-fast:\s*false/);
   assert.match(workflow, /group:\s*research-v3-learning-\$\{\{ github\.ref \}\}/);
   assert.doesNotMatch(workflow, /github\.event\.schedule/);
   assert.match(workflow, /marksix-research cycle[\s\S]*--game "\$GAME"/);
   assert.match(workflow, /marksix-research health-check[\s\S]*--game "\$GAME"/);
+  assert.match(workflow, /check-update[\s\S]*should_run/);
+  assert.match(workflow, /steps\.update_check\.outputs\.should_run == 'true'/);
   assert.doesNotMatch(workflow, /--max-wait-seconds\s+3600/);
   assert.doesNotMatch(workflow, /npm run test:ai|npm run typecheck/);
   assert.match(workflow, /test -n "\$RESEARCH_SECRET"/);

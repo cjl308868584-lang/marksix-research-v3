@@ -17,6 +17,26 @@ from marksix_research.cli import capture_task_id
 
 
 class ResearchPipelineTest(unittest.TestCase):
+    def test_update_gate_only_runs_when_verified_result_reaches_frozen_target(self):
+        cases = (
+            ("2026216", True, "2026217", False, "forecast_ahead"),
+            ("2026217", True, "2026217", True, "verified_result_ready"),
+            ("2026217", False, "2026217", False, "awaiting_verification"),
+        )
+        for latest_issue, verified, target_issue, expected, reason in cases:
+            with self.subTest(reason=reason):
+                responses = [
+                    {"draws": [self._draw_payload(latest_issue, verified)]},
+                    {"targetIssue": target_issue},
+                ]
+                with patch.object(cli, "fetch_json", side_effect=responses):
+                    result = cli.check_update_required(
+                        "https://example.test",
+                        "new_macau",
+                    )
+                self.assertEqual(result["shouldRun"], expected)
+                self.assertEqual(result["reason"], reason)
+
     def test_single_game_sync_only_requests_the_selected_game(self):
         payload = {
             "game": "new_macau",

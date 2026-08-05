@@ -64,6 +64,13 @@ def main() -> None:
     health.add_argument("--site-url", required=True)
     health.add_argument("--game", choices=("hk", "new_macau"), required=True)
 
+    update_check = subparsers.add_parser(
+        "check-update",
+        help="check whether a verified result has reached the frozen target",
+    )
+    update_check.add_argument("--site-url", required=True)
+    update_check.add_argument("--game", choices=("hk", "new_macau"), required=True)
+
     args = parser.parse_args()
     if args.command == "sync-history":
         sync_history(args.site_url, args.output)
@@ -78,7 +85,9 @@ def main() -> None:
         )
         print(json.dumps(result["resourceFunnel"], ensure_ascii=False))
         return
-    if args.command == "health-check":
+    if args.command == "check-update":
+        result = check_update_required(args.site_url, args.game)
+    elif args.command == "health-check":
         result = verify_production_health(args.site_url, args.game)
     elif args.command == "cycle":
         result = run_cycle(
@@ -221,6 +230,50 @@ def verify_production_health(
         "game": game,
         "settledIssue": latest_issue,
         "targetIssue": target_issue,
+    }
+
+
+def check_update_required(
+    site_url: str,
+    game: str,
+) -> dict[str, object]:
+    """Return whether the latest verified result is ready to be settled."""
+    if game not in ("hk", "new_macau"):
+        raise ValueError(f"unsupported game: {game}")
+    base = site_url.rstrip("/")
+    lottery = fetch_json(
+        f"{base}/api/lottery?game={game}&limit=1",
+        f"{base}/",
+    )
+    draws = lottery.get("draws")
+    if not isinstance(draws, list) or not draws or not isinstance(draws[0], dict):
+        raise RuntimeError(f"{game} latest draw unavailable")
+    latest = draws[0]
+    latest_issue = str(latest.get("issue") or "")
+    if not latest_issue:
+        raise RuntimeError(f"{game} latest draw issue unavailable")
+    if latest.get("verified") is not True:
+        return {
+            "shouldRun": False,
+            "reason": "awaiting_verification",
+            "game": game,
+            "latestIssue": latest_issue,
+        }
+
+    forecast = fetch_json(
+        f"{base}/api/research/forecast?game={game}",
+        f"{base}/research",
+    )
+    target_issue = str(forecast.get("targetIssue") or "")
+    should_run = not target_issue or (
+        _issue_number(latest_issue) >= _issue_number(target_issue)
+    )
+    return {
+        "shouldRun": should_run,
+        "reason": "verified_result_ready" if should_run else "forecast_ahead",
+        "game": game,
+        "latestIssue": latest_issue,
+        "targetIssue": target_issue or None,
     }
 
 

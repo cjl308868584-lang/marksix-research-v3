@@ -3,10 +3,10 @@ name: Research v3 settle, learn and freeze
 on:
   workflow_dispatch:
   schedule:
-    # GitHub cron is UTC: 21:40, 21:50 and 22:04 Asia/Shanghai.
-    - cron: "40 13 * * *"
-    - cron: "50 13 * * *"
-    - cron: "4 14 * * *"
+    # GitHub cron is best-effort. Poll every five minutes from 21:40 to 22:30
+    # Asia/Shanghai, then let the update gate skip all duplicate work.
+    - cron: "40,45,50,55 13 * * *"
+    - cron: "0,5,10,15,20,25,30 14 * * *"
 
 permissions:
   contents: read
@@ -30,16 +30,32 @@ jobs:
       GAME: ${{ matrix.game }}
     steps:
       - uses: actions/checkout@v5
+      - name: Verify update-check configuration
+        run: test -n "$SITE_URL"
+      - name: Check whether this game needs settlement
+        id: update_check
+        run: |
+          result="$(PYTHONPATH=research/src python3 -m marksix_research.cli check-update \
+            --site-url "$SITE_URL" \
+            --game "$GAME")"
+          echo "$result"
+          should_run="$(printf '%s' "$result" | python3 -c \
+            'import json,sys; print(str(json.load(sys.stdin)["shouldRun"]).lower())')"
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
       - uses: actions/setup-python@v6
+        if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         with:
           python-version: "3.12"
           cache: pip
       - run: pip install -e research
+        if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
       - name: Verify production automation configuration
+        if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
           test -n "$SITE_URL"
           test -n "$RESEARCH_SECRET"
       - name: Resync, research, settle and freeze this game
+        if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
           mkdir -p "research-artifacts/$GAME"
           marksix-research cycle \
@@ -49,13 +65,14 @@ jobs:
             --output-dir "research-artifacts/$GAME" \
             | tee "research-artifacts/$GAME/cycle-status.json"
       - name: Verify latest verified issue advanced
+        if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
           marksix-research health-check \
             --site-url "$SITE_URL" \
             --game "$GAME" \
             | tee "research-artifacts/$GAME/health-status.json"
       - uses: actions/upload-artifact@v6
-        if: always()
+        if: always() && (github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true')
         with:
           name: research-v3-${{ matrix.game }}-${{ github.run_id }}
           path: research-artifacts/${{ matrix.game }}
