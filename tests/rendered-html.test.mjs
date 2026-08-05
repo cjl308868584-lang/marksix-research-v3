@@ -163,6 +163,7 @@ test("scheduled learning sends Python artifacts and verified-only data through t
   assert.deepEqual(crons, [
     "40,45,50,55 13 * * *",
     "0,5,10,15,20,25,30 14 * * *",
+    "17 */2 * * *",
   ]);
   assert.match(workflow, /matrix:[\s\S]*game:\s*\[hk, new_macau\]/);
   assert.match(workflow, /fail-fast:\s*false/);

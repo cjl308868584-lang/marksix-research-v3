@@ -7,6 +7,8 @@ on:
     # Asia/Shanghai, then let the update gate skip all duplicate work.
     - cron: "40,45,50,55 13 * * *"
     - cron: "0,5,10,15,20,25,30 14 * * *"
+    # All-day backstop: recover automatically even if GitHub drops the draw window.
+    - cron: "17 */2 * * *"
 
 permissions:
   contents: read
