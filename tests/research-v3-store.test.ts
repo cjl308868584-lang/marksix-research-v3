@@ -76,6 +76,7 @@ type Claim =
   | { status: "claimed" | "processing" | "conflict" | "unavailable" }
   | { status: "existing"; response: unknown };
 type StoreModule = {
+  isResearchV3Snapshot(value: unknown): boolean;
   claimResearchTask(input: {
     taskId: string;
     game: "new_macau";
@@ -122,6 +123,28 @@ after(async () => {
   delete testRuntime.__marksixD1;
   delete testRuntime.__marksixResearchV3SchemaReady;
   await server.close();
+});
+
+test("snapshot reader accepts frozen v3.0 ledgers but rejects unknown future engines", () => {
+  const snapshot = {
+    schemaVersion: "3",
+    engineVersion: "high-probability-events-v3.0",
+    modelVersion: "champion-challenger-v3.0-deadbeef",
+    runId: "legacy_run",
+    game: "new_macau",
+    targetIssue: "2026218",
+    events: Array.from({ length: 4 }, (_, index) => ({
+      eventId: `legacy_${index}`,
+      probability: 0.5,
+      baselineProbability: 0.5,
+    })),
+  };
+  assert.equal(store.isResearchV3Snapshot(snapshot), true);
+  assert.equal(store.isResearchV3Snapshot({
+    ...snapshot,
+    engineVersion: "high-probability-events-v4.0",
+    modelVersion: "champion-challenger-v4.0-deadbeef",
+  }), false);
 });
 
 test("concurrent task claims allow exactly one learner and restore the immutable result", async () => {

@@ -6,6 +6,8 @@ import {
 } from "./research-v3-review";
 import {
   RESEARCH_V3_ENGINE_VERSION,
+  RESEARCH_V3_LEGACY_ENGINE_VERSION,
+  RESEARCH_V3_LEGACY_MODEL_VERSION,
   RESEARCH_V3_MODEL_VERSION,
   RESEARCH_V3_REVIEW_VERSION,
   RESEARCH_V3_SCHEMA_VERSION,
@@ -1194,9 +1196,11 @@ export function isResearchV3Snapshot(
   const snapshot = value as Partial<ResearchV3Snapshot>;
   return (
     snapshot.schemaVersion === RESEARCH_V3_SCHEMA_VERSION &&
-    snapshot.engineVersion === RESEARCH_V3_ENGINE_VERSION &&
+    (snapshot.engineVersion === RESEARCH_V3_ENGINE_VERSION ||
+      snapshot.engineVersion === RESEARCH_V3_LEGACY_ENGINE_VERSION) &&
     typeof snapshot.modelVersion === "string" &&
-    snapshot.modelVersion.startsWith(RESEARCH_V3_MODEL_VERSION) &&
+    (snapshot.modelVersion.startsWith(RESEARCH_V3_MODEL_VERSION) ||
+      snapshot.modelVersion.startsWith(RESEARCH_V3_LEGACY_MODEL_VERSION)) &&
     typeof snapshot.runId === "string" &&
     (snapshot.game === "hk" || snapshot.game === "new_macau") &&
     typeof snapshot.targetIssue === "string" &&

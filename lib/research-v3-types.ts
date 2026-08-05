@@ -3,7 +3,9 @@ import type { GameId } from "./lottery";
 export const RESEARCH_V3_SCHEMA_VERSION = "3" as const;
 export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.1" as const;
 export const RESEARCH_V3_MODEL_VERSION = "champion-challenger-v3.1" as const;
-export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v3.1" as const;
+export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v3" as const;
+export const RESEARCH_V3_LEGACY_ENGINE_VERSION = "high-probability-events-v3.0" as const;
+export const RESEARCH_V3_LEGACY_MODEL_VERSION = "champion-challenger-v3.0" as const;
 
 export type ResearchEventSlot =
   | "zodiac_6_plus_1"
@@ -168,7 +170,9 @@ export type ResearchV3DataQuality = {
 
 export type ResearchV3Snapshot = {
   schemaVersion: typeof RESEARCH_V3_SCHEMA_VERSION;
-  engineVersion: typeof RESEARCH_V3_ENGINE_VERSION;
+  engineVersion:
+    | typeof RESEARCH_V3_ENGINE_VERSION
+    | typeof RESEARCH_V3_LEGACY_ENGINE_VERSION;
   modelVersion: string;
   runId: string;
   game: GameId;
