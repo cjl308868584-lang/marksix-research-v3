@@ -209,7 +209,8 @@ test("history loader cross-verifies the latest issue with an independent endpoin
     assert.match(marksixUrls[0], /[?&]type=newMacau(?:&|$)/);
     assert.match(result.draws[0].source, /交叉一致/);
     assert.equal(result.draws.slice(1).some((draw) => draw.verified), false);
-    assert.match(result.warning ?? "", /独立接口交叉一致校验/);
+    assert.match(result.warning ?? "", /多源一致/);
+    assert.match(result.warning ?? "", /不等同于官方认证/);
     assert.equal(result.rejectedFutureCount, 0);
   } finally {
     globalThis.fetch = originalFetch;

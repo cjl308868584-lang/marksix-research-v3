@@ -117,7 +117,7 @@ export async function loadServerDraws(
         ? `历史源含 ${rejectedFutureCount} 条晚于分析时点的记录，已排除。`
         : null,
       verifiedMatches > 0
-        ? `最新记录已有 ${verifiedMatches} 期通过独立接口交叉一致校验。`
+        ? `最新记录已有 ${verifiedMatches} 期达到多源一致；这表示来源相互吻合，不等同于官方认证。`
         : null,
       verificationConflicts > 0
         ? `检测到 ${verificationConflicts} 期跨源结果冲突，本次不标记为已核验。`

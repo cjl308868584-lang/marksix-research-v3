@@ -100,7 +100,7 @@ export function buildResearchV3Review(
         ? `${modelLabel(championAfter)}完成${championDecision?.sampleIssues ?? 0}期独立前瞻、置信下界及随机挑战验证，正式晋级为冠军。`
         : weightLeaderAfter === championBefore
           ? `冠军保持为${modelLabel(championAfter)}；单期结果只更新权重，不触发模型替换。`
-          : `${modelLabel(weightLeaderAfter)}成为本期权重领先者，但未完成连续20期验证，冠军仍为${modelLabel(championBefore)}。`,
+          : `${modelLabel(weightLeaderAfter)}成为本期权重领先者，但未完成至少50期独立前瞻验证，正式冠军仍为${modelLabel(championBefore)}。`,
     },
     summary: brier < baselineBrier && logLoss < baselineLogLoss
       ? `本期固定四项命中 ${hits}/4（随机预期 ${expectedHits.toFixed(2)} 项），概率评分优于随机基线；这只形成一个新前瞻样本。`
@@ -108,7 +108,7 @@ export function buildResearchV3Review(
         ? `本期固定四项命中 ${hits}/4，虽高于随机预期 ${expectedHits.toFixed(2)} 项，但概率评分仍低于随机基线；模型不会把偶然命中误判为优势。`
         : `本期固定四项命中 ${hits}/4，不高于随机预期 ${expectedHits.toFixed(2)} 项，且概率评分未胜过基线；模型已降低相关证据权重。`,
     nextAction:
-      "本期结果只写入下一期训练集；冠军是否替换仍由连续前瞻Brier、校准和20期挑战窗口决定。",
+      "本期结果只写入下一期训练集；冠军是否替换仍由至少50期独立前瞻Brier、校准和挑战窗口共同决定。",
   };
 }
 

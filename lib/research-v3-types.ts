@@ -1,9 +1,9 @@
 import type { GameId } from "./lottery";
 
 export const RESEARCH_V3_SCHEMA_VERSION = "3" as const;
-export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.0" as const;
-export const RESEARCH_V3_MODEL_VERSION = "champion-challenger-v3.0" as const;
-export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v3" as const;
+export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.1" as const;
+export const RESEARCH_V3_MODEL_VERSION = "champion-challenger-v3.1" as const;
+export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v3.1" as const;
 
 export type ResearchEventSlot =
   | "zodiac_6_plus_1"
@@ -29,6 +29,11 @@ export type ResearchEvidenceTier =
   | "shadow"
   | "challenger"
   | "verified";
+
+export type ResearchDecisionStatus =
+  | "formal"
+  | "research_candidate"
+  | "abstain";
 
 export type ResearchModelWeight = {
   modelId: ResearchExpertId;
@@ -136,6 +141,10 @@ export type ResearchEventForecast = {
   baselineProbability: number;
   uplift: number;
   experimentalUplift: number;
+  /** Whether this direction is formal, research-only, or deliberately withheld. */
+  decisionStatus?: ResearchDecisionStatus;
+  /** Stable declaration of how the category direction was selected. */
+  selectionObjective?: "calibrated_absolute_probability";
   evidenceTier: ResearchEvidenceTier;
   experts: ResearchModelWeight[];
   ruleContributions: ResearchRuleContribution[];

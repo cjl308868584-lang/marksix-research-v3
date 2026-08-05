@@ -166,7 +166,7 @@ test("champion evidence counts independent issues rather than four correlated sl
   const rows = championRows(20);
   const evidence = store.evaluateChampionEvidence(rows);
   assert.equal(evidence.sampleIssues, 20);
-  assert.equal(evidence.champion, "interpretable_rules");
+  assert.equal(evidence.champion, "baseline");
   assert.equal(evidence.formalChampion, null);
 });
 

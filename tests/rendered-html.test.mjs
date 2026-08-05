@@ -65,6 +65,20 @@ test("server-renders the dedicated rule research workspace", async () => {
   assert.match(html, /正在读取冻结策略与学习状态/);
 });
 
+test("research UI separates formal abstention from multi-source research candidates", async () => {
+  const [workspace, engine, review] = await Promise.all([
+    readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v3-engine.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/research-v3-review.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(workspace, /正式层暂无已验证方向/);
+  assert.match(workspace, /研究候选/);
+  assert.match(workspace, /多源一致/);
+  assert.match(engine, /calibrated_absolute_probability/);
+  assert.doesNotMatch(review, /20期/);
+  assert.match(review, /50期/);
+});
+
 test("server-renders the immutable period review workspace", async () => {
   const response = await render("/research/review");
   assert.equal(response.status, 200);

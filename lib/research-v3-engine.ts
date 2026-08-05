@@ -11,6 +11,7 @@ import {
   type ResearchEventFamily,
   type ResearchEventForecast,
   type ResearchEventHistory,
+  type ResearchDecisionStatus,
   type ResearchEventScope,
   type ResearchEventSlot,
   type ResearchExpertId,
@@ -45,23 +46,46 @@ export function toPublicResearchV3Snapshot(
   snapshot: ResearchV3Snapshot,
 ): ResearchV3Snapshot {
   const events = snapshot.events.map((event) => {
-    if (typeof event.experimentalProbability === "number") return event;
-    if (event.evidenceTier === "verified") {
-      return {
+    const normalized = typeof event.experimentalProbability === "number"
+      ? event
+      : event.evidenceTier === "verified"
+        ? {
         ...event,
         experimentalProbability: event.probability,
         experimentalUplift: event.uplift,
-      };
-    }
-    return {
+      }
+        : {
       ...event,
       probability: event.baselineProbability,
       experimentalProbability: event.probability,
       uplift: 0,
       experimentalUplift: event.probability - event.baselineProbability,
     };
+    const decisionStatus = normalized.decisionStatus ?? (
+      normalized.evidenceTier === "verified"
+        ? "formal"
+        : normalized.history.sampleSize >= 80 &&
+            normalized.history.brierSkill > 0 &&
+            normalized.history.nonWorseFoldRatio >= 0.8
+          ? "research_candidate"
+          : "abstain"
+    );
+    return {
+      ...normalized,
+      decisionStatus,
+      selectionObjective: "calibrated_absolute_probability",
+    };
   }) as ResearchV3Snapshot["events"];
-  return { ...snapshot, events };
+  return {
+    ...snapshot,
+    events,
+    learningSummary: {
+      ...snapshot.learningSummary,
+      champion: snapshot.mode === "formal"
+        ? snapshot.learningSummary.champion
+        : "baseline",
+    },
+  };
 }
 
 type Candidate = {
@@ -97,7 +121,7 @@ export function buildResearchV3Snapshot({
   ruleStates = {},
   researchArtifact,
   settledForecasts = 0,
-  champion = "interpretable_rules",
+  champion = "baseline",
   challenger = "logistic",
   formalChampion = null,
 }: {
@@ -154,20 +178,24 @@ export function buildResearchV3Snapshot({
           ruleStates[slot],
           researchArtifact,
         )
-      )
-      .sort(compareCandidateEvaluation);
+      );
     const selectionHistory = outerSelectionHistory(
       slot,
       candidates,
       chronological,
     );
+    const selectedCandidate = chooseResearchCandidateForSlot(
+      evaluations,
+      selectionHistory,
+    );
     return toEventForecast(
       selectionHistory
-        ? { ...evaluations[0], history: selectionHistory }
-        : evaluations[0],
+        ? { ...selectedCandidate.evaluation, history: selectionHistory }
+        : selectedCandidate.evaluation,
       chronological,
       expectedDrawAt,
       formalChampion,
+      selectedCandidate.decisionStatus,
     );
   }) as ResearchV3Snapshot["events"];
 
@@ -211,8 +239,8 @@ export function buildResearchV3Snapshot({
         chronological.length < 80
           ? "历史样本不足80期，所有结果仅作影子观察。"
           : null,
-        verifiedSampleSize < 50
-          ? "独立核验前瞻样本不足50期，暂不标记已验证优势。"
+        settledForecasts < 50
+          ? `独立前瞻结算仅 ${settledForecasts} 期，未满50期，暂不标记已验证优势。`
           : null,
       ].filter((message): message is string => Boolean(message)),
     },
@@ -808,6 +836,7 @@ function toEventForecast(
   draws: Draw[],
   expectedDrawAt: string,
   formalChampion: ResearchExpertId | null,
+  researchDecision: Exclude<ResearchDecisionStatus, "formal">,
 ): ResearchEventForecast {
   const { candidate, history } = evaluation;
   const hasPositiveEdge = evaluation.probability > evaluation.baseline + 1e-9;
@@ -815,12 +844,7 @@ function toEventForecast(
     ? evaluation.probability
     : evaluation.baseline;
   const verifiedCount = draws.filter((draw) => draw.verified).length;
-  const historicalGate =
-    hasPositiveEdge &&
-    history.sampleSize >= 80 &&
-    history.brierSkill > 0 &&
-    history.nonWorseFoldRatio >= 0.8 &&
-    evaluation.probability - evaluation.baseline >= 0.03;
+  const historicalGate = researchDecision === "research_candidate";
   const tier = formalChampion
     ? "verified"
     : historicalGate && verifiedCount >= 50
@@ -887,15 +911,22 @@ function toEventForecast(
     baselineProbability: evaluation.baseline,
     uplift: formalProbability - evaluation.baseline,
     experimentalUplift: displayedProbability - evaluation.baseline,
+    decisionStatus: formalChampion ? "formal" : researchDecision,
+    selectionObjective: "calibrated_absolute_probability",
     evidenceTier: tier,
     experts,
     ruleContributions: evaluation.contributions,
     history,
-    rationale:
-      hasPositiveEdge && strongest.contribution >= 0
-        ? `${strongest.label}对“${candidate.value}”提供当前最强支持；该结果只进入实验概率，正式概率仍保持随机基线。`
-        : `现有证据没有形成正优势；该槽位只保留精确随机基线，不将负提升包装成预测优势。`,
-    warning: "尚未完成独立前瞻、FDR及随机管线验证，只能作为影子研究结果。",
+    rationale: formalChampion
+      ? `该方向由已通过前瞻晋级门槛的正式冠军模型生成。`
+      : researchDecision === "research_candidate"
+        ? `${strongest?.label ?? "滚动选择管线"}对“${candidate.value}”提供研究支持；候选按校准后的绝对命中概率选择，但正式概率仍保持随机基线。`
+        : `所选管线的滚动回测未稳定超过随机基线，本槽位主动弃权，不展示方向性预测。`,
+    warning: formalChampion
+      ? null
+      : researchDecision === "research_candidate"
+        ? "这是研究候选，尚未完成50期独立前瞻、FDR及随机管线晋级验证。"
+        : "正式层和研究层均不提供方向；保留基线仅用于后续客观评分。",
   };
 }
 
@@ -909,30 +940,56 @@ function probabilityForExpert(
   return evaluation.baseline;
 }
 
-function compareCandidateEvaluation(
-  left: CandidateEvaluation,
-  right: CandidateEvaluation,
+function compareCandidateEvaluation<
+  T extends {
+    candidate: { value: string };
+    probability: number;
+    baseline: number;
+    history: { brierSkill: number; nonWorseFoldRatio: number };
+  },
+>(
+  left: T,
+  right: T,
 ) {
-  const leftUplift = left.probability - left.baseline;
-  const rightUplift = right.probability - right.baseline;
-  const leftPositive = leftUplift > 1e-9 ? 1 : 0;
-  const rightPositive = rightUplift > 1e-9 ? 1 : 0;
-  const leftScore =
-    leftUplift * 8 +
-    Math.max(left.history.brierSkill, -0.2) * 0.2 +
-    left.history.nonWorseFoldRatio * 0.1 +
-    left.history.posteriorAdvantage * 0.03;
-  const rightScore =
-    rightUplift * 8 +
-    Math.max(right.history.brierSkill, -0.2) * 0.2 +
-    right.history.nonWorseFoldRatio * 0.1 +
-    right.history.posteriorAdvantage * 0.03;
   return (
-    rightPositive - leftPositive ||
-    rightScore - leftScore ||
     right.probability - left.probability ||
+    right.history.brierSkill - left.history.brierSkill ||
+    right.history.nonWorseFoldRatio - left.history.nonWorseFoldRatio ||
+    (right.probability - right.baseline) -
+      (left.probability - left.baseline) ||
     left.candidate.value.localeCompare(right.candidate.value, "zh-Hans-CN")
   );
+}
+
+export function chooseResearchCandidateForSlot<
+  T extends {
+    candidate: { value: string };
+    probability: number;
+    baseline: number;
+    history: { brierSkill: number; nonWorseFoldRatio: number };
+  },
+>(
+  evaluations: T[],
+  selectionHistory: Pick<
+    ResearchEventHistory,
+    "sampleSize" | "brierSkill" | "nonWorseFoldRatio"
+  > | null,
+): {
+  evaluation: T;
+  decisionStatus: Exclude<ResearchDecisionStatus, "formal">;
+} {
+  const evaluation = [...evaluations].sort(compareCandidateEvaluation)[0];
+  if (!evaluation) throw new Error("No candidate evaluation is available");
+  const passesResearchGate = Boolean(
+    selectionHistory &&
+      selectionHistory.sampleSize >= 80 &&
+      selectionHistory.brierSkill > 0 &&
+      selectionHistory.nonWorseFoldRatio >= 0.8,
+  );
+  return {
+    evaluation,
+    decisionStatus: passesResearchGate ? "research_candidate" : "abstain",
+  };
 }
 
 function actualValues(

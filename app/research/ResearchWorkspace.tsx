@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { GAME_META, type GameId } from "../../lib/lottery";
 import type {
   ResearchEventForecast,
@@ -19,12 +20,17 @@ export function ResearchWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    const controller = new AbortController();
+  const selectGame = (nextGame: GameId) => {
+    if (nextGame === game) return;
     setLoading(true);
     setError("");
     setSnapshot(null);
     setPerformance(null);
+    setGame(nextGame);
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
     void Promise.all([
       fetch(`/api/research/forecast?game=${game}`, {
         cache: "no-store",
@@ -62,7 +68,7 @@ export function ResearchWorkspace() {
   return (
     <div className="v3-shell">
       <header className="v3-topbar">
-        <a href="/" aria-label="返回开奖首页">← 开奖</a>
+        <Link href="/" aria-label="返回开奖首页">← 开奖</Link>
         <div>
           <strong>六合智研</strong>
           <span>高概率策略中心</span>
@@ -83,7 +89,7 @@ export function ResearchWorkspace() {
               <button
                 type="button"
                 className={game === item ? "active" : ""}
-                onClick={() => setGame(item)}
+                onClick={() => selectGame(item)}
                 key={item}
               >
                 {GAME_META[item].name}
@@ -91,8 +97,8 @@ export function ResearchWorkspace() {
             ))}
           </div>
           <nav className="v3-view-switch" aria-label="研究页面">
-            <a className="active" href="/research">下一期策略</a>
-            <a href="/research/review">逐期复盘</a>
+            <Link className="active" href="/research">下一期策略</Link>
+            <Link href="/research/review">逐期复盘</Link>
           </nav>
         </section>
 
@@ -159,7 +165,7 @@ function RunContext({ snapshot }: { snapshot: ResearchV3Snapshot }) {
       <div><span>目标期</span><strong>{snapshot.targetIssue}</strong></div>
       <div><span>历史样本</span><strong>{snapshot.dataQuality.sampleSize}期</strong></div>
       <div>
-        <span>独立核验</span>
+        <span>{snapshot.game === "new_macau" ? "多源一致" : "核验比例"}</span>
         <strong>{percent(snapshot.dataQuality.verifiedRatio)}</strong>
       </div>
       <div>
@@ -177,19 +183,39 @@ function EventCard({
   event: ResearchEventForecast;
   rank: number;
 }) {
+  const decisionStatus = event.decisionStatus ?? (
+    event.evidenceTier === "verified" ? "formal" : "abstain"
+  );
+  const isFormal = decisionStatus === "formal";
+  const isCandidate = decisionStatus === "research_candidate";
   return (
-    <article className="v3-event-card">
+    <article className={`v3-event-card ${decisionStatus}`}>
       <header>
         <div>
           <span>{String(rank).padStart(2, "0")} · {event.slotLabel}</span>
-          <h2>{event.predictionLabel}</h2>
-          <p>{event.scopeLabel} · {evidenceLabel(event.evidenceTier)}</p>
+          <h2>{isFormal ? event.predictionLabel : "正式层暂无已验证方向"}</h2>
+          <p>{event.scopeLabel} · {isFormal ? evidenceLabel(event.evidenceTier) : "精确随机基线"}</p>
         </div>
         <div className="v3-probability">
           <strong>{percent(event.probability)}</strong>
           <span>{event.evidenceTier === "verified" ? "正式模型概率" : "正式基线概率"}</span>
         </div>
       </header>
+
+      {isCandidate && (
+        <div className="v3-decision v3-research-candidate">
+          <span>研究候选</span>
+          <strong>{event.predictionLabel}</strong>
+          <p>校准绝对概率 {percent(event.experimentalProbability)}；仅供前瞻验证，不属于正式预测。</p>
+        </div>
+      )}
+      {!isFormal && !isCandidate && (
+        <div className="v3-decision v3-abstain">
+          <span>研究层主动弃权</span>
+          <strong>滚动回测尚未稳定超过随机基线</strong>
+          <p>系统仍保存基线评分，但不向本期给出方向。</p>
+        </div>
+      )}
 
       <div className="v3-probability-track" aria-label="预测概率对比">
         <div style={{ width: `${event.probability * 100}%` }} />
@@ -202,9 +228,9 @@ function EventCard({
         </strong>
       </div>
 
-      {event.evidenceTier !== "verified" && (
+      {isCandidate && (
         <div className="v3-baseline-row">
-          <span>影子实验概率 {percent(event.experimentalProbability ?? event.probability)}</span>
+          <span>研究候选概率 {percent(event.experimentalProbability ?? event.probability)}</span>
           <strong>{signedPoints(event.experimentalUplift ?? 0)}</strong>
         </div>
       )}
@@ -277,7 +303,7 @@ function LearningBoard({
           <span>SETTLE → LEARN → FREEZE</span>
           <h2>逐期开奖学习闭环</h2>
         </div>
-        <a href="/research/review">查看完整复盘 →</a>
+        <Link href="/research/review">查看完整复盘 →</Link>
       </header>
       <div className="v3-learning-flow">
         {["冻结四项", "核验开奖", "概率评分", "误差归因", "更新权重", "冻结下期"].map(

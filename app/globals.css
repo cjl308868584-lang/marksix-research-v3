@@ -7547,6 +7547,51 @@ footer p {
   font-size: 10px;
 }
 
+.v3-decision {
+  margin: 0 16px 16px;
+  padding: 12px;
+  border-radius: 9px;
+  border: 1px solid #303638;
+  background: #121617;
+}
+
+.v3-decision span,
+.v3-decision strong,
+.v3-decision p { display: block; }
+
+.v3-decision span {
+  color: #c8aa5e;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: .08em;
+}
+
+.v3-decision strong {
+  margin-top: 7px;
+  color: #e9e5dc;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.v3-decision p {
+  margin: 6px 0 0;
+  color: #858c89;
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.v3-research-candidate {
+  border-color: rgba(210, 179, 109, .3);
+  background: rgba(210, 179, 109, .055);
+}
+
+.v3-abstain {
+  border-color: rgba(127, 139, 136, .24);
+  background: rgba(127, 139, 136, .035);
+}
+
+.v3-abstain span { color: #89928f; }
+
 .v3-probability {
   min-width: 76px;
   text-align: right;

@@ -921,7 +921,7 @@ export async function readChampionChallengeState(game: GameId): Promise<{
   const db = runtime.__marksixD1;
   if (!db) {
     return {
-      champion: "interpretable_rules",
+      champion: "baseline",
       challenger: "logistic",
       sampleIssues: 0,
       formalChampion: null,
@@ -940,7 +940,7 @@ export async function readChampionChallengeState(game: GameId): Promise<{
     );
   } catch {
     return {
-      champion: "interpretable_rules",
+      champion: "baseline",
       challenger: "logistic",
       sampleIssues: 0,
       formalChampion: null,
@@ -1058,7 +1058,7 @@ export function evaluateChampionEvidence(rows: ChampionEvidenceRow[]) {
   );
   const champion: ResearchExpertId = verified && best
     ? best.model
-    : "interpretable_rules";
+    : "baseline";
   return {
     champion,
     challenger: candidates.find((candidate) => candidate.model !== champion)?.model ??

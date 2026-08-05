@@ -37,6 +37,7 @@ let cycleAction: (
   hasFrozenSnapshot: boolean,
 ) => "compute" | "await_verification" | "bootstrap";
 let publicSnapshot: (snapshot: any) => any;
+let chooseResearchCandidate: (evaluations: any[], history: any) => any;
 
 before(async () => {
   server = await createServer({
@@ -56,6 +57,7 @@ before(async () => {
   zodiacFor = lottery.getZodiac;
   cycleAction = engine.researchCycleAction;
   publicSnapshot = engine.toPublicResearchV3Snapshot;
+  chooseResearchCandidate = engine.chooseResearchCandidateForSlot;
 });
 
 test("a new database bootstraps a baseline forecast without learning from an unverified latest draw", () => {
@@ -88,6 +90,7 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
     ],
   );
   for (const event of snapshot.events) {
+    assert.equal(event.selectionObjective, "calibrated_absolute_probability");
     assert.ok(event.probability >= 0.4 && event.probability <= 0.7);
     assert.ok(
       event.baselineProbability >= 0.4 &&
@@ -99,6 +102,46 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
     assert.doesNotMatch(event.predictionLabel, /候选号码|最高交集号码|号码前三/);
     assert.equal(event.experts.length, 4);
   }
+  assert.equal(snapshot.learningSummary.champion, "baseline");
+});
+
+test("candidate selection prefers calibrated absolute probability over relative uplift", () => {
+  const history = {
+    sampleSize: 120,
+    brierSkill: 0.01,
+    nonWorseFoldRatio: 0.8,
+  };
+  const lowerAbsolute = {
+    candidate: { value: "0尾" },
+    probability: 0.49,
+    baseline: 0.47,
+    history: { brierSkill: 0.03, nonWorseFoldRatio: 1 },
+  };
+  const higherAbsolute = {
+    candidate: { value: "1尾" },
+    probability: 0.55,
+    baseline: 0.55,
+    history: { brierSkill: 0.01, nonWorseFoldRatio: 0.8 },
+  };
+  const selected = chooseResearchCandidate(
+    [lowerAbsolute, higherAbsolute],
+    history,
+  );
+  assert.equal(selected.evaluation.candidate.value, "1尾");
+  assert.equal(selected.decisionStatus, "research_candidate");
+});
+
+test("negative selected-pipeline evidence abstains instead of presenting a direction", () => {
+  const selected = chooseResearchCandidate(
+    [{
+      candidate: { value: "鼠" },
+      probability: 0.52,
+      baseline: 0.47,
+      history: { brierSkill: 0.02, nonWorseFoldRatio: 0.8 },
+    }],
+    { sampleSize: 250, brierSkill: -0.01, nonWorseFoldRatio: 0.2 },
+  );
+  assert.equal(selected.decisionStatus, "abstain");
 });
 
 test("shadow experts remain diagnostic and cannot change the formal probability", () => {
@@ -142,7 +185,10 @@ test("legacy shadow ledgers are projected as baseline formal plus experimental p
     assert.equal(event.experimentalProbability, event.baselineProbability + 0.02);
     assert.equal(event.uplift, 0);
     assert.ok(Math.abs(event.experimentalUplift - 0.02) < 1e-12);
+    assert.ok(["research_candidate", "abstain"].includes(event.decisionStatus));
+    assert.equal(event.selectionObjective, "calibrated_absolute_probability");
   }
+  assert.equal(projected.learningSummary.champion, "baseline");
 });
 
 test("persisted formal champion evidence makes verified mode reachable", () => {
@@ -156,7 +202,31 @@ test("persisted formal champion evidence makes verified mode reachable", () => {
   });
   assert.equal(snapshot.mode, "formal");
   assert.ok(snapshot.events.every((event: any) => event.evidenceTier === "verified"));
+  assert.ok(snapshot.events.every((event: any) => event.decisionStatus === "formal"));
   assert.ok(snapshot.events.every((event: any) => event.probability === event.experts.find((expert: any) => expert.modelId === "interpretable_rules").probability));
+});
+
+test("unpromoted learning copy uses the fifty-issue gate", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const draw: Draw = {
+    game: "new_macau",
+    issue: "2026999",
+    drawAt: "2026-10-01T21:32:32+08:00",
+    numbers: [1, 12, 23, 34, 45, 49],
+    special: 8,
+    source: "多源一致测试",
+    verified: true,
+  };
+  const review = buildReview(snapshot, draw, "2026-10-01T21:35:00+08:00");
+  assert.match(review.learningRun.summary, /50期/);
+  assert.match(review.nextAction, /50期/);
+  assert.doesNotMatch(review.learningRun.summary + review.nextAction, /20期/);
 });
 
 test("reported model history comes only from outer walk-forward selection rows", () => {
@@ -278,7 +348,7 @@ test("learning review records a validated champion promotion", () => {
     confidenceLowerBound: 0.01,
     randomChampionPercentile: 0.995,
   });
-  assert.equal(review.learningRun.championBefore, "interpretable_rules");
+  assert.equal(review.learningRun.championBefore, "baseline");
   assert.equal(review.learningRun.championAfter, "logistic");
   assert.equal(review.learningRun.challengerPromoted, true);
   assert.match(review.learningRun.summary, /完成.*验证|晋级/);
@@ -378,7 +448,8 @@ test("retired rule states are consumed by the next frozen forecast", () => {
   const after = buildSnapshot({ ...input, ruleStates });
   const sameCandidate = after.events[0].predictedValue === event.predictedValue;
   assert.ok(
-    !sameCandidate || after.events[0].probability < event.probability,
+    !sameCandidate ||
+      after.events[0].experimentalProbability < event.experimentalProbability,
     "a retired rule must either lower its candidate or cause another candidate to win",
   );
   assert.ok(
