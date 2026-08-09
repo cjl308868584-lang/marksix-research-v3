@@ -535,6 +535,82 @@ export const researchTaskRuns = sqliteTable(
   ],
 );
 
+export const rollingPatternRuns = sqliteTable(
+  "rolling_pattern_runs",
+  {
+    runId: text("run_id").primaryKey(),
+    game: text("game").notNull(),
+    sourceIssue: text("source_issue").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    windowOldestIssue: text("window_oldest_issue").notNull(),
+    windowNewestIssue: text("window_newest_issue").notNull(),
+    windowDataHash: text("window_data_hash").notNull(),
+    engineVersion: text("engine_version").notNull(),
+    status: text("status").notNull(),
+    generatedAt: text("generated_at").notNull(),
+    frozenAt: text("frozen_at").notNull(),
+    runJson: text("run_json").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_target_idx").on(
+      table.game,
+      table.targetIssue,
+      table.windowDataHash,
+      table.engineVersion,
+    ),
+  ],
+);
+
+export const rollingPatternSignals = sqliteTable(
+  "rolling_pattern_signals",
+  {
+    runId: text("run_id").notNull(),
+    ruleId: text("rule_id").notNull(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    ruleFamily: text("rule_family").notNull(),
+    eventFamily: text("event_family").notNull(),
+    eventValue: text("event_value").notNull(),
+    sampleLabel: text("sample_label").notNull(),
+    signalJson: text("signal_json").notNull(),
+    frozenAt: text("frozen_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_signal_identity_idx").on(
+      table.runId,
+      table.ruleId,
+    ),
+    index("rolling_pattern_signal_filter_idx").on(
+      table.game,
+      table.targetIssue,
+      table.eventFamily,
+    ),
+  ],
+);
+
+export const rollingPatternScores = sqliteTable(
+  "rolling_pattern_scores",
+  {
+    runId: text("run_id").notNull(),
+    ruleId: text("rule_id").notNull(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    actualMatched: integer("actual_matched", { mode: "boolean" }).notNull(),
+    scoreJson: text("score_json").notNull(),
+    scoredAt: text("scored_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_score_identity_idx").on(
+      table.runId,
+      table.ruleId,
+    ),
+    index("rolling_pattern_score_issue_idx").on(
+      table.game,
+      table.targetIssue,
+    ),
+  ],
+);
+
 export const researchModelArtifacts = sqliteTable(
   "research_model_artifacts",
   {

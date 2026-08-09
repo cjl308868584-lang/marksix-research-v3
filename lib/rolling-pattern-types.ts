@@ -91,3 +91,19 @@ export type RollingPatternRun = {
   };
   signals: RollingPatternSignal[];
 };
+
+export type RollingPatternScore = {
+  runId: string;
+  ruleId: string;
+  game: GameId;
+  targetIssue: string;
+  actualMatched: boolean;
+  actual: RollingPatternEventState;
+  scoredAt: string;
+};
+
+export type RollingPatternEnvelope = {
+  run: RollingPatternRun;
+  signals: RollingPatternSignal[];
+  scores: RollingPatternScore[];
+};

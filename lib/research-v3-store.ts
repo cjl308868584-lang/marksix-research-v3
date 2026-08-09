@@ -712,6 +712,35 @@ CREATE TABLE IF NOT EXISTS research_task_runs (
 );
 CREATE INDEX IF NOT EXISTS research_task_status_idx
   ON research_task_runs (game, status, started_at);
+CREATE TABLE IF NOT EXISTS rolling_pattern_runs (
+  run_id text PRIMARY KEY NOT NULL, game text NOT NULL,
+  source_issue text NOT NULL, target_issue text NOT NULL,
+  window_oldest_issue text NOT NULL, window_newest_issue text NOT NULL,
+  window_data_hash text NOT NULL, engine_version text NOT NULL,
+  status text NOT NULL, generated_at text NOT NULL, frozen_at text NOT NULL,
+  run_json text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_target_idx
+  ON rolling_pattern_runs (game, target_issue, window_data_hash, engine_version);
+CREATE TABLE IF NOT EXISTS rolling_pattern_signals (
+  run_id text NOT NULL, rule_id text NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, rule_family text NOT NULL,
+  event_family text NOT NULL, event_value text NOT NULL,
+  sample_label text NOT NULL, signal_json text NOT NULL, frozen_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_signal_identity_idx
+  ON rolling_pattern_signals (run_id, rule_id);
+CREATE INDEX IF NOT EXISTS rolling_pattern_signal_filter_idx
+  ON rolling_pattern_signals (game, target_issue, event_family);
+CREATE TABLE IF NOT EXISTS rolling_pattern_scores (
+  run_id text NOT NULL, rule_id text NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, actual_matched integer NOT NULL,
+  score_json text NOT NULL, scored_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_score_identity_idx
+  ON rolling_pattern_scores (run_id, rule_id);
+CREATE INDEX IF NOT EXISTS rolling_pattern_score_issue_idx
+  ON rolling_pattern_scores (game, target_issue);
 `;
 
 export async function readResearchV3Reviews(
