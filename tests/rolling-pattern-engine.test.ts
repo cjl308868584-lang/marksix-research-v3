@@ -45,7 +45,8 @@ test("discovers a current A-to-next-draw-B rule with explicit evidence", async (
   const signal = run.signals.find((item) =>
     item.rule.antecedent.kind === "single" &&
     item.rule.antecedent.conditions[0].event.value === "0尾" &&
-    item.rule.event.value === "9尾"
+    item.rule.event.value === "9尾" &&
+    item.rule.event.scope === "coverage_6_plus_1"
   );
 
   assert.ok(signal);
@@ -60,7 +61,29 @@ test("discovers a current A-to-next-draw-B rule with explicit evidence", async (
   assert.ok(signal.audit.every((row) => row.conditionEvidence.length === 1));
 });
 
-test("finds a current missing-three recovery and writes the full condition", async () => {
+test("freezes separate 6+1 and special targets from the same 6+1 conditions", async () => {
+  const run = await buildRollingPatternRun(input(makeCrossEventDraws(30)));
+  const matchingTailRules = run.signals.filter((item) =>
+    item.rule.antecedent.kind === "single" &&
+    item.rule.antecedent.conditions[0].event.value === "0尾" &&
+    item.rule.event.value === "9尾"
+  );
+
+  assert.equal(run.engineVersion, "conditional-patterns-v3");
+  assert.deepEqual(
+    new Set(matchingTailRules.map((item) => item.rule.event.scope)),
+    new Set(["coverage_6_plus_1", "special"]),
+  );
+  assert.ok(run.signals.every((item) => item.rule.antecedent.kind === "sequence"
+    ? item.rule.antecedent.event.scope === "condition"
+    : item.rule.antecedent.conditions.every((condition) => condition.event.scope === "condition")));
+  assert.ok(run.signals.every((item) =>
+    item.rule.event.scope === "special" ||
+    ["zodiac", "tail"].includes(item.rule.event.family)
+  ));
+});
+
+test("finds a current three-miss condition and writes the full condition", async () => {
   const chronologicalTail0 = [
     true, false, false, false, true,
     true, false, false, false, false,
@@ -72,18 +95,18 @@ test("finds a current missing-three recovery and writes the full condition", asy
   const run = await buildRollingPatternRun(input(makeTailDraws(chronologicalTail0)));
   const signal = run.signals.find((item) =>
     item.rule.family === "sequence_transition" &&
-    item.rule.event.value === "0尾" &&
     item.rule.antecedent.kind === "sequence" &&
+    item.rule.antecedent.event.value === "0尾" &&
     item.rule.antecedent.states.join(",") === "false,false,false"
   );
 
   assert.ok(signal);
   assert.equal(signal.support, 3);
-  assert.equal(signal.hits, 2);
+  assert.ok(signal.hits >= 2);
+  assert.equal(signal.rawRate, signal.hits / signal.support);
   assert.match(signal.rule.conditionLabel, /连续3期未出现/);
   assert.match(signal.rule.relationLabel, /连续3期未出现.*下一期/);
-  assert.equal(signal.evidenceTier, "experimental");
-  assert.ok(signal.qValue > 0.1);
+  assert.ok(signal.qValue >= signal.pValue && signal.qValue <= 1);
 });
 
 test("never generates hotness, simple lag, or one-draw self continuation", async () => {

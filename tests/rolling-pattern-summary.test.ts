@@ -27,6 +27,7 @@ function signal(input: {
         conditions: [{
           event: {
             eventId: "condition:fixture",
+            scope: "condition",
             family: "tail",
             value: "4",
             label: "6+1至少出现一次4尾",
@@ -38,6 +39,7 @@ function signal(input: {
       },
       event: {
         eventId: input.eventId,
+        scope: "coverage_6_plus_1",
         family: input.family ?? "zodiac",
         value: input.label,
         label: input.label,

@@ -1,8 +1,10 @@
 import type { Draw, GameId } from "./lottery";
 import {
-  enumerateRollingEvents,
-  evaluateRollingEvent,
-  rollingEventBaseline,
+  enumerateRollingConditionEvents,
+  enumerateRollingResultEvents,
+  evaluateRollingConditionEvent,
+  evaluateRollingResultEvent,
+  rollingResultEventBaseline,
 } from "./rolling-pattern-events";
 import {
   benjaminiHochberg,
@@ -70,8 +72,12 @@ export async function buildRollingPatternRun(
     throw new Error("rolling pattern scan requires 30 verified draws");
   }
   const chronological = [...windowDraws].reverse();
-  const events = enumerateRollingEvents(input.expectedDrawAt);
-  const states = indexEventStates(events, chronological);
+  const conditionEvents = enumerateRollingConditionEvents(input.expectedDrawAt);
+  const resultEvents = [
+    ...enumerateRollingResultEvents(input.expectedDrawAt, "coverage_6_plus_1"),
+    ...enumerateRollingResultEvents(input.expectedDrawAt, "special"),
+  ];
+  const states = indexEventStates(conditionEvents, resultEvents, chronological);
   const windowDataHash = await stablePatternHash(JSON.stringify(
     chronological.map((draw) => ({
       game: draw.game,
@@ -82,7 +88,7 @@ export async function buildRollingPatternRun(
       verified: draw.verified,
     })),
   ));
-  const generatedRules = generateRules(events);
+  const generatedRules = generateRules(conditionEvents, resultEvents);
   const currentEvaluations: RuleEvaluation[] = [];
   for (const rule of generatedRules) {
     const currentEvidence = evidenceAt(states, WINDOW_SIZE, rule);
@@ -195,22 +201,34 @@ function selectDiverseSignals(signals: RollingPatternSignal[]) {
   return selected;
 }
 
-function indexEventStates(events: RollingPatternEvent[], draws: Draw[]) {
-  return new Map(events.map((event) => [
-    event.eventId,
-    draws.map((draw) => evaluateRollingEvent(draw, event)),
-  ]));
+function indexEventStates(
+  conditionEvents: RollingPatternEvent[],
+  resultEvents: RollingPatternEvent[],
+  draws: Draw[],
+) {
+  return new Map([
+    ...conditionEvents.map((event) => [
+      event.eventId,
+      draws.map((draw) => evaluateRollingConditionEvent(draw, event)),
+    ] as const),
+    ...resultEvents.map((event) => [
+      event.eventId,
+      draws.map((draw) => evaluateRollingResultEvent(draw, event)),
+    ] as const),
+  ]);
 }
 
-function generateRules(events: RollingPatternEvent[]) {
+function generateRules(
+  conditionEvents: RollingPatternEvent[],
+  resultEvents: RollingPatternEvent[],
+) {
   const candidates: Array<{
     family: RollingPatternRuleFamily;
     antecedent: RollingPatternAntecedent;
     event: RollingPatternEvent;
   }> = [];
-  for (const source of events) {
-    for (const target of events) {
-      if (source.eventId === target.eventId) continue;
+  for (const source of conditionEvents) {
+    for (const target of resultEvents) {
       candidates.push({
         family: "single_transfer",
         antecedent: {
@@ -221,13 +239,12 @@ function generateRules(events: RollingPatternEvent[]) {
       });
     }
   }
-  for (let leftIndex = 0; leftIndex < events.length; leftIndex += 1) {
-    const left = events[leftIndex];
-    for (let rightIndex = leftIndex + 1; rightIndex < events.length; rightIndex += 1) {
-      const right = events[rightIndex];
+  for (let leftIndex = 0; leftIndex < conditionEvents.length; leftIndex += 1) {
+    const left = conditionEvents[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < conditionEvents.length; rightIndex += 1) {
+      const right = conditionEvents[rightIndex];
       if (left.family === right.family) continue;
-      for (const target of events) {
-        if (target.eventId === left.eventId || target.eventId === right.eventId) continue;
+      for (const target of resultEvents) {
         candidates.push({
           family: "conjunction_transfer",
           antecedent: {
@@ -242,7 +259,8 @@ function generateRules(events: RollingPatternEvent[]) {
       }
     }
   }
-  for (const event of events) {
+  for (const conditionEvent of conditionEvents) {
+    for (const resultEvent of resultEvents) {
     for (let length = 2; length <= 5; length += 1) {
       for (let mask = 0; mask < 2 ** length; mask += 1) {
         const sequence = Array.from(
@@ -253,13 +271,14 @@ function generateRules(events: RollingPatternEvent[]) {
           family: "sequence_transition",
           antecedent: {
             kind: "sequence",
-            event,
+            event: conditionEvent,
             states: sequence,
             requireBoundaryFlip: sequence.every((state) => state === sequence[0]),
           },
-          event,
+          event: resultEvent,
         });
       }
+    }
     }
   }
   return candidates.map(finalizeRule);
@@ -358,14 +377,14 @@ function evaluateRule(
       result,
       matched: result.matched,
     });
-    baselines.push(rollingEventBaseline(rule.event, result.drawAt));
+    baselines.push(rollingResultEventBaseline(rule.event, result.drawAt));
   }
   const support = audit.length;
   const hits = audit.filter((item) => item.matched).length;
   const rawRate = support ? hits / support : 0;
   const baseline = baselines.length
     ? average(baselines)
-    : rollingEventBaseline(rule.event, expectedDrawAt);
+    : rollingResultEventBaseline(rule.event, expectedDrawAt);
   const posteriorRate = (hits + PRIOR_STRENGTH * baseline) /
     (support + PRIOR_STRENGTH);
   return {

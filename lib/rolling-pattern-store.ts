@@ -1,5 +1,5 @@
 import type { Draw, GameId } from "./lottery";
-import { evaluateRollingEvent } from "./rolling-pattern-events";
+import { evaluateRollingResultEvent } from "./rolling-pattern-events";
 import { ensureResearchV3Store } from "./research-v3-store";
 import type {
   RollingPatternEnvelope,
@@ -164,7 +164,7 @@ export async function settleRollingPatternRuns(
           .map((item) => parseJson(item.signal_json))
           .filter(isRollingPatternSignal);
         const statements = signals.map((signal) => {
-          const actual = evaluateRollingEvent(draw, signal.rule.event);
+          const actual = evaluateRollingResultEvent(draw, signal.rule.event);
           const score: RollingPatternScore = {
             runId: run.runId,
             ruleId: signal.rule.ruleId,
