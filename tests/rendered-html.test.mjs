@@ -99,6 +99,32 @@ test("review API accepts the fifty-period history requested by the review page",
   assert.deepEqual(payload, { game: "new_macau", reviews: [] });
 });
 
+test("rolling pattern API rejects unsupported parameters before reading storage", async () => {
+  const response = await fetchWorker(
+    "/api/research/patterns?game=new_macau&write=true",
+  );
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "请求包含不受支持的参数。",
+  });
+});
+
+test("rolling pattern API returns an explicit no-store unavailable state", async () => {
+  const response = await fetchWorker(
+    "/api/research/patterns?game=new_macau",
+  );
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await response.json(), {
+    game: "new_macau",
+    status: "unavailable",
+    run: null,
+    signals: [],
+    scores: [],
+    pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
+  });
+});
+
 test("public research reads never settle, train, or freeze forecasts", async () => {
   const [forecastRoute, reviewRoute, modelRoute, rulesRoute, lotteryRoute, analyzeRoute] =
     await Promise.all([
