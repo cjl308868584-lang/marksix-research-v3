@@ -90,6 +90,28 @@ test("server-renders the immutable period review workspace", async () => {
   assert.match(html, /href="\/research"/);
 });
 
+test("server-renders the mobile-first rolling 30 pattern workspace", async () => {
+  const response = await render("/research/patterns");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>近30期规律｜六合智研<\/title>/i);
+  assert.match(html, /只看最新30期/);
+  assert.match(html, /正在读取冻结的近期规律/);
+  assert.match(html, /href="\/research"/);
+  assert.match(html, /href="\/research\/patterns"/);
+  assert.match(html, /href="\/research\/review"/);
+});
+
+test("all research workspaces expose the same three-way navigation", async () => {
+  for (const path of ["/research", "/research/patterns", "/research/review"]) {
+    const response = await render(path);
+    const html = await response.text();
+    assert.match(html, /href="\/research"/);
+    assert.match(html, /href="\/research\/patterns"/);
+    assert.match(html, /href="\/research\/review"/);
+  }
+});
+
 test("review API accepts the fifty-period history requested by the review page", async () => {
   const response = await fetchWorker(
     "/api/research/reviews?game=new_macau&limit=50",

@@ -112,6 +112,7 @@ export function ResearchReviewWorkspace() {
           </div>
           <nav className="v3-view-switch" aria-label="研究页面">
             <a href="/research">下一期策略</a>
+            <a href="/research/patterns">近30期规律</a>
             <a className="active" href="/research/review">逐期复盘</a>
           </nav>
         </section>
