@@ -109,6 +109,7 @@ export async function POST(request: NextRequest) {
         taskId: body.taskId,
         runId: envelope.snapshot.runId,
         targetIssue: envelope.snapshot.targetIssue,
+        rollingPatterns: envelope.rollingPatterns,
         immutable: true,
       };
       const completed = await completeResearchTask(
@@ -127,6 +128,7 @@ export async function POST(request: NextRequest) {
       taskId: body.taskId,
       runId: envelope.snapshot.runId,
       targetIssue: envelope.snapshot.targetIssue,
+      rollingPatterns: envelope.rollingPatterns,
       immutable: true,
     };
     const completed = await completeResearchTask(

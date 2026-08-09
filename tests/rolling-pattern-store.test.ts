@@ -126,6 +126,20 @@ let server: ViteDevServer;
 let store: StoreModule;
 let runFixture: RollingPatternRun;
 let db: FakePatternD1;
+let runRollingPatternCycle: (
+  input: {
+    game: "new_macau";
+    draws: Draw[];
+    targetIssue: string;
+    expectedDrawAt: string;
+    generatedAt: string;
+  },
+  dependencies: {
+    settle: () => Promise<"ok">;
+    build: () => Promise<RollingPatternRun>;
+    persist: () => Promise<"created">;
+  },
+) => Promise<{ status: string; runId?: string }>;
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: unknown;
   __marksixResearchV3SchemaReady?: unknown;
@@ -141,6 +155,8 @@ before(async () => {
   });
   store = await server.ssrLoadModule("/lib/rolling-pattern-store.ts") as StoreModule;
   const engine = await server.ssrLoadModule("/lib/rolling-pattern-engine.ts");
+  const service = await server.ssrLoadModule("/lib/rolling-pattern-service.ts");
+  runRollingPatternCycle = service.runRollingPatternCycle;
   runFixture = await engine.buildRollingPatternRun({
     game: "new_macau",
     draws: patternDraws(),
@@ -206,6 +222,39 @@ test("settlement scores only the previously frozen verified target and is idempo
     "ok",
   );
   assert.equal(db.scores.size, runFixture.signals.length);
+});
+
+test("rolling lifecycle settles the old target before building and freezing the next window", async () => {
+  const calls: string[] = [];
+  const result = await runRollingPatternCycle(
+    {
+      game: "new_macau",
+      draws: patternDraws(),
+      targetIssue: runFixture.targetIssue,
+      expectedDrawAt: runFixture.expectedDrawAt,
+      generatedAt: runFixture.generatedAt,
+    },
+    {
+      settle: async () => {
+        calls.push("settle");
+        return "ok";
+      },
+      build: async () => {
+        calls.push("build");
+        return runFixture;
+      },
+      persist: async () => {
+        calls.push("persist");
+        return "created";
+      },
+    },
+  );
+  assert.deepEqual(calls, ["settle", "build", "persist"]);
+  assert.deepEqual(result, {
+    status: "created",
+    runId: runFixture.runId,
+    qualified: runFixture.signals.length,
+  });
 });
 
 function patternDraws() {

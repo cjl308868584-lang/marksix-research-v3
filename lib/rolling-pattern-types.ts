@@ -107,3 +107,20 @@ export type RollingPatternEnvelope = {
   signals: RollingPatternSignal[];
   scores: RollingPatternScore[];
 };
+
+export type RollingPatternCycleResult =
+  | {
+      status: "created" | "existing";
+      runId: string;
+      qualified: number;
+    }
+  | {
+      status: "insufficient_data";
+      missing: number;
+      qualified: 0;
+    }
+  | {
+      status: "failed";
+      qualified: 0;
+      reason: string;
+    };

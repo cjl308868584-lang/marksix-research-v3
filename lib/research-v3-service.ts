@@ -23,6 +23,8 @@ import type {
   ResearchPythonArtifact,
   ResearchV3Envelope,
 } from "./research-v3-types";
+import { runRollingPatternCycle } from "./rolling-pattern-service";
+import type { RollingPatternCycleResult } from "./rolling-pattern-types";
 
 const MAX_RESEARCH_HISTORY = 500;
 const CACHE_TTL_MS = 10 * 60_000;
@@ -109,6 +111,22 @@ export async function runResearchV3Cycle({
   }
   const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
   const targetIssue = nextIssue(latest.issue);
+  let rollingPatterns: RollingPatternCycleResult;
+  try {
+    rollingPatterns = await runRollingPatternCycle({
+      game,
+      draws: history.draws,
+      targetIssue,
+      expectedDrawAt,
+      generatedAt: asOf.toISOString(),
+    });
+  } catch (error) {
+    rollingPatterns = {
+      status: "failed",
+      qualified: 0,
+      reason: error instanceof Error ? error.message : "unknown",
+    };
+  }
   const cacheKey = [
     game,
     targetIssue,
@@ -120,7 +138,7 @@ export async function runResearchV3Cycle({
   ].join(":");
   const cached = cache.get(cacheKey);
   if (!forceCompute && cached && cached.expiresAt > Date.now()) {
-    return cached.envelope;
+    return { ...cached.envelope, rollingPatterns };
   }
   if (!forceCompute) {
     const stored = await readResearchV3Snapshot(game, targetIssue);
@@ -129,6 +147,7 @@ export async function runResearchV3Cycle({
         snapshot: stored,
         source: "stored",
         cycleStatus: "existing",
+        rollingPatterns,
       };
       cache.set(cacheKey, {
         expiresAt: Date.now() + CACHE_TTL_MS,
@@ -166,6 +185,7 @@ export async function runResearchV3Cycle({
     snapshot,
     source: history.sourceMode === "snapshot" ? "snapshot" : "computed",
     cycleStatus: "completed",
+    rollingPatterns,
   };
   const datasetPersistence = await persistResearchDataset(snapshot, history.draws);
   if (datasetPersistence !== "ok") {
@@ -179,6 +199,7 @@ export async function runResearchV3Cycle({
         snapshot: immutable,
         source: "stored",
         cycleStatus: "existing",
+        rollingPatterns,
       };
       cache.set(cacheKey, {
         expiresAt: Date.now() + CACHE_TTL_MS,

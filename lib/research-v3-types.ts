@@ -1,4 +1,5 @@
 import type { GameId } from "./lottery";
+import type { RollingPatternCycleResult } from "./rolling-pattern-types";
 
 export const RESEARCH_V3_SCHEMA_VERSION = "3" as const;
 export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.1" as const;
@@ -315,4 +316,5 @@ export type ResearchV3Envelope = {
   snapshot: ResearchV3Snapshot;
   source: "computed" | "stored" | "snapshot";
   cycleStatus?: "completed" | "existing" | "awaiting_verification";
+  rollingPatterns?: RollingPatternCycleResult;
 };
