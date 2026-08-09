@@ -32,6 +32,16 @@ test("the production source has no workers.dev dependency", async () => {
   assert.doesNotMatch(source, /marksix-research-v3\.cjl308868584\.workers\.dev/);
 });
 
+test("scheduled research cannot hide a failed cycle behind tee", async () => {
+  const workflow = await readFile(
+    new URL("../.github/workflows/research-v2.yml", import.meta.url),
+    "utf8",
+  );
+  const pipedSteps = workflow.match(/run: \|[\s\S]*?\| tee[\s\S]*?(?=\n      - |$)/g) ?? [];
+  assert.ok(pipedSteps.length >= 2);
+  assert.ok(pipedSteps.every((step) => /set -o pipefail/.test(step)));
+});
+
 test("the Sites seed preserves the audited immutable research ledger", async () => {
   const seed = await readFile(
     new URL("../drizzle/0007_sites_seed.sql", import.meta.url),

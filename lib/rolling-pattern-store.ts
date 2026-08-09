@@ -45,10 +45,10 @@ export async function persistRollingPatternRun(
       run.window.newestIssue,
       run.window.dataHash,
       run.engineVersion,
-      run.status,
+      "processing",
       run.generatedAt,
       run.frozenAt,
-      JSON.stringify(run),
+      JSON.stringify({ ...run, signals: [] }),
     ).run();
     const status = Number(inserted.meta?.changes ?? 0) === 0
       ? "existing" as const
@@ -75,6 +75,11 @@ export async function persistRollingPatternRun(
       );
       await runBatches(db, statements);
     }
+    const completed = await db.prepare(
+      `UPDATE rolling_pattern_runs SET status = 'completed'
+       WHERE run_id = ? AND engine_version = ? AND window_data_hash = ?`,
+    ).bind(run.runId, run.engineVersion, run.window.dataHash).run();
+    if (Number(completed.meta?.changes ?? 0) < 1) return "unavailable";
     return status;
   } catch {
     return "unavailable";
@@ -151,7 +156,14 @@ export async function settleRollingPatternRuns(
       for (const row of rows.results ?? []) {
         const run = parseJson(row.run_json);
         if (!isRollingPatternRun(run)) continue;
-        const statements = run.signals.map((signal) => {
+        const signalRows = await db.prepare(
+          `SELECT signal_json FROM rolling_pattern_signals
+           WHERE run_id = ? ORDER BY rowid ASC`,
+        ).bind(run.runId).all<SignalRow>();
+        const signals = (signalRows.results ?? [])
+          .map((item) => parseJson(item.signal_json))
+          .filter(isRollingPatternSignal);
+        const statements = signals.map((signal) => {
           const actual = evaluateRollingEvent(draw, signal.rule.event);
           const score: RollingPatternScore = {
             runId: run.runId,

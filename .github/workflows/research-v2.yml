@@ -59,6 +59,7 @@ jobs:
       - name: Resync, research, settle and freeze this game
         if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
+          set -o pipefail
           mkdir -p "research-artifacts/$GAME"
           marksix-research cycle \
             --site-url "$SITE_URL" \
@@ -69,6 +70,7 @@ jobs:
       - name: Verify latest verified issue advanced
         if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
+          set -o pipefail
           marksix-research health-check \
             --site-url "$SITE_URL" \
             --game "$GAME" \

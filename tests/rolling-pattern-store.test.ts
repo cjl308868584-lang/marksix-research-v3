@@ -13,6 +13,7 @@ type RunRow = {
   target_issue: string;
   engine_version: string;
   frozen_at: string;
+  status: string;
   run_json: string;
 };
 
@@ -40,8 +41,17 @@ class FakePatternD1 {
             target_issue: String(values[3]),
             engine_version: String(values[7]),
             frozen_at: String(values[10]),
+            status: String(values[8]),
             run_json: String(values[11]),
           });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE rolling_pattern_runs SET status = 'completed'")) {
+          const row = this.runs.get(String(values[0]));
+          if (!row || row.engine_version !== String(values[1])) {
+            return { meta: { changes: 0 } };
+          }
+          row.status = "completed";
           return { meta: { changes: 1 } };
         }
         if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_signals")) {
@@ -79,6 +89,9 @@ class FakePatternD1 {
             (item) => item.game === String(values[0]) &&
               item.target_issue === String(values[1]) &&
               (!requestedEngine || item.engine_version === requestedEngine),
+          ).filter(
+            (item) => !sql.includes("status = 'completed'") ||
+              item.status === "completed",
           ).sort((left, right) => left.frozen_at.localeCompare(right.frozen_at))[0];
           return (row ?? null) as T | null;
         }

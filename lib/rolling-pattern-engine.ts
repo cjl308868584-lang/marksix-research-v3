@@ -26,6 +26,9 @@ const WINDOW_SIZE = 30;
 const PRIOR_STRENGTH = 8;
 const MIN_SUPPORT = 3;
 const MIN_RAW_UPLIFT = 0.05;
+const MAX_STORED_SIGNALS = 180;
+const MAX_RULES_PER_RESULT = 6;
+const MAX_RULES_PER_RESULT_FAMILY = 2;
 
 type BuildRollingPatternRunInput = {
   game: GameId;
@@ -107,7 +110,7 @@ export async function buildRollingPatternRun(
   const qualified = corrected.filter((item) =>
     item.rawUplift >= MIN_RAW_UPLIFT && item.posteriorUplift > 0
   );
-  const signals: RollingPatternSignal[] = qualified
+  const rankedSignals: RollingPatternSignal[] = qualified
     .map((item) => ({
       rule: item.rule,
       currentTriggered: true as const,
@@ -133,6 +136,7 @@ export async function buildRollingPatternRun(
       right.support - left.support ||
       left.rule.ruleId.localeCompare(right.rule.ruleId)
     );
+  const signals = selectDiverseSignals(rankedSignals);
   const runHash = await stablePatternHash([
     input.game,
     input.targetIssue,
@@ -166,6 +170,29 @@ export async function buildRollingPatternRun(
     },
     signals,
   };
+}
+
+function selectDiverseSignals(signals: RollingPatternSignal[]) {
+  const selected: RollingPatternSignal[] = [];
+  const byResult = new Map<string, number>();
+  const byResultFamily = new Map<string, number>();
+  for (const signal of signals) {
+    if (selected.length >= MAX_STORED_SIGNALS) break;
+    const resultKey = signal.rule.event.eventId;
+    const familyKey = `${resultKey}:${signal.rule.family}`;
+    if ((byResult.get(resultKey) ?? 0) >= MAX_RULES_PER_RESULT) continue;
+    if (
+      (byResultFamily.get(familyKey) ?? 0) >=
+        MAX_RULES_PER_RESULT_FAMILY
+    ) continue;
+    selected.push(signal);
+    byResult.set(resultKey, (byResult.get(resultKey) ?? 0) + 1);
+    byResultFamily.set(
+      familyKey,
+      (byResultFamily.get(familyKey) ?? 0) + 1,
+    );
+  }
+  return selected;
 }
 
 function indexEventStates(events: RollingPatternEvent[], draws: Draw[]) {

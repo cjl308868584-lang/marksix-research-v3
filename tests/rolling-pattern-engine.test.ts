@@ -99,6 +99,15 @@ test("never generates hotness, simple lag, or one-draw self continuation", async
     item.rule.antecedent.states.length >= 2));
   assert.ok(run.signals.every((item) => item.rule.conditionLabel.length > 0));
   assert.ok(run.signals.every((item) => item.rule.predictionLabel.startsWith("下一期")));
+  assert.ok(run.signals.length <= 180);
+  const perResult = new Map<string, number>();
+  for (const signal of run.signals) {
+    perResult.set(
+      signal.rule.event.eventId,
+      (perResult.get(signal.rule.event.eventId) ?? 0) + 1,
+    );
+  }
+  assert.ok([...perResult.values()].every((count) => count <= 6));
 });
 
 test("normalizes every active condition to one stable rule id", async () => {
