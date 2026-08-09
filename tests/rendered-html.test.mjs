@@ -94,8 +94,10 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   const response = await render("/research/patterns");
   assert.equal(response.status, 200);
   const html = await response.text();
-  assert.match(html, /<title>近30期规律｜六合智研<\/title>/i);
-  assert.match(html, /只看最新30期/);
+  assert.match(html, /<title>近30期条件规律｜六合智研<\/title>/i);
+  assert.match(html, /条件 A/);
+  assert.match(html, /下一期结果 B/);
+  assert.match(html, /不是热号/);
   assert.match(html, /正在读取冻结的近期规律/);
   assert.match(html, /href="\/research"/);
   assert.match(html, /href="\/research\/patterns"/);

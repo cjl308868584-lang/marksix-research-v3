@@ -112,11 +112,11 @@ export function RollingPatternWorkspace() {
 
       <main>
         <section className="v3-hero rolling-pattern-hero">
-          <span>ROLLING 30 · ACTIVE PATTERNS ONLY</span>
-          <h1>只看最新30期，<br />只留本期已触发</h1>
+          <span>CONDITION A → NEXT-DRAW RESULT B</span>
+          <h1>条件 A 已成立，<br />下一期结果 B 会怎样</h1>
           <p>
-            新期开奖核验后先结算旧规律，再丢掉最早一期并完整重扫。
-            原始命中率会公开展示，小样本同时经过基准收缩提醒。
+            这里研究的是明确的前提与下一期结果，不是热号或出现频率。
+            每期开奖后严格滚动最新30期，重新验证 A → B 的历史表现。
           </p>
           <div className="v3-game-switch" role="group" aria-label="选择彩种">
             {GAMES.map((item) => (
@@ -178,8 +178,8 @@ export function RollingPatternWorkspace() {
                 <h2>指向下一期 {data.run.targetIssue}</h2>
               </div>
               <p>
-                当前分类共 {data.pagination.total} 条。只表示最新30期内的待验证方向，
-                不进入正式策略概率。
+                当前分类共 {data.pagination.total} 条。每条都必须写明条件 A、下一期结果 B
+                和本期触发证据；不进入正式策略概率。
               </p>
             </section>
 
@@ -293,40 +293,53 @@ function PatternCard({
   rank: number;
 }) {
   return (
-    <article className="rolling-pattern-card">
+    <article className={`rolling-pattern-card ${signal.evidenceTier}`}>
       <header>
         <div>
-          <span>{String(rank).padStart(2, "0")} · {familyLabel(signal.rule.event.family)} · 待验证规律</span>
-          <h2>{signal.rule.description}</h2>
-          <p>{signal.rule.event.label}</p>
+          <span>
+            {String(rank).padStart(2, "0")} · {ruleFamilyLabel(signal.rule.family)} · {familyLabel(signal.rule.event.family)}
+          </span>
+          <h2>{signal.rule.relationLabel}</h2>
         </div>
-        <strong className="rolling-pattern-sample">{signal.sampleLabel}</strong>
+        <strong className="rolling-pattern-sample">
+          {signal.evidenceTier === "strong" ? "近期强证据" : "待验证规律"}
+        </strong>
       </header>
 
-      <div className="rolling-pattern-rate">
-        <div><span>近期命中</span><strong>{signal.hits}/{signal.support}</strong></div>
-        <div><span>原始命中率</span><strong>{percent(signal.rawRate)}</strong></div>
-        <div><span>随机基准</span><strong>{percent(signal.baseline)}</strong></div>
-        <div><span>高于基准</span><strong className="good">{signedPoints(signal.rawUplift)}</strong></div>
-        <div><span>收缩后</span><strong>{percent(signal.posteriorRate)}</strong></div>
+      <div className="conditional-relation" aria-label="完整条件规律">
+        <section>
+          <span>历史条件 A</span>
+          <strong>{signal.rule.conditionLabel}</strong>
+        </section>
+        <b aria-hidden="true">→</b>
+        <section>
+          <span>下一期结果 B</span>
+          <strong>{signal.rule.predictionLabel}</strong>
+        </section>
       </div>
 
-      <div className="rolling-pattern-state" aria-label="最近30期状态">
-        {signal.stateHistory.map((state) => (
-          <span
-            className={state.matched ? "matched" : "missed"}
-            aria-label={`${state.issue} ${state.matched ? "出现" : "未出现"}`}
-            title={`${state.issue} ${state.matched ? "出现" : "未出现"}`}
-            key={state.issue}
-          >
-            <i>{state.matched ? "出现" : "未出现"}</i>
-          </span>
-        ))}
+      <div className="rolling-pattern-rate">
+        <div><span>历史触发</span><strong>{signal.support}次</strong></div>
+        <div><span>命中 / 失败</span><strong>{signal.hits} / {signal.support - signal.hits}</strong></div>
+        <div><span>原始命中率</span><strong>{percent(signal.rawRate)}</strong></div>
+        <div><span>B自身随机基准</span><strong>{percent(signal.baseline)}</strong></div>
+        <div><span>高于基准</span><strong className="good">{signedPoints(signal.rawUplift)}</strong></div>
+        <div><span>收缩后</span><strong>{percent(signal.posteriorRate)}</strong></div>
+        <div><span>原始 p / FDR q</span><strong>{statValue(signal.pValue)} / {statValue(signal.qValue)}</strong></div>
+        <div><span>证据结论</span><strong>{signal.evidenceTier === "strong" ? "q≤0.10" : signal.sampleLabel}</strong></div>
       </div>
 
       <div className="rolling-pattern-current">
-        <span>当前为何触发</span>
-        <p>{signal.rule.description}，因此只研究目标期的“{signal.rule.event.value}”事件。</p>
+        <span>本期触发依据</span>
+        <div className="rolling-pattern-evidence-list">
+          {signal.currentEvidence.map((evidence, index) => (
+            <p key={`${evidence.issue}:${evidence.eventId}:${index}`}>
+              <strong>{evidence.issue}</strong>
+              <span>{evidence.eventLabel}</span>
+              <em>实际{evidence.count}个 · {evidence.actualMatched ? "条件成立" : "条件未出现"}</em>
+            </p>
+          ))}
+        </div>
         {signal.relatedRuleCount > 1 && (
           <small>已合并 {signal.relatedRuleCount} 条数学等价规则，未重复计数。</small>
         )}
@@ -334,15 +347,26 @@ function PatternCard({
       </div>
 
       <details className="rolling-pattern-audit">
-        <summary>查看 {signal.support} 次历史触发审计 <span>展开</span></summary>
+        <summary>查看 {signal.support} 次“A → B”历史审计 <span>展开</span></summary>
         <div>
           {signal.audit.map((item) => (
-            <p key={`${item.sourceIssue}:${item.targetIssue}`}>
-              <span>{item.sourceIssue} → {item.targetIssue}</span>
-              <strong className={item.matched ? "hit" : "miss"}>
-                {item.matched ? "命中" : "失败"}
-              </strong>
-            </p>
+            <article key={`${item.sourceIssue}:${item.targetIssue}`}>
+              <header>
+                <span>{item.sourceIssue} 的条件 A → {item.targetIssue} 的结果 B</span>
+                <strong className={item.matched ? "hit" : "miss"}>
+                  {item.matched ? "命中" : "失败"}
+                </strong>
+              </header>
+              <p>
+                A：{item.conditionEvidence.map((evidence) =>
+                  `${evidence.issue} ${evidence.eventLabel}（实际${evidence.count}个）`
+                ).join("；")}
+              </p>
+              <p>
+                B：{signal.rule.predictionLabel}，实际{item.result.count}个，
+                {item.result.matched ? "已满足" : "未满足"}
+              </p>
+            </article>
           ))}
         </div>
       </details>
@@ -354,12 +378,24 @@ function familyLabel(family: RollingPatternFamily) {
   return { zodiac: "生肖", tail: "尾数", wave: "波色", head: "头数" }[family];
 }
 
+function ruleFamilyLabel(family: RollingPatternSignal["rule"]["family"]) {
+  return {
+    single_transfer: "单条件传导",
+    conjunction_transfer: "双条件交集",
+    sequence_transition: "节奏规律",
+  }[family];
+}
+
 function percent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
 function signedPoints(value: number) {
   return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}个百分点`;
+}
+
+function statValue(value: number) {
+  return value < 0.001 ? "<0.001" : value.toFixed(3);
 }
 
 function beijingTime(value: string) {
