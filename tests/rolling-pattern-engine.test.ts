@@ -21,8 +21,8 @@ before(async () => {
     appType: "custom",
     logLevel: "silent",
   });
-  const module = await server.ssrLoadModule("/lib/rolling-pattern-engine.ts");
-  buildRollingPatternRun = module.buildRollingPatternRun;
+  const loadedModule = await server.ssrLoadModule("/lib/rolling-pattern-engine.ts");
+  buildRollingPatternRun = loadedModule.buildRollingPatternRun;
 });
 
 after(async () => {

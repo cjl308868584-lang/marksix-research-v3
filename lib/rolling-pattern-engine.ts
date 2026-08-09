@@ -9,7 +9,6 @@ import {
   type RollingPatternEvent,
   type RollingPatternEventState,
   type RollingPatternRule,
-  type RollingPatternRuleFamily,
   type RollingPatternRun,
   type RollingPatternSignal,
   type RollingPatternTriggerAudit,

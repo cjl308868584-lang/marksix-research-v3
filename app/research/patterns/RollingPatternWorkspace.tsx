@@ -42,14 +42,18 @@ export function RollingPatternWorkspace() {
   const [game, setGame] = useState<GameId>("new_macau");
   const [family, setFamily] = useState<RollingPatternFamily | null>(null);
   const [page, setPage] = useState(1);
-  const [data, setData] = useState<PatternApiResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const [response, setResponse] = useState<{
+    key: string;
+    data: PatternApiResponse | null;
+    error: string;
+  }>({ key: "", data: null, error: "" });
+  const requestKey = `${game}:${family ?? "all"}:${page}`;
+  const loading = response.key !== requestKey;
+  const data = loading ? null : response.data;
+  const error = loading ? "" : response.error;
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoading(true);
-    setError("");
     const query = new URLSearchParams({ game, page: String(page) });
     if (family) query.set("family", family);
     void fetch(`/api/research/patterns?${query.toString()}`, {
@@ -63,17 +67,20 @@ export function RollingPatternWorkspace() {
         }
         return payload;
       })
-      .then(setData)
+      .then((payload) => {
+        setResponse({ key: requestKey, data: payload, error: "" });
+      })
       .catch((reason) => {
         if (!(reason instanceof DOMException && reason.name === "AbortError")) {
-          setError(reason instanceof Error ? reason.message : "近期规律暂不可用。");
+          setResponse({
+            key: requestKey,
+            data: null,
+            error: reason instanceof Error ? reason.message : "近期规律暂不可用。",
+          });
         }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [game, family, page]);
+  }, [game, family, page, requestKey]);
 
   const scoreByRule = useMemo(
     () => new Map((data?.scores ?? []).map((score) => [score.ruleId, score])),
@@ -82,7 +89,6 @@ export function RollingPatternWorkspace() {
 
   const selectGame = (next: GameId) => {
     if (next === game) return;
-    setData(null);
     setPage(1);
     setGame(next);
   };

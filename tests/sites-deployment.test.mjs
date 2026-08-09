@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 
 test("Sites owns the production database through one logical binding", async () => {
   const hosting = JSON.parse(
@@ -53,4 +54,40 @@ test("the Sites seed preserves the audited immutable research ledger", async () 
       `${table} row count must match the verified export`,
     );
   }
+});
+
+test("the rolling pattern migration creates immutable run, signal and score identities", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0008_rolling_pattern_runs.sql", import.meta.url),
+    "utf8",
+  );
+  const database = new DatabaseSync(":memory:");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) database.exec(statement);
+  }
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_schema
+     WHERE type = 'table' AND name LIKE 'rolling_pattern_%'
+     ORDER BY name`,
+  ).all().map((row) => row.name);
+  assert.deepEqual(tables, [
+    "rolling_pattern_runs",
+    "rolling_pattern_scores",
+    "rolling_pattern_signals",
+  ]);
+  database.exec(
+    `INSERT INTO rolling_pattern_signals (
+       run_id, rule_id, game, target_issue, rule_family, event_family,
+       event_value, sample_label, signal_json, frozen_at
+     ) VALUES ('run-1','rule-1','new_macau','2026222','omission_recovery',
+       'tail','0尾','小样本','{}','2026-08-09T13:40:00Z')`,
+  );
+  assert.throws(() => database.exec(
+    `INSERT INTO rolling_pattern_signals (
+       run_id, rule_id, game, target_issue, rule_family, event_family,
+       event_value, sample_label, signal_json, frozen_at
+     ) VALUES ('run-1','rule-1','new_macau','2026222','omission_recovery',
+       'tail','0尾','小样本','{}','2026-08-09T13:40:00Z')`,
+  ));
+  database.close();
 });

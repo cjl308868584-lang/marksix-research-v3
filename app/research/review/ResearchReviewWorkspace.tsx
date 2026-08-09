@@ -1,5 +1,7 @@
 "use client";
 
+/* eslint-disable react-hooks/set-state-in-effect -- legacy request reset is intentionally synchronous */
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { GAME_META, getZodiac, type GameId } from "../../../lib/lottery";
 import type {
@@ -82,7 +84,7 @@ export function ResearchReviewWorkspace() {
   return (
     <div className="v3-shell">
       <header className="v3-topbar">
-        <a href="/" aria-label="返回开奖首页">← 开奖</a>
+        <Link href="/" aria-label="返回开奖首页">← 开奖</Link>
         <div>
           <strong>六合智研</strong>
           <span>逐期学习复盘</span>
@@ -111,9 +113,9 @@ export function ResearchReviewWorkspace() {
             ))}
           </div>
           <nav className="v3-view-switch" aria-label="研究页面">
-            <a href="/research">下一期策略</a>
-            <a href="/research/patterns">近30期规律</a>
-            <a className="active" href="/research/review">逐期复盘</a>
+            <Link href="/research">下一期策略</Link>
+            <Link href="/research/patterns">近30期规律</Link>
+            <Link className="active" href="/research/review">逐期复盘</Link>
           </nav>
         </section>
 

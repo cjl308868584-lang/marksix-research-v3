@@ -24,10 +24,10 @@ before(async () => {
     appType: "custom",
     logLevel: "silent",
   });
-  const module = await server.ssrLoadModule("/lib/rolling-pattern-events.ts");
-  enumerateRollingEvents = module.enumerateRollingEvents;
-  evaluateRollingEvent = module.evaluateRollingEvent;
-  rollingEventBaseline = module.rollingEventBaseline;
+  const loadedModule = await server.ssrLoadModule("/lib/rolling-pattern-events.ts");
+  enumerateRollingEvents = loadedModule.enumerateRollingEvents;
+  evaluateRollingEvent = loadedModule.evaluateRollingEvent;
+  rollingEventBaseline = loadedModule.rollingEventBaseline;
 });
 
 after(async () => {

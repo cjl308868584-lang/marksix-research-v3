@@ -11,6 +11,9 @@ const eslintConfig = defineConfig([
     ".next/**",
     "out/**",
     "build/**",
+    // Test fixtures are compiled by TypeScript and executed by node:test;
+    // Next.js browser rules do not apply to their in-memory module loaders.
+    "tests/**",
     "next-env.d.ts",
   ]),
 ]);
