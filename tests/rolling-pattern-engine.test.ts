@@ -70,6 +70,14 @@ test("freezes separate 6+1 and special targets from the same 6+1 conditions", as
   );
 
   assert.equal(run.engineVersion, "conditional-patterns-v3");
+  assert.equal(
+    run.scopeFunnels.coverage_6_plus_1.qualified,
+    run.signals.filter((item) => item.rule.event.scope === "coverage_6_plus_1").length,
+  );
+  assert.equal(
+    run.scopeFunnels.special.qualified,
+    run.signals.filter((item) => item.rule.event.scope === "special").length,
+  );
   assert.deepEqual(
     new Set(matchingTailRules.map((item) => item.rule.event.scope)),
     new Set(["coverage_6_plus_1", "special"]),
@@ -122,7 +130,10 @@ test("never generates hotness, simple lag, or one-draw self continuation", async
     item.rule.antecedent.states.length >= 2));
   assert.ok(run.signals.every((item) => item.rule.conditionLabel.length > 0));
   assert.ok(run.signals.every((item) => item.rule.predictionLabel.startsWith("下一期")));
-  assert.ok(run.signals.length <= 180);
+  assert.ok(run.signals.length <= 360);
+  assert.ok(["coverage_6_plus_1", "special"].every((scope) =>
+    run.signals.filter((item) => item.rule.event.scope === scope).length <= 180
+  ));
   const perResult = new Map<string, number>();
   for (const signal of run.signals) {
     perResult.set(

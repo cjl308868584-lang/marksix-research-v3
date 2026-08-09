@@ -21,6 +21,7 @@ import {
   type RollingPatternRuleFamily,
   type RollingPatternRun,
   type RollingPatternSignal,
+  type RollingPatternScope,
   type RollingPatternTriggerAudit,
 } from "./rolling-pattern-types";
 
@@ -28,7 +29,7 @@ const WINDOW_SIZE = 30;
 const PRIOR_STRENGTH = 8;
 const MIN_SUPPORT = 3;
 const MIN_RAW_UPLIFT = 0.05;
-const MAX_STORED_SIGNALS = 180;
+const MAX_STORED_SIGNALS_PER_SCOPE = 180;
 const MAX_RULES_PER_RESULT = 6;
 const MAX_RULES_PER_RESULT_FAMILY = 2;
 
@@ -73,10 +74,12 @@ export async function buildRollingPatternRun(
   }
   const chronological = [...windowDraws].reverse();
   const conditionEvents = enumerateRollingConditionEvents(input.expectedDrawAt);
-  const resultEvents = [
-    ...enumerateRollingResultEvents(input.expectedDrawAt, "coverage_6_plus_1"),
-    ...enumerateRollingResultEvents(input.expectedDrawAt, "special"),
-  ];
+  const scopes: readonly RollingPatternScope[] = ["coverage_6_plus_1", "special"];
+  const resultEventsByScope = new Map(scopes.map((scope) => [
+    scope,
+    enumerateRollingResultEvents(input.expectedDrawAt, scope),
+  ]));
+  const resultEvents = scopes.flatMap((scope) => resultEventsByScope.get(scope) ?? []);
   const states = indexEventStates(conditionEvents, resultEvents, chronological);
   const windowDataHash = await stablePatternHash(JSON.stringify(
     chronological.map((draw) => ({
@@ -88,61 +91,24 @@ export async function buildRollingPatternRun(
       verified: draw.verified,
     })),
   ));
-  const generatedRules = generateRules(conditionEvents, resultEvents);
-  const currentEvaluations: RuleEvaluation[] = [];
-  for (const rule of generatedRules) {
-    const currentEvidence = evidenceAt(states, WINDOW_SIZE, rule);
-    if (!currentEvidence) continue;
-    currentEvaluations.push(evaluateRule(
-      rule,
-      states,
-      input.expectedDrawAt,
-      currentEvidence,
-    ));
-  }
-  const grouped = new Map<string, RuleEvaluation[]>();
-  for (const evaluation of currentEvaluations) {
-    const group = grouped.get(evaluation.rule.canonicalJson) ?? [];
-    group.push(evaluation);
-    grouped.set(evaluation.rule.canonicalJson, group);
-  }
-  const deduplicated = [...grouped.values()].map((group) => ({
-    ...group[0],
-    relatedRuleCount: group.length,
-  }));
-  const testable = deduplicated.filter((item) => item.support >= MIN_SUPPORT);
-  const corrected = benjaminiHochberg(testable, (item) => item.pValue);
-  const aboveBaseline = deduplicated.filter((item) => item.rawRate > item.baseline);
-  const qualified = corrected.filter((item) =>
-    item.rawUplift >= MIN_RAW_UPLIFT && item.posteriorUplift > 0
-  );
-  const rankedSignals: RollingPatternSignal[] = qualified
-    .map((item) => ({
-      rule: item.rule,
-      currentTriggered: true as const,
-      currentEvidence: item.currentEvidence,
-      support: item.support,
-      hits: item.hits,
-      rawRate: item.rawRate,
-      baseline: item.baseline,
-      rawUplift: item.rawUplift,
-      posteriorRate: item.posteriorRate,
-      posteriorUplift: item.posteriorUplift,
-      pValue: item.pValue,
-      qValue: item.qValue,
-      evidenceTier: item.qValue <= 0.10 ? "strong" as const : "experimental" as const,
-      sampleLabel: sampleLabel(item.support),
-      relatedRuleCount: item.relatedRuleCount,
-      stateHistory: item.stateHistory,
-      audit: item.audit,
-    }))
-    .sort((left, right) =>
-      Number(right.evidenceTier === "strong") - Number(left.evidenceTier === "strong") ||
-      right.posteriorUplift - left.posteriorUplift ||
-      right.support - left.support ||
-      left.rule.ruleId.localeCompare(right.rule.ruleId)
-    );
-  const signals = selectDiverseSignals(rankedSignals);
+  const scopeResults = scopes.map((scope) => evaluateScope(
+    scope,
+    conditionEvents,
+    resultEventsByScope.get(scope) ?? [],
+    states,
+    input.expectedDrawAt,
+  ));
+  const signals = scopeResults.flatMap((result) => result.signals);
+  const scopeFunnels = Object.fromEntries(
+    scopeResults.map((result) => [result.scope, result.funnel]),
+  ) as RollingPatternRun["scopeFunnels"];
+  const funnel = scopeResults.reduce((total, result) => ({
+    generated: total.generated + result.funnel.generated,
+    currentTriggered: total.currentTriggered + result.funnel.currentTriggered,
+    deduplicated: total.deduplicated + result.funnel.deduplicated,
+    aboveBaseline: total.aboveBaseline + result.funnel.aboveBaseline,
+    qualified: total.qualified + result.funnel.qualified,
+  }), { generated: 0, currentTriggered: 0, deduplicated: 0, aboveBaseline: 0, qualified: 0 });
   const runHash = await stablePatternHash([
     input.game,
     input.targetIssue,
@@ -167,6 +133,71 @@ export async function buildRollingPatternRun(
       newestIssue: chronological[chronological.length - 1].issue,
       dataHash: windowDataHash,
     },
+    funnel,
+    scopeFunnels,
+    signals,
+  };
+}
+
+function evaluateScope(
+  scope: RollingPatternScope,
+  conditionEvents: RollingPatternEvent[],
+  resultEvents: RollingPatternEvent[],
+  states: EventStateIndex,
+  expectedDrawAt: string,
+) {
+  const generatedRules = generateRules(conditionEvents, resultEvents);
+  const currentEvaluations: RuleEvaluation[] = [];
+  for (const rule of generatedRules) {
+    const currentEvidence = evidenceAt(states, WINDOW_SIZE, rule);
+    if (!currentEvidence) continue;
+    currentEvaluations.push(evaluateRule(rule, states, expectedDrawAt, currentEvidence));
+  }
+  const grouped = new Map<string, RuleEvaluation[]>();
+  for (const evaluation of currentEvaluations) {
+    const group = grouped.get(evaluation.rule.canonicalJson) ?? [];
+    group.push(evaluation);
+    grouped.set(evaluation.rule.canonicalJson, group);
+  }
+  const deduplicated = [...grouped.values()].map((group) => ({
+    ...group[0],
+    relatedRuleCount: group.length,
+  }));
+  const corrected = benjaminiHochberg(
+    deduplicated.filter((item) => item.support >= MIN_SUPPORT),
+    (item) => item.pValue,
+  );
+  const aboveBaseline = deduplicated.filter((item) => item.rawRate > item.baseline);
+  const qualified = corrected.filter((item) =>
+    item.rawUplift >= MIN_RAW_UPLIFT && item.posteriorUplift > 0
+  );
+  const rankedSignals: RollingPatternSignal[] = qualified.map((item) => ({
+    rule: item.rule,
+    currentTriggered: true as const,
+    currentEvidence: item.currentEvidence,
+    support: item.support,
+    hits: item.hits,
+    rawRate: item.rawRate,
+    baseline: item.baseline,
+    rawUplift: item.rawUplift,
+    posteriorRate: item.posteriorRate,
+    posteriorUplift: item.posteriorUplift,
+    pValue: item.pValue,
+    qValue: item.qValue,
+    evidenceTier: item.qValue <= 0.10 ? "strong" as const : "experimental" as const,
+    sampleLabel: sampleLabel(item.support),
+    relatedRuleCount: item.relatedRuleCount,
+    stateHistory: item.stateHistory,
+    audit: item.audit,
+  })).sort((left, right) =>
+    Number(right.evidenceTier === "strong") - Number(left.evidenceTier === "strong") ||
+    right.posteriorUplift - left.posteriorUplift ||
+    right.support - left.support ||
+    left.rule.ruleId.localeCompare(right.rule.ruleId)
+  );
+  const signals = selectDiverseSignals(rankedSignals, MAX_STORED_SIGNALS_PER_SCOPE);
+  return {
+    scope,
     funnel: {
       generated: generatedRules.length,
       currentTriggered: currentEvaluations.length,
@@ -178,12 +209,12 @@ export async function buildRollingPatternRun(
   };
 }
 
-function selectDiverseSignals(signals: RollingPatternSignal[]) {
+function selectDiverseSignals(signals: RollingPatternSignal[], limit: number) {
   const selected: RollingPatternSignal[] = [];
   const byResult = new Map<string, number>();
   const byResultFamily = new Map<string, number>();
   for (const signal of signals) {
-    if (selected.length >= MAX_STORED_SIGNALS) break;
+    if (selected.length >= limit) break;
     const resultKey = signal.rule.event.eventId;
     const familyKey = `${resultKey}:${signal.rule.family}`;
     if ((byResult.get(resultKey) ?? 0) >= MAX_RULES_PER_RESULT) continue;

@@ -127,14 +127,17 @@ export type RollingPatternRun = {
   frozenAt: string;
   status: "completed";
   window: RollingPatternWindow;
-  funnel: {
+  funnel: RollingPatternFunnel;
+  scopeFunnels: Record<RollingPatternScope, RollingPatternFunnel>;
+  signals: RollingPatternSignal[];
+};
+
+export type RollingPatternFunnel = {
     generated: number;
     currentTriggered: number;
     deduplicated: number;
     aboveBaseline: number;
     qualified: number;
-  };
-  signals: RollingPatternSignal[];
 };
 
 export type RollingPatternScore = {

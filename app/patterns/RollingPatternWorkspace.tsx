@@ -211,7 +211,7 @@ export function RollingPatternWorkspace() {
                 onSelectResult={selectResult}
               />
             )}
-            <PatternFunnel run={data.run} />
+            <PatternFunnel run={data.run} scope={scope} />
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
               {filters.map((item) => (
                 <button
@@ -412,13 +412,14 @@ function PatternRunContext({ run }: { run: RollingPatternRun }) {
   );
 }
 
-function PatternFunnel({ run }: { run: RollingPatternRun }) {
+function PatternFunnel({ run, scope }: { run: RollingPatternRun; scope: RollingPatternScope }) {
+  const funnel = run.scopeFunnels?.[scope] ?? run.funnel;
   const cells = [
-    ["模板生成", run.funnel.generated],
-    ["当前触发", run.funnel.currentTriggered],
-    ["规范去重", run.funnel.deduplicated],
-    ["高于基准", run.funnel.aboveBaseline],
-    ["最终展示", run.funnel.qualified],
+    ["模板生成", funnel.generated],
+    ["当前触发", funnel.currentTriggered],
+    ["规范去重", funnel.deduplicated],
+    ["高于基准", funnel.aboveBaseline],
+    ["最终展示", funnel.qualified],
   ] as const;
   return (
     <section className="rolling-pattern-funnel" aria-label="本期规律扫描漏斗">
