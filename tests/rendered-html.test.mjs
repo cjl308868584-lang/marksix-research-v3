@@ -91,7 +91,7 @@ test("server-renders the immutable period review workspace", async () => {
 });
 
 test("server-renders the mobile-first rolling 30 pattern workspace", async () => {
-  const response = await render("/research/patterns");
+  const response = await render("/patterns");
   assert.equal(response.status, 200);
   const html = await response.text();
   assert.match(html, /<title>近30期条件规律｜六合智研<\/title>/i);
@@ -100,8 +100,24 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(html, /不是热号/);
   assert.match(html, /正在读取冻结的近期规律/);
   assert.match(html, /href="\/research"/);
-  assert.match(html, /href="\/research\/patterns"/);
+  assert.match(html, /href="\/patterns"/);
   assert.match(html, /href="\/research\/review"/);
+
+  const workspace = await readFile(
+    new URL("../app/patterns/RollingPatternWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(workspace, /支持策略数/);
+  assert.match(workspace, /总命中次数/);
+  assert.match(workspace, /总失败次数/);
+  assert.match(workspace, /结果 B 支持汇总/);
+  assert.match(workspace, /规则审计次数，不是独立期开奖期数/);
+});
+
+test("legacy rolling pattern route redirects to the independent page", async () => {
+  const response = await render("/research/patterns");
+  assert.ok([307, 308].includes(response.status));
+  assert.equal(new URL(response.headers.get("location"), "http://localhost").pathname, "/patterns");
 });
 
 test("all research workspaces expose the same three-way navigation", async () => {

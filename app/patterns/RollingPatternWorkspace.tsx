@@ -2,14 +2,16 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { GAME_META, type GameId } from "../../../lib/lottery";
+import { GAME_META, type GameId } from "../../lib/lottery";
 import type {
   RollingPatternEnvelope,
   RollingPatternFamily,
+  RollingPatternResultSummary,
   RollingPatternRun,
   RollingPatternScore,
   RollingPatternSignal,
-} from "../../../lib/rolling-pattern-types";
+  RollingPatternSummary,
+} from "../../lib/rolling-pattern-types";
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
 const FILTERS: ReadonlyArray<{
@@ -29,6 +31,7 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
   run: RollingPatternRun | null;
   signals: RollingPatternSignal[];
   scores: RollingPatternScore[];
+  summary: RollingPatternSummary | null;
   pagination: {
     page: number;
     pageSize: number;
@@ -159,6 +162,7 @@ export function RollingPatternWorkspace() {
           <>
             <PatternRunContext run={data.run} />
             <PatternFunnel run={data.run} />
+            {data.summary && <PatternSummaryPanel summary={data.summary} />}
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
               {FILTERS.map((item) => (
                 <button
@@ -243,13 +247,96 @@ function ResearchNavigation({ active }: { active: "strategy" | "patterns" | "rev
       <Link className={active === "strategy" ? "active" : ""} href="/research">
         下一期策略
       </Link>
-      <Link className={active === "patterns" ? "active" : ""} href="/research/patterns">
+      <Link className={active === "patterns" ? "active" : ""} href="/patterns">
         近30期规律
       </Link>
       <Link className={active === "review" ? "active" : ""} href="/research/review">
         逐期复盘
       </Link>
     </nav>
+  );
+}
+
+function PatternSummaryPanel({ summary }: { summary: RollingPatternSummary }) {
+  const cells = [
+    ["支持策略数", `${summary.strategyCount}条`],
+    ["支持结果数", `${summary.resultCount}种`],
+    ["历史触发总次数", `${summary.triggerCount}次`],
+    ["总命中次数", `${summary.hitCount}次`],
+    ["总失败次数", `${summary.missCount}次`],
+    ["汇总命中率", percent(summary.hitRate)],
+    ["加权随机基准", percent(summary.baselineRate)],
+    ["相对基准", signedPoints(summary.uplift)],
+  ] as const;
+
+  return (
+    <section className="rolling-pattern-summary" aria-labelledby="pattern-summary-title">
+      <header>
+        <div>
+          <span>ALL ACTIVE RULES · FULL WINDOW</span>
+          <h2 id="pattern-summary-title">本期规律总统计</h2>
+        </div>
+        <p>
+          统计当前分类全部冻结规律，不受每页20条限制。命中、失败和触发均为
+          规则审计次数，不是独立期开奖期数。
+        </p>
+      </header>
+
+      <div className="rolling-pattern-summary-kpis">
+        {cells.map(([label, value]) => (
+          <div key={label}>
+            <span>{label}</span>
+            <strong>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      <div className="rolling-pattern-summary-detail">
+        <span>
+          随机预期命中 {decimal(summary.expectedHits)} 次 · 随机预期失败 {decimal(summary.expectedMisses)} 次
+        </span>
+        <strong>
+          近期强证据 {summary.strongStrategyCount} 条 · 待验证 {summary.experimentalStrategyCount} 条
+        </strong>
+      </div>
+
+      <section className="rolling-pattern-result-summary" aria-labelledby="result-summary-title">
+        <header>
+          <span>RESULT B CONSENSUS</span>
+          <h3 id="result-summary-title">结果 B 支持汇总</h3>
+          <p>相同结果由多少条条件规律支持，以及这些规律过去累计命中和失败多少次。</p>
+        </header>
+        {summary.resultGroups.length === 0 ? (
+          <p className="rolling-pattern-result-empty">当前分类没有可汇总的结果 B。</p>
+        ) : (
+          <div className="rolling-pattern-result-grid">
+            {summary.resultGroups.map((group) => (
+              <PatternResultSummaryCard group={group} key={group.eventId} />
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function PatternResultSummaryCard({ group }: { group: RollingPatternResultSummary }) {
+  return (
+    <article className="rolling-pattern-result-card">
+      <header>
+        <span>{familyLabel(group.family)}</span>
+        <strong>{group.label}</strong>
+        <em>{group.strategyCount}条策略支持</em>
+      </header>
+      <div>
+        <p><span>命中 / 失败</span><strong>{group.hitCount} / {group.missCount}</strong></p>
+        <p><span>历史触发</span><strong>{group.triggerCount}次</strong></p>
+        <p><span>汇总命中率</span><strong>{percent(group.hitRate)}</strong></p>
+        <p><span>随机基准</span><strong>{percent(group.baselineRate)}</strong></p>
+        <p><span>高于基准</span><strong className={group.uplift >= 0 ? "good" : "bad"}>{signedPoints(group.uplift)}</strong></p>
+        <p><span>证据构成</span><strong>{group.strongStrategyCount}强 / {group.experimentalStrategyCount}待验</strong></p>
+      </div>
+    </article>
   );
 }
 
@@ -396,6 +483,10 @@ function signedPoints(value: number) {
 
 function statValue(value: number) {
   return value < 0.001 ? "<0.001" : value.toFixed(3);
+}
+
+function decimal(value: number) {
+  return value.toFixed(1);
 }
 
 function beijingTime(value: string) {
