@@ -8,19 +8,23 @@ import type {
   RollingPatternFamily,
   RollingPatternResultSummary,
   RollingPatternRun,
+  RollingPatternScope,
   RollingPatternScore,
   RollingPatternSignal,
   RollingPatternSummary,
 } from "../../lib/rolling-pattern-types";
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
-const FILTERS: ReadonlyArray<{
+const COVERAGE_FILTERS: ReadonlyArray<{
   value: RollingPatternFamily | null;
   label: string;
 }> = [
   { value: null, label: "全部" },
   { value: "zodiac", label: "生肖" },
   { value: "tail", label: "尾数" },
+];
+const SPECIAL_FILTERS: typeof COVERAGE_FILTERS = [
+  ...COVERAGE_FILTERS,
   { value: "wave", label: "波色" },
   { value: "head", label: "头数" },
 ];
@@ -43,22 +47,25 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
 
 export function RollingPatternWorkspace() {
   const [game, setGame] = useState<GameId>("new_macau");
+  const [scope, setScope] = useState<RollingPatternScope>("coverage_6_plus_1");
   const [family, setFamily] = useState<RollingPatternFamily | null>(null);
+  const [resultEventId, setResultEventId] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const [response, setResponse] = useState<{
     key: string;
     data: PatternApiResponse | null;
     error: string;
   }>({ key: "", data: null, error: "" });
-  const requestKey = `${game}:${family ?? "all"}:${page}`;
+  const requestKey = `${game}:${scope}:${family ?? "all"}:${resultEventId ?? "all"}:${page}`;
   const loading = response.key !== requestKey;
   const data = loading ? null : response.data;
   const error = loading ? "" : response.error;
 
   useEffect(() => {
     const controller = new AbortController();
-    const query = new URLSearchParams({ game, page: String(page) });
+    const query = new URLSearchParams({ game, scope, page: String(page) });
     if (family) query.set("family", family);
+    if (resultEventId) query.set("result", resultEventId);
     void fetch(`/api/research/patterns?${query.toString()}`, {
       cache: "no-store",
       signal: controller.signal,
@@ -83,7 +90,7 @@ export function RollingPatternWorkspace() {
         }
       });
     return () => controller.abort();
-  }, [game, family, page, requestKey]);
+  }, [game, scope, family, resultEventId, page, requestKey]);
 
   const scoreByRule = useMemo(
     () => new Map((data?.scores ?? []).map((score) => [score.ruleId, score])),
@@ -93,14 +100,33 @@ export function RollingPatternWorkspace() {
   const selectGame = (next: GameId) => {
     if (next === game) return;
     setPage(1);
+    setResultEventId(null);
     setGame(next);
+  };
+
+  const selectScope = (next: RollingPatternScope) => {
+    if (next === scope) return;
+    setPage(1);
+    setFamily(null);
+    setResultEventId(null);
+    setScope(next);
   };
 
   const selectFamily = (next: RollingPatternFamily | null) => {
     if (next === family) return;
     setPage(1);
+    setResultEventId(null);
     setFamily(next);
   };
+
+  const selectResult = (next: string) => {
+    setPage(1);
+    setResultEventId((current) => current === next ? null : next);
+  };
+
+  const filters = scope === "coverage_6_plus_1"
+    ? COVERAGE_FILTERS
+    : SPECIAL_FILTERS;
 
   return (
     <div className="v3-shell rolling-pattern-shell">
@@ -119,7 +145,7 @@ export function RollingPatternWorkspace() {
           <h1>条件 A 已成立，<br />下一期结果 B 会怎样</h1>
           <p>
             这里研究的是明确的前提与下一期结果，不是热号或出现频率。
-            每期开奖后严格滚动最新30期，重新验证 A → B 的历史表现。
+            条件 A 统一读取本期6+1；每期开奖后严格滚动最新30期，重新验证 A → B。
           </p>
           <div className="v3-game-switch" role="group" aria-label="选择彩种">
             {GAMES.map((item) => (
@@ -133,7 +159,24 @@ export function RollingPatternWorkspace() {
               </button>
             ))}
           </div>
-          <ResearchNavigation active="patterns" />
+          <div className="rolling-pattern-scope-switch" role="group" aria-label="选择结果范围">
+            <button
+              type="button"
+              className={scope === "coverage_6_plus_1" ? "active" : ""}
+              onClick={() => selectScope("coverage_6_plus_1")}
+            >
+              <strong>6+1覆盖规律</strong>
+              <span>结果只研究生肖、尾数</span>
+            </button>
+            <button
+              type="button"
+              className={scope === "special" ? "active" : ""}
+              onClick={() => selectScope("special")}
+            >
+              <strong>特码规律</strong>
+              <span>结果只看下一期的特码</span>
+            </button>
+          </div>
         </section>
 
         {loading && (
@@ -161,10 +204,16 @@ export function RollingPatternWorkspace() {
         {!loading && !error && data?.run && (
           <>
             <PatternRunContext run={data.run} />
-            {data.summary && <PatternSummaryPanel summary={data.summary} />}
+            {data.summary && (
+              <PatternSummaryPanel
+                summary={data.summary}
+                selectedResult={resultEventId}
+                onSelectResult={selectResult}
+              />
+            )}
             <PatternFunnel run={data.run} />
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
-              {FILTERS.map((item) => (
+              {filters.map((item) => (
                 <button
                   type="button"
                   className={family === item.value ? "active" : ""}
@@ -182,7 +231,7 @@ export function RollingPatternWorkspace() {
                 <h2>指向下一期 {data.run.targetIssue}</h2>
               </div>
               <p>
-                当前分类共 {data.pagination.total} 条。每条都必须写明条件 A、下一期结果 B
+                当前筛选共 {data.pagination.total} 条。每条都必须写明条件 A、下一期结果 B
                 和本期触发证据；不进入正式策略概率。
               </p>
             </section>
@@ -241,23 +290,15 @@ export function RollingPatternWorkspace() {
   );
 }
 
-function ResearchNavigation({ active }: { active: "strategy" | "patterns" | "review" }) {
-  return (
-    <nav className="v3-view-switch" aria-label="研究页面">
-      <Link className={active === "strategy" ? "active" : ""} href="/research">
-        下一期策略
-      </Link>
-      <Link className={active === "patterns" ? "active" : ""} href="/patterns">
-        近30期规律
-      </Link>
-      <Link className={active === "review" ? "active" : ""} href="/research/review">
-        逐期复盘
-      </Link>
-    </nav>
-  );
-}
-
-function PatternSummaryPanel({ summary }: { summary: RollingPatternSummary }) {
+function PatternSummaryPanel({
+  summary,
+  selectedResult,
+  onSelectResult,
+}: {
+  summary: RollingPatternSummary;
+  selectedResult: string | null;
+  onSelectResult: (eventId: string) => void;
+}) {
   const cells = [
     ["支持策略数", `${summary.strategyCount}条`],
     ["支持结果数", `${summary.resultCount}种`],
@@ -311,7 +352,12 @@ function PatternSummaryPanel({ summary }: { summary: RollingPatternSummary }) {
         ) : (
           <div className="rolling-pattern-result-grid">
             {summary.resultGroups.map((group) => (
-              <PatternResultSummaryCard group={group} key={group.eventId} />
+              <PatternResultSummaryCard
+                group={group}
+                selected={selectedResult === group.eventId}
+                onSelect={() => onSelectResult(group.eventId)}
+                key={group.eventId}
+              />
             ))}
           </div>
         )}
@@ -320,9 +366,22 @@ function PatternSummaryPanel({ summary }: { summary: RollingPatternSummary }) {
   );
 }
 
-function PatternResultSummaryCard({ group }: { group: RollingPatternResultSummary }) {
+function PatternResultSummaryCard({
+  group,
+  selected,
+  onSelect,
+}: {
+  group: RollingPatternResultSummary;
+  selected: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <article className="rolling-pattern-result-card">
+    <button
+      type="button"
+      className={`rolling-pattern-result-card ${selected ? "selected" : ""}`}
+      aria-pressed={selected}
+      onClick={onSelect}
+    >
       <header>
         <span>{familyLabel(group.family)}</span>
         <strong>{group.label}</strong>
@@ -336,7 +395,7 @@ function PatternResultSummaryCard({ group }: { group: RollingPatternResultSummar
         <p><span>高于基准</span><strong className={group.uplift >= 0 ? "good" : "bad"}>{signedPoints(group.uplift)}</strong></p>
         <p><span>证据构成</span><strong>{group.strongStrategyCount}强 / {group.experimentalStrategyCount}待验</strong></p>
       </div>
-    </article>
+    </button>
   );
 }
 
@@ -401,7 +460,8 @@ function PatternCard({
         <b aria-hidden="true">→</b>
         <section>
           <span>下一期结果 B</span>
-          <strong>{signal.rule.predictionLabel}</strong>
+          <strong className="rolling-pattern-result-value">{signal.rule.event.value}</strong>
+          <small>{signal.rule.predictionLabel}</small>
         </section>
       </div>
 

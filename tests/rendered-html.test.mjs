@@ -100,10 +100,11 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(html, /条件 A/);
   assert.match(html, /下一期结果 B/);
   assert.match(html, /不是热号/);
+  assert.match(html, /6\+1覆盖规律/);
+  assert.match(html, /特码规律/);
   assert.match(html, /正在读取冻结的近期规律/);
-  assert.match(html, /href="\/research"/);
-  assert.match(html, /href="\/patterns"/);
-  assert.match(html, /href="\/research\/review"/);
+  assert.doesNotMatch(html, /aria-label="研究页面"/);
+  assert.doesNotMatch(html, /href="\/research(?:\/review)?"/);
 
   const workspace = await readFile(
     new URL("../app/patterns/RollingPatternWorkspace.tsx", import.meta.url),
@@ -122,13 +123,13 @@ test("legacy rolling pattern route redirects to the independent page", async () 
   assert.equal(new URL(response.headers.get("location"), "http://localhost").pathname, "/patterns");
 });
 
-test("all research workspaces expose the same three-way navigation", async () => {
-  for (const path of ["/research", "/patterns", "/research/review"]) {
+test("strategy and review stay linked while patterns remain a standalone workspace", async () => {
+  for (const path of ["/research", "/research/review"]) {
     const response = await render(path);
     const html = await response.text();
     assert.match(html, /href="\/research"/);
-    assert.match(html, /href="\/patterns"/);
     assert.match(html, /href="\/research\/review"/);
+    assert.doesNotMatch(html, /href="\/patterns"/);
   }
 });
 

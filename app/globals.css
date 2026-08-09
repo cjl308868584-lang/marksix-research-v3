@@ -8162,6 +8162,41 @@ footer p {
 
 .rolling-pattern-hero { padding-bottom: 22px; }
 
+.rolling-pattern-scope-switch {
+  width: min(100%, 620px);
+  margin-top: 16px;
+  padding: 4px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  border: 1px solid #2d3335;
+  border-radius: 11px;
+  background: #0b0e0f;
+}
+
+.rolling-pattern-scope-switch button {
+  min-width: 0;
+  min-height: 54px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: #888f8c;
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.rolling-pattern-scope-switch button strong,
+.rolling-pattern-scope-switch button span { display: block; }
+.rolling-pattern-scope-switch button strong { color: #d9d8d1; font-size: 11px; font-weight: 500; }
+.rolling-pattern-scope-switch button span { margin-top: 4px; font-size: 8px; line-height: 1.45; }
+.rolling-pattern-scope-switch button.active {
+  border-color: #79683a;
+  background: rgba(207, 177, 96, .14);
+}
+.rolling-pattern-scope-switch button.active strong { color: #f1d888; }
+
 .rolling-pattern-context {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -8313,11 +8348,24 @@ footer p {
 
 .rolling-pattern-result-grid { display: grid; gap: 8px; }
 .rolling-pattern-result-card {
+  width: 100%;
   min-width: 0;
+  padding: 0;
   overflow: hidden;
   border: 1px solid #303637;
   border-radius: 10px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
   background: rgba(10, 13, 14, .84);
+  cursor: pointer;
+  transition: border-color .18s ease, background .18s ease;
+}
+.rolling-pattern-result-card:hover,
+.rolling-pattern-result-card:focus-visible { border-color: #78683d; }
+.rolling-pattern-result-card.selected {
+  border-color: #c1a454;
+  background: rgba(46, 39, 21, .62);
 }
 .rolling-pattern-result-card > header {
   padding: 12px;
@@ -8336,9 +8384,9 @@ footer p {
 }
 .rolling-pattern-result-card > header strong {
   overflow-wrap: anywhere;
-  color: #dfddd5;
-  font-size: 11px;
-  font-weight: 500;
+  color: #f0cf68;
+  font-size: 18px;
+  font-weight: 600;
 }
 .rolling-pattern-result-card > header em {
   color: #d0b665;
@@ -8479,6 +8527,21 @@ footer p {
   font-size: 11px;
   font-weight: 500;
   line-height: 1.65;
+}
+
+.conditional-relation .rolling-pattern-result-value {
+  color: #f0cf68;
+  font-family: var(--font-serif);
+  font-size: 20px;
+}
+
+.conditional-relation small {
+  margin-top: 5px;
+  display: block;
+  overflow-wrap: anywhere;
+  color: #8c9390;
+  font-size: 9px;
+  line-height: 1.55;
 }
 
 .conditional-relation b {
