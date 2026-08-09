@@ -82,7 +82,7 @@ export async function buildRollingPatternRun(
   const generatedRules = generateRules(events);
   const currentEvaluations: RuleEvaluation[] = [];
   for (const rule of generatedRules) {
-    const currentEvidence = evidenceAt(states, states.size ? WINDOW_SIZE : 0, rule);
+    const currentEvidence = evidenceAt(states, WINDOW_SIZE, rule);
     if (!currentEvidence) continue;
     currentEvaluations.push(evaluateRule(
       rule,

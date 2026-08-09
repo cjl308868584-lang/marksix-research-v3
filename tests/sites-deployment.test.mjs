@@ -75,6 +75,24 @@ test("the rolling pattern migration creates immutable run, signal and score iden
     "rolling_pattern_scores",
     "rolling_pattern_signals",
   ]);
+  const insertRun = database.prepare(
+    `INSERT INTO rolling_pattern_runs (
+       run_id, game, source_issue, target_issue, window_oldest_issue,
+       window_newest_issue, window_data_hash, engine_version, status,
+       generated_at, frozen_at, run_json
+     ) VALUES (?, 'new_macau', '2026220', '2026221', '2026191',
+       '2026220', 'same-window', ?, 'completed',
+       '2026-08-09T13:40:00Z', '2026-08-09T13:40:00Z', '{}')`,
+  );
+  insertRun.run("legacy-run", "rolling-patterns-v1");
+  insertRun.run("conditional-run", "conditional-patterns-v2");
+  const versions = database.prepare(
+    `SELECT engine_version FROM rolling_pattern_runs
+     WHERE game = 'new_macau' AND target_issue = '2026221'
+     ORDER BY engine_version`,
+  ).all().map((row) => row.engine_version);
+  assert.deepEqual(versions, ["conditional-patterns-v2", "rolling-patterns-v1"]);
+  assert.throws(() => insertRun.run("duplicate-v2", "conditional-patterns-v2"));
   database.exec(
     `INSERT INTO rolling_pattern_signals (
        run_id, rule_id, game, target_issue, rule_family, event_family,
