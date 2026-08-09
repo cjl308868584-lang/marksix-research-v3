@@ -150,6 +150,38 @@ export type RollingPatternEnvelope = {
   scores: RollingPatternScore[];
 };
 
+export type RollingPatternResultSummary = {
+  eventId: string;
+  label: string;
+  family: RollingPatternFamily;
+  strategyCount: number;
+  triggerCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number;
+  expectedHits: number;
+  baselineRate: number;
+  uplift: number;
+  strongStrategyCount: number;
+  experimentalStrategyCount: number;
+};
+
+export type RollingPatternSummary = {
+  strategyCount: number;
+  resultCount: number;
+  triggerCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number;
+  expectedHits: number;
+  expectedMisses: number;
+  baselineRate: number;
+  uplift: number;
+  strongStrategyCount: number;
+  experimentalStrategyCount: number;
+  resultGroups: RollingPatternResultSummary[];
+};
+
 export type RollingPatternCycleResult =
   | {
       status: "created" | "existing";
