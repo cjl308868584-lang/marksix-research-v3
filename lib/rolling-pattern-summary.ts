@@ -1,8 +1,30 @@
 import type {
+  RollingPatternFamily,
   RollingPatternResultSummary,
+  RollingPatternScope,
   RollingPatternSignal,
   RollingPatternSummary,
 } from "./rolling-pattern-types";
+
+export function selectRollingPatternView(
+  signals: readonly RollingPatternSignal[],
+  filters: {
+    scope: RollingPatternScope;
+    family: RollingPatternFamily | null;
+    resultEventId: string | null;
+  },
+) {
+  const scoped = signals.filter((signal) =>
+    signal.rule.event.scope === filters.scope &&
+    (!filters.family || signal.rule.event.family === filters.family)
+  );
+  return {
+    summary: summarizeRollingPatterns(scoped),
+    signals: filters.resultEventId
+      ? scoped.filter((signal) => signal.rule.event.eventId === filters.resultEventId)
+      : scoped,
+  };
+}
 
 type MutableResultSummary = Omit<
   RollingPatternResultSummary,
@@ -32,7 +54,7 @@ export function summarizeRollingPatterns(
     const event = signal.rule.event;
     const existing = resultGroups.get(event.eventId) ?? {
       eventId: event.eventId,
-      label: signal.rule.predictionLabel,
+      label: event.value,
       family: event.family,
       strategyCount: 0,
       triggerCount: 0,
@@ -62,7 +84,8 @@ export function summarizeRollingPatterns(
       return { ...group, hitRate, baselineRate, uplift: hitRate - baselineRate };
     })
     .sort((left, right) =>
-      right.strongStrategyCount - left.strongStrategyCount ||
+      right.hitRate - left.hitRate ||
+      right.triggerCount - left.triggerCount ||
       right.strategyCount - left.strategyCount ||
       right.uplift - left.uplift ||
       left.label.localeCompare(right.label, "zh-CN")

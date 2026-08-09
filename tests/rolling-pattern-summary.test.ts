@@ -1,16 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { summarizeRollingPatterns } from "../lib/rolling-pattern-summary.ts";
+import {
+  selectRollingPatternView,
+  summarizeRollingPatterns,
+} from "../lib/rolling-pattern-summary.ts";
 import type {
   RollingPatternEvidenceTier,
   RollingPatternFamily,
   RollingPatternSignal,
+  RollingPatternScope,
 } from "../lib/rolling-pattern-types";
 
 function signal(input: {
   ruleId: string;
   eventId: string;
   label: string;
+  value?: string;
+  scope?: RollingPatternScope;
   family?: RollingPatternFamily;
   support: number;
   hits: number;
@@ -39,9 +45,9 @@ function signal(input: {
       },
       event: {
         eventId: input.eventId,
-        scope: "coverage_6_plus_1",
+        scope: input.scope ?? "coverage_6_plus_1",
         family: input.family ?? "zodiac",
-        value: input.label,
+        value: input.value ?? input.label,
         label: input.label,
         threshold: 1,
         memberCount: 4,
@@ -77,6 +83,7 @@ test("summarizes unique strategies across mixed result baselines", () => {
     ruleId: "rule-a",
     eventId: "zodiac:羊:1",
     label: "下一期6+1至少出现一次羊",
+    value: "羊",
     support: 10,
     hits: 7,
     baseline: 0.472,
@@ -89,6 +96,7 @@ test("summarizes unique strategies across mixed result baselines", () => {
       ruleId: "rule-b",
       eventId: "zodiac:羊:1",
       label: "下一期6+1至少出现一次羊",
+      value: "羊",
       support: 6,
       hits: 4,
       baseline: 0.472,
@@ -114,6 +122,7 @@ test("summarizes unique strategies across mixed result baselines", () => {
   assert.equal(summary.strongStrategyCount, 1);
   assert.equal(summary.experimentalStrategyCount, 2);
   assert.equal(summary.resultGroups[0].eventId, "zodiac:羊:1");
+  assert.equal(summary.resultGroups[0].label, "羊");
   assert.equal(summary.resultGroups[0].strategyCount, 2);
   assert.equal(summary.resultGroups[0].hitCount, 11);
   assert.equal(summary.resultGroups[0].missCount, 5);
@@ -137,12 +146,58 @@ test("returns an explicit zero summary for no active rules", () => {
   });
 });
 
-test("sorts result support by strong evidence, strategies, uplift, then label", () => {
+test("sorts result support by hit rate before evidence or strategy counts", () => {
   const summary = summarizeRollingPatterns([
-    signal({ ruleId: "a", eventId: "a", label: "甲", support: 4, hits: 3, baseline: 0.5 }),
-    signal({ ruleId: "b", eventId: "b", label: "乙", support: 4, hits: 2, baseline: 0.5, evidenceTier: "strong" }),
-    signal({ ruleId: "c", eventId: "c", label: "丙", support: 4, hits: 3, baseline: 0.5, evidenceTier: "strong" }),
+    signal({ ruleId: "a", eventId: "a", label: "甲", support: 10, hits: 8, baseline: 0.5 }),
+    signal({ ruleId: "b", eventId: "b", label: "乙", support: 20, hits: 14, baseline: 0.5, evidenceTier: "strong" }),
+    signal({ ruleId: "c", eventId: "c", label: "丙", support: 4, hits: 4, baseline: 0.5 }),
   ]);
 
-  assert.deepEqual(summary.resultGroups.map((group) => group.eventId), ["c", "b", "a"]);
+  assert.deepEqual(summary.resultGroups.map((group) => group.eventId), ["c", "a", "b"]);
+});
+
+test("selects one scope before summary and applies result filtering only to details", () => {
+  const coverage = signal({
+    ruleId: "coverage",
+    eventId: "coverage:tail:7尾:gte1",
+    label: "下一期6+1至少出现一次7尾",
+    value: "7尾",
+    family: "tail",
+    support: 8,
+    hits: 6,
+    baseline: 0.55,
+  });
+  const specialTail = signal({
+    ruleId: "special-tail",
+    eventId: "special:tail:7尾:gte1",
+    label: "下一期的特码为7尾",
+    value: "7尾",
+    family: "tail",
+    scope: "special",
+    support: 5,
+    hits: 4,
+    baseline: 0.1,
+  });
+  const specialWave = signal({
+    ruleId: "special-wave",
+    eventId: "special:wave:红波:gte1",
+    label: "下一期的特码为红波",
+    value: "红波",
+    family: "wave",
+    scope: "special",
+    support: 4,
+    hits: 3,
+    baseline: 17 / 49,
+  });
+
+  const view = selectRollingPatternView(
+    [coverage, specialTail, specialWave],
+    { scope: "special", family: null, resultEventId: specialTail.rule.event.eventId },
+  );
+  assert.equal(view.summary.strategyCount, 2);
+  assert.deepEqual(view.summary.resultGroups.map((group) => group.eventId), [
+    specialTail.rule.event.eventId,
+    specialWave.rule.event.eventId,
+  ]);
+  assert.deepEqual(view.signals.map((item) => item.rule.ruleId), ["special-tail"]);
 });

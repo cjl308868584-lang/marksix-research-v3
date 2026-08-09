@@ -153,7 +153,7 @@ test("rolling pattern API rejects unsupported parameters before reading storage"
 
 test("rolling pattern API returns an explicit no-store unavailable state", async () => {
   const response = await fetchWorker(
-    "/api/research/patterns?game=new_macau",
+    "/api/research/patterns?game=new_macau&scope=special",
   );
   assert.equal(response.status, 404);
   assert.equal(response.headers.get("cache-control"), "private, no-store");
@@ -168,16 +168,14 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
   });
 });
 
-test("rolling pattern API summarizes all filtered rules before pagination", async () => {
-  const route = await readFile(
-    new URL("../app/api/research/patterns/route.ts", import.meta.url),
-    "utf8",
+test("rolling pattern API rejects a family that is unavailable in the selected scope", async () => {
+  const response = await fetchWorker(
+    "/api/research/patterns?game=new_macau&scope=coverage_6_plus_1&family=wave",
   );
-  const summaryIndex = route.indexOf("summarizeRollingPatterns(filtered)");
-  const paginationIndex = route.indexOf("filtered.slice(start, start + PAGE_SIZE)");
-  assert.ok(summaryIndex >= 0, "the API must aggregate the filtered rule set");
-  assert.ok(paginationIndex >= 0, "the API must still paginate detailed cards");
-  assert.ok(summaryIndex < paginationIndex, "summary must use all rules before pagination");
+  assert.equal(response.status, 400);
+  assert.deepEqual(await response.json(), {
+    error: "彩种、期号、结果域、分类、结果或页码无效。",
+  });
 });
 
 test("public research reads never settle, train, or freeze forecasts", async () => {
