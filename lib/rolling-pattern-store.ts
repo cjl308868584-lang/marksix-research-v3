@@ -7,6 +7,7 @@ import type {
   RollingPatternScore,
   RollingPatternSignal,
 } from "./rolling-pattern-types";
+import { ROLLING_PATTERN_ENGINE_VERSION } from "./rolling-pattern-types";
 
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: D1Database;
@@ -99,10 +100,11 @@ export async function readRollingPatternRun(
     const row = await db.prepare(
       `SELECT run_id, run_json
        FROM rolling_pattern_runs
-       WHERE game = ? AND target_issue = ? AND status = 'completed'
+       WHERE game = ? AND target_issue = ? AND engine_version = ?
+         AND status = 'completed'
        ORDER BY frozen_at ASC, run_id ASC
        LIMIT 1`,
-    ).bind(game, targetIssue).first<RunRow>();
+    ).bind(game, targetIssue, ROLLING_PATTERN_ENGINE_VERSION).first<RunRow>();
     const run = parseJson(row?.run_json ?? "");
     if (!isRollingPatternRun(run)) return null;
     const [signalRows, scoreRows] = await Promise.all([
@@ -183,7 +185,8 @@ export async function settleRollingPatternRuns(
 function isRollingPatternRun(value: unknown): value is RollingPatternRun {
   if (!value || typeof value !== "object") return false;
   const run = value as Partial<RollingPatternRun>;
-  return run.schemaVersion === "rolling-patterns-1" &&
+  const schemaVersion = (value as { schemaVersion?: string }).schemaVersion;
+  return (schemaVersion === "rolling-patterns-1" || schemaVersion === "rolling-patterns-2") &&
     (run.game === "hk" || run.game === "new_macau") &&
     typeof run.runId === "string" &&
     typeof run.targetIssue === "string" &&

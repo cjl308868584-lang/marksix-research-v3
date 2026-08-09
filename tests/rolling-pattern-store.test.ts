@@ -11,6 +11,8 @@ type RunRow = {
   run_id: string;
   game: string;
   target_issue: string;
+  engine_version: string;
+  frozen_at: string;
   run_json: string;
 };
 
@@ -35,6 +37,8 @@ class FakePatternD1 {
             run_id: runId,
             game: String(values[1]),
             target_issue: String(values[3]),
+            engine_version: String(values[7]),
+            frozen_at: String(values[10]),
             run_json: String(values[11]),
           });
           return { meta: { changes: 1 } };
@@ -67,10 +71,14 @@ class FakePatternD1 {
           return (target_issue ? { target_issue } : null) as T | null;
         }
         if (sql.includes("FROM rolling_pattern_runs")) {
-          const row = [...this.runs.values()].find(
+          const requestedEngine = sql.includes("engine_version = ?")
+            ? String(values[2])
+            : null;
+          const row = [...this.runs.values()].filter(
             (item) => item.game === String(values[0]) &&
-              item.target_issue === String(values[1]),
-          );
+              item.target_issue === String(values[1]) &&
+              (!requestedEngine || item.engine_version === requestedEngine),
+          ).sort((left, right) => left.frozen_at.localeCompare(right.frozen_at))[0];
           return (row ?? null) as T | null;
         }
         return null;
@@ -199,6 +207,22 @@ test("current reads never fall back to a previous target issue", async () => {
     (await store.readRollingPatternRun("new_macau", "2026031"))?.run.targetIssue,
     "2026031",
   );
+});
+
+test("current reads ignore a frozen v1 heat-like run for the same target", async () => {
+  const legacy = {
+    ...runFixture,
+    schemaVersion: "rolling-patterns-1",
+    engineVersion: "rolling-patterns-v1",
+    runId: `legacy_${runFixture.runId}`,
+    frozenAt: "2026-01-30T12:00:00.000Z",
+  } as unknown as RollingPatternRun;
+  assert.equal(await store.persistRollingPatternRun(legacy), "created");
+  assert.equal(await store.persistRollingPatternRun(runFixture), "created");
+
+  const restored = await store.readRollingPatternRun("new_macau");
+  assert.equal(restored?.run.engineVersion, runFixture.engineVersion);
+  assert.equal(restored?.run.runId, runFixture.runId);
 });
 
 test("settlement scores only the previously frozen verified target and is idempotent", async () => {
