@@ -16,6 +16,7 @@ const runtime = globalThis as typeof globalThis & {
 type RunRow = { run_id: string; run_json: string };
 type SignalRow = { signal_json: string };
 type ScoreRow = { score_json: string };
+const D1_BATCH_SIZE = 80;
 
 export async function ensureRollingPatternStore() {
   return ensureResearchV3Store();
@@ -49,9 +50,11 @@ export async function persistRollingPatternRun(
       run.frozenAt,
       JSON.stringify(run),
     ).run();
-    if (Number(inserted.meta?.changes ?? 0) === 0) return "existing";
+    const status = Number(inserted.meta?.changes ?? 0) === 0
+      ? "existing" as const
+      : "created" as const;
     if (run.signals.length) {
-      await db.batch(run.signals.map((signal) =>
+      const statements = run.signals.map((signal) =>
         db.prepare(
           `INSERT OR IGNORE INTO rolling_pattern_signals (
              run_id, rule_id, game, target_issue, rule_family,
@@ -69,9 +72,10 @@ export async function persistRollingPatternRun(
           JSON.stringify(signal),
           run.frozenAt,
         )
-      ));
+      );
+      await runBatches(db, statements);
     }
-    return "created";
+    return status;
   } catch {
     return "unavailable";
   }
@@ -173,12 +177,21 @@ export async function settleRollingPatternRuns(
             settledAt,
           );
         });
-        if (statements.length) await db.batch(statements);
+        await runBatches(db, statements);
       }
     }
     return "ok";
   } catch {
     return "unavailable";
+  }
+}
+
+async function runBatches(
+  db: D1Database,
+  statements: D1PreparedStatement[],
+) {
+  for (let index = 0; index < statements.length; index += D1_BATCH_SIZE) {
+    await db.batch(statements.slice(index, index + D1_BATCH_SIZE));
   }
 }
 

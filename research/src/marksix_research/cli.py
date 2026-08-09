@@ -374,6 +374,9 @@ def capture(
         time.sleep(min(60, max(1, deadline - time.monotonic())))
 
 
+PATTERN_TASK_VERSION = "conditional-patterns-v2"
+
+
 def capture_task_id(game: str, artifact: dict[str, object]) -> str:
     audit = artifact.get("audit")
     audit = audit if isinstance(audit, dict) else {}
@@ -386,7 +389,7 @@ def capture_task_id(game: str, artifact: dict[str, object]) -> str:
             separators=(",", ":"),
         ).encode("utf-8")
     ).hexdigest()
-    return f"scheduled-{game}-{issue}-{artifact_hash[:20]}"
+    return f"scheduled-{game}-{issue}-{PATTERN_TASK_VERSION}-{artifact_hash[:20]}"
 
 
 if __name__ == "__main__":

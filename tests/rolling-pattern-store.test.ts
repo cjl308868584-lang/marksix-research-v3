@@ -21,6 +21,7 @@ class FakePatternD1 {
   signals = new Map<string, { run_id: string; rule_id: string; signal_json: string }>();
   scores = new Map<string, { run_id: string; rule_id: string; score_json: string }>();
   currentTargets = new Map<string, string>();
+  batchSizes: number[] = [];
 
   prepare(sql: string) {
     let values: unknown[] = [];
@@ -113,6 +114,8 @@ class FakePatternD1 {
   }
 
   async batch(statements: Array<{ run(): Promise<unknown> }>) {
+    this.batchSizes.push(statements.length);
+    if (statements.length > 100) throw new Error("D1 batch limit exceeded");
     return Promise.all(statements.map((statement) => statement.run()));
   }
 }
@@ -148,6 +151,9 @@ let runRollingPatternCycle: (
     persist: () => Promise<"created">;
   },
 ) => Promise<{ status: string; runId?: string }>;
+let requireRollingPatternTaskSuccess: (
+  result: { status: string; reason?: string } | undefined,
+) => void;
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: unknown;
   __marksixResearchV3SchemaReady?: unknown;
@@ -165,6 +171,7 @@ before(async () => {
   const engine = await server.ssrLoadModule("/lib/rolling-pattern-engine.ts");
   const service = await server.ssrLoadModule("/lib/rolling-pattern-service.ts");
   runRollingPatternCycle = service.runRollingPatternCycle;
+  requireRollingPatternTaskSuccess = service.requireRollingPatternTaskSuccess;
   runFixture = await engine.buildRollingPatternRun({
     game: "new_macau",
     draws: patternDraws(),
@@ -197,6 +204,31 @@ test("replaying one run id restores the immutable result without duplicate signa
   const restored = await store.readRollingPatternRun("new_macau");
   assert.equal(restored?.run.runId, runFixture.runId);
   assert.equal(restored?.signals.length, runFixture.signals.length);
+});
+
+test("large conditional runs are persisted in bounded, retry-safe D1 batches", async () => {
+  const seed = runFixture.signals[0];
+  assert.ok(seed);
+  const largeRun: RollingPatternRun = {
+    ...runFixture,
+    runId: `${runFixture.runId}_large`,
+    signals: Array.from({ length: 205 }, (_, index) => ({
+      ...seed,
+      rule: {
+        ...seed.rule,
+        ruleId: `large-rule-${index}`,
+      },
+    })),
+  };
+  assert.equal(await store.persistRollingPatternRun(largeRun), "created");
+  assert.equal(db.signals.size, 205);
+  assert.ok(db.batchSizes.every((size) => size <= 100));
+
+  // Replaying an existing run must refill any missing signal rows instead of
+  // returning before the immutable child ledger has been repaired.
+  db.signals.delete(`${largeRun.runId}:large-rule-204`);
+  assert.equal(await store.persistRollingPatternRun(largeRun), "existing");
+  assert.equal(db.signals.size, 205);
 });
 
 test("current reads never fall back to a previous target issue", async () => {
@@ -279,6 +311,19 @@ test("rolling lifecycle settles the old target before building and freezing the 
     runId: runFixture.runId,
     qualified: runFixture.signals.length,
   });
+});
+
+test("a failed auxiliary pattern freeze keeps the signed task retryable", () => {
+  assert.throws(
+    () => requireRollingPatternTaskSuccess({
+      status: "failed",
+      reason: "rolling pattern freeze unavailable",
+    }),
+    /rolling pattern freeze unavailable/,
+  );
+  assert.doesNotThrow(() => requireRollingPatternTaskSuccess({
+    status: "created",
+  }));
 });
 
 function patternDraws() {

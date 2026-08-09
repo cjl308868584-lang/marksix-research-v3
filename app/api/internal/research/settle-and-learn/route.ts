@@ -9,6 +9,7 @@ import {
 import { getRuntimeEnv } from "../../../../../lib/runtime-env";
 import { isResearchPythonArtifact } from "../../../../../lib/research-python-artifact";
 import type { ResearchPythonArtifact } from "../../../../../lib/research-v3-types";
+import { requireRollingPatternTaskSuccess } from "../../../../../lib/rolling-pattern-service";
 
 export const dynamic = "force-dynamic";
 
@@ -103,6 +104,10 @@ export async function POST(request: NextRequest) {
       forceCompute: false,
       researchArtifact: body.researchArtifact,
     });
+    // The four-slot production forecast is already immutable at this point.
+    // Keep the signed task retryable when its auxiliary 30-draw scan fails,
+    // instead of permanently recording a successful task with missing rules.
+    requireRollingPatternTaskSuccess(envelope.rollingPatterns);
     if (envelope.cycleStatus === "awaiting_verification") {
       const response = {
         status: "awaiting_verification",

@@ -163,6 +163,7 @@ class ResearchPipelineTest(unittest.TestCase):
         }
         first = capture_task_id("new_macau", artifact)
         self.assertEqual(first, capture_task_id("new_macau", dict(artifact)))
+        self.assertIn("conditional-patterns-v2", first)
         changed = {
             **artifact,
             "audit": {"datasetVersion": "b" * 64, "newestIssue": "2026214"},

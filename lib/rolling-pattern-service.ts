@@ -71,3 +71,11 @@ export async function runRollingPatternCycle(
     qualified: run.signals.length,
   };
 }
+
+export function requireRollingPatternTaskSuccess(
+  result: RollingPatternCycleResult | undefined,
+) {
+  if (result?.status === "failed") {
+    throw new Error(result.reason || "rolling pattern cycle failed");
+  }
+}
