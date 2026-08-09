@@ -20,6 +20,48 @@ export type RollingPatternEventState = {
   count: number;
 };
 
+export type RollingPatternCondition = {
+  event: RollingPatternEvent;
+  expectedMatched: boolean;
+};
+
+export type RollingPatternAntecedent =
+  | {
+      kind: "single";
+      conditions: [RollingPatternCondition];
+    }
+  | {
+      kind: "conjunction";
+      conditions: [RollingPatternCondition, RollingPatternCondition];
+    }
+  | {
+      kind: "sequence";
+      event: RollingPatternEvent;
+      states: boolean[];
+      requireBoundaryFlip: boolean;
+    };
+
+export type RollingPatternConditionEvidence = {
+  issue: string;
+  drawAt: string;
+  eventId: string;
+  eventLabel: string;
+  expectedMatched: boolean;
+  actualMatched: boolean;
+  count: number;
+};
+
+export type RollingPatternHistoricalAudit = {
+  sourceIssue: string;
+  targetIssue: string;
+  targetDrawAt: string;
+  conditionEvidence: RollingPatternConditionEvidence[];
+  result: RollingPatternEventState;
+  matched: boolean;
+};
+
+export type RollingPatternEvidenceTier = "experimental" | "strong";
+
 export type RollingPatternWindow = {
   game: GameId;
   drawCount: number;
