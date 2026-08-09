@@ -161,8 +161,8 @@ export function RollingPatternWorkspace() {
         {!loading && !error && data?.run && (
           <>
             <PatternRunContext run={data.run} />
-            <PatternFunnel run={data.run} />
             {data.summary && <PatternSummaryPanel summary={data.summary} />}
+            <PatternFunnel run={data.run} />
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
               {FILTERS.map((item) => (
                 <button
