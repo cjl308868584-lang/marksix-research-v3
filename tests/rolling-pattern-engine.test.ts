@@ -30,12 +30,7 @@ after(async () => {
 });
 
 test("uses exactly the newest 30 verified draws and drops the oldest", async () => {
-  const draws = makeDraws([
-    false, true, false, true, false, true, false, true,
-    false, true, false, true, false, true, false, true,
-    false, true, false, true, false, true, false, true,
-    false, true, false, true, false, true, false,
-  ]);
+  const draws = makeCrossEventDraws(31);
   const run = await buildRollingPatternRun(input(draws));
 
   assert.equal(run.window.drawCount, 30);
@@ -45,8 +40,28 @@ test("uses exactly the newest 30 verified draws and drops the oldest", async () 
   assert.ok(run.signals.every((signal) => signal.currentTriggered));
 });
 
-test("finds a current missing-three recovery with three historical triggers and two hits", async () => {
-  const chronological = [
+test("discovers a current A-to-next-draw-B rule with explicit evidence", async () => {
+  const run = await buildRollingPatternRun(input(makeCrossEventDraws(30)));
+  const signal = run.signals.find((item) =>
+    item.rule.antecedent.kind === "single" &&
+    item.rule.antecedent.conditions[0].event.value === "0尾" &&
+    item.rule.event.value === "9尾"
+  );
+
+  assert.ok(signal);
+  assert.equal(signal.rule.family, "single_transfer");
+  assert.match(signal.rule.relationLabel, /当.*0尾.*下一期.*9尾/);
+  assert.equal(signal.support, 3);
+  assert.equal(signal.hits, 2);
+  assert.equal(signal.rawRate, 2 / 3);
+  assert.equal(signal.currentEvidence.at(-1)?.issue, "2026030");
+  assert.equal(signal.currentEvidence.at(-1)?.actualMatched, true);
+  assert.equal(signal.audit.length, 3);
+  assert.ok(signal.audit.every((row) => row.conditionEvidence.length === 1));
+});
+
+test("finds a current missing-three recovery and writes the full condition", async () => {
+  const chronologicalTail0 = [
     true, false, false, false, true,
     true, false, false, false, false,
     true, false, false, false, true,
@@ -54,71 +69,82 @@ test("finds a current missing-three recovery with three historical triggers and 
     false, true, false, true, false,
     true, true, false, false, false,
   ];
-  const run = await buildRollingPatternRun(input(makeDraws(chronological)));
+  const run = await buildRollingPatternRun(input(makeTailDraws(chronologicalTail0)));
   const signal = run.signals.find((item) =>
-    item.rule.family === "omission_recovery" &&
-    item.rule.event.family === "tail" &&
+    item.rule.family === "sequence_transition" &&
     item.rule.event.value === "0尾" &&
-    item.rule.parameters.length === 3
+    item.rule.antecedent.kind === "sequence" &&
+    item.rule.antecedent.states.join(",") === "false,false,false"
   );
 
   assert.ok(signal);
   assert.equal(signal.support, 3);
   assert.equal(signal.hits, 2);
-  assert.equal(signal.rawRate, 2 / 3);
-  assert.ok(Math.abs(signal.baseline - 0.47171930751949254) < 1e-12);
-  assert.ok(Math.abs(signal.posteriorRate - 0.5248867691050855) < 1e-12);
-  assert.equal(signal.sampleLabel, "小样本");
-  assert.equal(signal.audit.length, 3);
-  assert.equal(signal.currentTriggered, true);
+  assert.match(signal.rule.conditionLabel, /连续3期未出现/);
+  assert.match(signal.rule.relationLabel, /连续3期未出现.*下一期/);
+  assert.equal(signal.evidenceTier, "experimental");
+  assert.ok(signal.qValue > 0.1);
 });
 
-test("normalizes equivalent active rules to unique stable ids", async () => {
-  const chronological = [
-    true, false, false, false, true,
-    true, false, false, false, true,
-    true, false, false, false, true,
-    true, false, false, false, true,
-    true, false, true, false, true,
-    true, true, false, false, false,
-  ];
-  const first = await buildRollingPatternRun(input(makeDraws(chronological)));
-  const second = await buildRollingPatternRun(input(makeDraws(chronological)));
+test("never generates hotness, simple lag, or one-draw self continuation", async () => {
+  const run = await buildRollingPatternRun(input(makeCrossEventDraws(30)));
+  assert.ok(run.signals.every((item) => [
+    "single_transfer",
+    "conjunction_transfer",
+    "sequence_transition",
+  ].includes(item.rule.family)));
+  assert.ok(run.signals.every((item) => item.rule.antecedent.kind !== "single" ||
+    item.rule.antecedent.conditions[0].event.eventId !== item.rule.event.eventId));
+  assert.ok(run.signals.every((item) => item.rule.antecedent.kind !== "sequence" ||
+    item.rule.antecedent.states.length >= 2));
+  assert.ok(run.signals.every((item) => item.rule.conditionLabel.length > 0));
+  assert.ok(run.signals.every((item) => item.rule.predictionLabel.startsWith("下一期")));
+});
+
+test("normalizes every active condition to one stable rule id", async () => {
+  const first = await buildRollingPatternRun(input(makeCrossEventDraws(30)));
+  const second = await buildRollingPatternRun(input(makeCrossEventDraws(30)));
   const ids = first.signals.map((signal) => signal.rule.ruleId);
 
   assert.equal(new Set(ids).size, ids.length);
   assert.deepEqual(first, second);
-  assert.ok(first.funnel.generated > first.funnel.deduplicated);
-});
-
-test("freezes a completed empty run instead of searching until something appears", async () => {
-  const chronological = Array.from({ length: 30 }, (_, index) => index % 2 === 0);
-  const run = await buildRollingPatternRun(input(makeDraws(chronological)));
-  assert.equal(run.status, "completed");
-  assert.equal(run.signals.length, run.funnel.qualified);
-  if (run.signals.length === 0) {
-    assert.equal(run.funnel.qualified, 0);
-  }
 });
 
 function input(draws: Draw[]) {
   return {
     game: "new_macau" as const,
     draws,
-    targetIssue: "2026032",
+    targetIssue: "2026031",
     expectedDrawAt: "2026-02-01T21:32:00+08:00",
     generatedAt: "2026-02-01T13:40:00.000Z",
   };
 }
 
-function makeDraws(chronologicalTail0: boolean[]) {
-  return chronologicalTail0.map((matched, index) => ({
-    game: "new_macau" as const,
+function makeCrossEventDraws(length: number) {
+  const sourceIndexes = new Set([2, 10, 20, length - 1]);
+  const successfulTargetIndexes = new Set([3, 11]);
+  return Array.from({ length }, (_, index) => {
+    const hasTail0 = sourceIndexes.has(index);
+    const hasTail9 = successfulTargetIndexes.has(index);
+    return makeDraw(index, hasTail0, hasTail9);
+  }).reverse();
+}
+
+function makeTailDraws(chronologicalTail0: boolean[]) {
+  return chronologicalTail0.map((matched, index) =>
+    makeDraw(index, matched, false)
+  ).reverse();
+}
+
+function makeDraw(index: number, hasTail0: boolean, hasTail9: boolean): Draw {
+  const numbers = hasTail0 ? [10, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6];
+  return {
+    game: "new_macau",
     issue: String(2026001 + index),
     drawAt: `2026-01-${String(index + 1).padStart(2, "0")}T21:32:00+08:00`,
-    numbers: matched ? [10, 1, 2, 3, 4, 5] : [1, 2, 3, 4, 5, 6],
-    special: matched ? 6 : 7,
+    numbers,
+    special: hasTail9 ? 9 : 7,
     source: "双源一致测试",
     verified: true,
-  })).reverse();
+  };
 }

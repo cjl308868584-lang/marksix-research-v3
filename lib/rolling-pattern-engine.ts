@@ -5,10 +5,18 @@ import {
   rollingEventBaseline,
 } from "./rolling-pattern-events";
 import {
+  benjaminiHochberg,
+  poissonBinomialUpperTail,
+} from "./rolling-pattern-statistics";
+import {
   ROLLING_PATTERN_ENGINE_VERSION,
+  type RollingPatternAntecedent,
+  type RollingPatternCondition,
+  type RollingPatternConditionEvidence,
   type RollingPatternEvent,
   type RollingPatternEventState,
   type RollingPatternRule,
+  type RollingPatternRuleFamily,
   type RollingPatternRun,
   type RollingPatternSignal,
   type RollingPatternTriggerAudit,
@@ -29,7 +37,8 @@ type BuildRollingPatternRunInput = {
 
 type RuleEvaluation = {
   rule: RollingPatternRule;
-  currentTriggered: boolean;
+  currentTriggered: true;
+  currentEvidence: RollingPatternConditionEvidence[];
   support: number;
   hits: number;
   rawRate: number;
@@ -37,9 +46,12 @@ type RuleEvaluation = {
   rawUplift: number;
   posteriorRate: number;
   posteriorUplift: number;
+  pValue: number;
   stateHistory: RollingPatternEventState[];
   audit: RollingPatternTriggerAudit[];
 };
+
+type EventStateIndex = Map<string, RollingPatternEventState[]>;
 
 export async function buildRollingPatternRun(
   input: BuildRollingPatternRunInput,
@@ -55,6 +67,8 @@ export async function buildRollingPatternRun(
     throw new Error("rolling pattern scan requires 30 verified draws");
   }
   const chronological = [...windowDraws].reverse();
+  const events = enumerateRollingEvents(input.expectedDrawAt);
+  const states = indexEventStates(events, chronological);
   const windowDataHash = await stablePatternHash(JSON.stringify(
     chronological.map((draw) => ({
       game: draw.game,
@@ -65,33 +79,39 @@ export async function buildRollingPatternRun(
       verified: draw.verified,
     })),
   ));
-  const generatedRules = enumerateRollingEvents(input.expectedDrawAt)
-    .flatMap((event) => generateRules(event));
-  const evaluations: RuleEvaluation[] = [];
+  const generatedRules = generateRules(events);
+  const currentEvaluations: RuleEvaluation[] = [];
   for (const rule of generatedRules) {
-    const states = chronological.map((draw) => evaluateRollingEvent(draw, rule.event));
-    const evaluation = evaluateRule(rule, states, input.expectedDrawAt);
-    if (evaluation.currentTriggered) evaluations.push(evaluation);
+    const currentEvidence = evidenceAt(states, states.size ? WINDOW_SIZE : 0, rule);
+    if (!currentEvidence) continue;
+    currentEvaluations.push(evaluateRule(
+      rule,
+      states,
+      input.expectedDrawAt,
+      currentEvidence,
+    ));
   }
   const grouped = new Map<string, RuleEvaluation[]>();
-  for (const evaluation of evaluations) {
+  for (const evaluation of currentEvaluations) {
     const group = grouped.get(evaluation.rule.canonicalJson) ?? [];
     group.push(evaluation);
     grouped.set(evaluation.rule.canonicalJson, group);
   }
   const deduplicated = [...grouped.values()].map((group) => ({
     ...group[0],
-    rule: group[0].rule,
     relatedRuleCount: group.length,
   }));
+  const testable = deduplicated.filter((item) => item.support >= MIN_SUPPORT);
+  const corrected = benjaminiHochberg(testable, (item) => item.pValue);
   const aboveBaseline = deduplicated.filter((item) => item.rawRate > item.baseline);
-  const qualified = aboveBaseline.filter((item) =>
-    item.support >= MIN_SUPPORT && item.rawUplift >= MIN_RAW_UPLIFT
+  const qualified = corrected.filter((item) =>
+    item.rawUplift >= MIN_RAW_UPLIFT && item.posteriorUplift > 0
   );
   const signals: RollingPatternSignal[] = qualified
     .map((item) => ({
       rule: item.rule,
       currentTriggered: true as const,
+      currentEvidence: item.currentEvidence,
       support: item.support,
       hits: item.hits,
       rawRate: item.rawRate,
@@ -99,15 +119,18 @@ export async function buildRollingPatternRun(
       rawUplift: item.rawUplift,
       posteriorRate: item.posteriorRate,
       posteriorUplift: item.posteriorUplift,
+      pValue: item.pValue,
+      qValue: item.qValue,
+      evidenceTier: item.qValue <= 0.10 ? "strong" as const : "experimental" as const,
       sampleLabel: sampleLabel(item.support),
       relatedRuleCount: item.relatedRuleCount,
       stateHistory: item.stateHistory,
       audit: item.audit,
     }))
     .sort((left, right) =>
+      Number(right.evidenceTier === "strong") - Number(left.evidenceTier === "strong") ||
       right.posteriorUplift - left.posteriorUplift ||
       right.support - left.support ||
-      right.rawUplift - left.rawUplift ||
       left.rule.ruleId.localeCompare(right.rule.ruleId)
     );
   const runHash = await stablePatternHash([
@@ -117,7 +140,7 @@ export async function buildRollingPatternRun(
     ROLLING_PATTERN_ENGINE_VERSION,
   ].join(":"));
   return {
-    schemaVersion: "rolling-patterns-1",
+    schemaVersion: "rolling-patterns-2",
     engineVersion: ROLLING_PATTERN_ENGINE_VERSION,
     runId: `rp_${input.game}_${input.targetIssue}_${runHash.slice(0, 16)}`,
     game: input.game,
@@ -136,7 +159,7 @@ export async function buildRollingPatternRun(
     },
     funnel: {
       generated: generatedRules.length,
-      currentTriggered: evaluations.length,
+      currentTriggered: currentEvaluations.length,
       deduplicated: deduplicated.length,
       aboveBaseline: aboveBaseline.length,
       qualified: signals.length,
@@ -145,123 +168,170 @@ export async function buildRollingPatternRun(
   };
 }
 
-function generateRules(event: RollingPatternEvent) {
-  const candidates: Array<Omit<RollingPatternRule, "ruleId" | "canonicalJson" | "description">> = [];
-  for (let length = 1; length <= 5; length += 1) {
-    candidates.push({
-      family: "omission_recovery",
-      event,
-      statePattern: Array<boolean>(length).fill(false),
-      parameters: { length },
-      prediction: true,
-    });
-  }
-  for (let length = 1; length <= 3; length += 1) {
-    candidates.push({
-      family: "continuation",
-      event,
-      statePattern: Array<boolean>(length).fill(true),
-      parameters: { length },
-      prediction: true,
-    });
-  }
-  for (let length = 2; length <= 4; length += 1) {
-    for (let mask = 0; mask < 2 ** length; mask += 1) {
+function indexEventStates(events: RollingPatternEvent[], draws: Draw[]) {
+  return new Map(events.map((event) => [
+    event.eventId,
+    draws.map((draw) => evaluateRollingEvent(draw, event)),
+  ]));
+}
+
+function generateRules(events: RollingPatternEvent[]) {
+  const candidates: Array<{
+    family: RollingPatternRuleFamily;
+    antecedent: RollingPatternAntecedent;
+    event: RollingPatternEvent;
+  }> = [];
+  for (const source of events) {
+    for (const target of events) {
+      if (source.eventId === target.eventId) continue;
       candidates.push({
-        family: "state_transition",
-        event,
-        statePattern: Array.from(
-          { length },
-          (_, index) => Boolean(mask & (1 << (length - index - 1))),
-        ),
-        parameters: { length },
-        prediction: true,
+        family: "single_transfer",
+        antecedent: {
+          kind: "single",
+          conditions: [{ event: source, expectedMatched: true }],
+        },
+        event: target,
       });
     }
   }
-  for (let lag = 2; lag <= 5; lag += 1) {
-    candidates.push({
-      family: "lag_recurrence",
-      event,
-      statePattern: [true, ...Array<null>(lag - 1).fill(null)],
-      parameters: { lag },
-      prediction: true,
-    });
+  for (let leftIndex = 0; leftIndex < events.length; leftIndex += 1) {
+    const left = events[leftIndex];
+    for (let rightIndex = leftIndex + 1; rightIndex < events.length; rightIndex += 1) {
+      const right = events[rightIndex];
+      if (left.family === right.family) continue;
+      for (const target of events) {
+        if (target.eventId === left.eventId || target.eventId === right.eventId) continue;
+        candidates.push({
+          family: "conjunction_transfer",
+          antecedent: {
+            kind: "conjunction",
+            conditions: [
+              { event: left, expectedMatched: true },
+              { event: right, expectedMatched: true },
+            ],
+          },
+          event: target,
+        });
+      }
+    }
   }
-  return candidates.map((candidate) => finalizeRule(candidate));
+  for (const event of events) {
+    for (let length = 2; length <= 5; length += 1) {
+      for (let mask = 0; mask < 2 ** length; mask += 1) {
+        const sequence = Array.from(
+          { length },
+          (_, index) => Boolean(mask & (1 << (length - index - 1))),
+        );
+        candidates.push({
+          family: "sequence_transition",
+          antecedent: {
+            kind: "sequence",
+            event,
+            states: sequence,
+            requireBoundaryFlip: sequence.every((state) => state === sequence[0]),
+          },
+          event,
+        });
+      }
+    }
+  }
+  return candidates.map(finalizeRule);
 }
 
-function finalizeRule(
-  candidate: Omit<RollingPatternRule, "ruleId" | "canonicalJson" | "description">,
-): RollingPatternRule {
-  const normalized = normalizeRule(candidate);
+function finalizeRule(candidate: {
+  family: RollingPatternRuleFamily;
+  antecedent: RollingPatternAntecedent;
+  event: RollingPatternEvent;
+}): RollingPatternRule {
   const canonicalJson = JSON.stringify({
     engineVersion: ROLLING_PATTERN_ENGINE_VERSION,
-    family: normalized.family,
-    eventId: normalized.event.eventId,
-    parameters: normalized.parameters,
-    statePattern: normalized.statePattern,
-    prediction: true,
+    family: candidate.family,
+    antecedent: canonicalAntecedent(candidate.antecedent),
+    resultEventId: candidate.event.eventId,
   });
+  const conditionLabel = describeAntecedent(candidate.antecedent);
+  const predictionLabel = candidate.event.label;
+  const relationLabel = `当${conditionLabel}时 → ${predictionLabel}`;
   return {
-    ...normalized,
+    ...candidate,
+    prediction: true,
     canonicalJson,
     ruleId: `r30_${stablePatternHashSync(canonicalJson)}`,
-    description: describeRule(normalized),
+    conditionLabel,
+    predictionLabel,
+    relationLabel,
+    description: relationLabel,
   };
 }
 
-function normalizeRule(
-  candidate: Omit<RollingPatternRule, "ruleId" | "canonicalJson" | "description">,
-) {
-  const allFalse = candidate.statePattern.every((value) => value === false);
-  const allTrue = candidate.statePattern.every((value) => value === true);
-  if (candidate.family === "state_transition" && allFalse) {
+function canonicalAntecedent(antecedent: RollingPatternAntecedent) {
+  if (antecedent.kind === "sequence") {
     return {
-      ...candidate,
-      family: "omission_recovery" as const,
-      parameters: { length: candidate.statePattern.length },
+      kind: antecedent.kind,
+      eventId: antecedent.event.eventId,
+      states: antecedent.states,
+      requireBoundaryFlip: antecedent.requireBoundaryFlip,
     };
   }
-  if (candidate.family === "state_transition" && allTrue) {
-    return {
-      ...candidate,
-      family: "continuation" as const,
-      parameters: { length: candidate.statePattern.length },
-    };
-  }
-  return candidate;
+  return {
+    kind: antecedent.kind,
+    conditions: antecedent.conditions.map((condition) => ({
+      eventId: condition.event.eventId,
+      expectedMatched: condition.expectedMatched,
+    })),
+  };
 }
 
-function describeRule(rule: Pick<RollingPatternRule, "family" | "event" | "parameters" | "statePattern">) {
-  switch (rule.family) {
-    case "omission_recovery":
-      return `最近连续${rule.parameters.length}期未满足“${rule.event.value}”，研究下一期回补`;
-    case "continuation":
-      return `最近连续${rule.parameters.length}期满足“${rule.event.value}”，研究下一期延续`;
-    case "lag_recurrence":
-      return `前${rule.parameters.lag}期满足“${rule.event.value}”，研究下一期重现`;
-    case "state_transition":
-      return `最近${rule.statePattern.length}期状态为${rule.statePattern.map((value) => value ? "开" : "未开").join("→")}，研究下一期出现`;
+function describeAntecedent(antecedent: RollingPatternAntecedent) {
+  if (antecedent.kind === "single") {
+    return `本期${eventPhrase(antecedent.conditions[0].event)}`;
   }
+  if (antecedent.kind === "conjunction") {
+    return `本期同时${eventPhrase(antecedent.conditions[0].event)}，并且${eventPhrase(antecedent.conditions[1].event)}`;
+  }
+  const allMatched = antecedent.states.every(Boolean);
+  const allMissed = antecedent.states.every((state) => !state);
+  if (allMatched) {
+    return `最近连续${antecedent.states.length}期均${eventPhrase(antecedent.event)}`;
+  }
+  if (allMissed) {
+    if (antecedent.event.family === "wave" || antecedent.event.family === "head") {
+      return `最近连续${antecedent.states.length}期${antecedent.event.value}均未达到${antecedent.event.threshold}个`;
+    }
+    return `最近连续${antecedent.states.length}期未出现${antecedent.event.value}`;
+  }
+  return `最近${antecedent.states.length}期“${eventPhrase(antecedent.event)}”状态依次为${antecedent.states.map((state) => state ? "出现" : "未出现").join("→")}`;
+}
+
+function eventPhrase(event: RollingPatternEvent) {
+  if (event.family === "wave" || event.family === "head") {
+    return `6+1达到至少${event.threshold}个${event.value}`;
+  }
+  return `6+1至少出现一次${event.value}`;
 }
 
 function evaluateRule(
   rule: RollingPatternRule,
-  states: RollingPatternEventState[],
+  states: EventStateIndex,
   expectedDrawAt: string,
+  currentEvidence: RollingPatternConditionEvidence[],
 ): RuleEvaluation {
   const audit: RollingPatternTriggerAudit[] = [];
   const baselines: number[] = [];
-  for (let targetIndex = 1; targetIndex < states.length; targetIndex += 1) {
-    if (!triggerAt(states, targetIndex, rule)) continue;
+  const targetStates = requiredStates(states, rule.event);
+  for (let targetIndex = 1; targetIndex < WINDOW_SIZE; targetIndex += 1) {
+    const conditionEvidence = evidenceAt(states, targetIndex, rule);
+    if (!conditionEvidence) continue;
+    const result = targetStates[targetIndex];
     audit.push({
-      sourceIssue: states[targetIndex - 1].issue,
-      targetIssue: states[targetIndex].issue,
-      targetDrawAt: states[targetIndex].drawAt,
-      matched: states[targetIndex].matched,
+      sourceIssue: conditionEvidence.at(-1)?.issue ?? "",
+      targetIssue: result.issue,
+      targetDrawAt: result.drawAt,
+      conditionEvidence,
+      result,
+      matched: result.matched,
     });
-    baselines.push(rollingEventBaseline(rule.event, states[targetIndex].drawAt));
+    baselines.push(rollingEventBaseline(rule.event, result.drawAt));
   }
   const support = audit.length;
   const hits = audit.filter((item) => item.matched).length;
@@ -273,7 +343,8 @@ function evaluateRule(
     (support + PRIOR_STRENGTH);
   return {
     rule,
-    currentTriggered: triggerAt(states, states.length, rule),
+    currentTriggered: true,
+    currentEvidence,
     support,
     hits,
     rawRate,
@@ -281,35 +352,65 @@ function evaluateRule(
     rawUplift: rawRate - baseline,
     posteriorRate,
     posteriorUplift: posteriorRate - baseline,
-    stateHistory: states,
+    pValue: poissonBinomialUpperTail(baselines, hits),
+    stateHistory: targetStates,
     audit,
   };
 }
 
-function triggerAt(
-  states: RollingPatternEventState[],
+function evidenceAt(
+  states: EventStateIndex,
   targetIndex: number,
   rule: RollingPatternRule,
-) {
-  if (rule.family === "lag_recurrence") {
-    const lag = rule.parameters.lag ?? 0;
-    return targetIndex >= lag && states[targetIndex - lag]?.matched === true;
+): RollingPatternConditionEvidence[] | null {
+  const antecedent = rule.antecedent;
+  if (antecedent.kind === "single" || antecedent.kind === "conjunction") {
+    const sourceIndex = targetIndex - 1;
+    if (sourceIndex < 0) return null;
+    const evidence = antecedent.conditions.map((condition) =>
+      conditionEvidence(requiredStates(states, condition.event)[sourceIndex], condition)
+    );
+    return evidence.every((item) => item.actualMatched === item.expectedMatched)
+      ? evidence
+      : null;
   }
-  const length = rule.parameters.length ?? rule.statePattern.length;
-  if (targetIndex < length) return false;
-  const observed = states.slice(targetIndex - length, targetIndex)
-    .map((state) => state.matched);
-  const matches = rule.statePattern.every((value, index) =>
-    value === null || value === observed[index]
-  );
-  if (!matches) return false;
-  if (rule.family === "omission_recovery") {
-    return targetIndex > length && states[targetIndex - length - 1].matched;
+  const length = antecedent.states.length;
+  const start = targetIndex - length;
+  if (start < 0) return null;
+  const eventStates = requiredStates(states, antecedent.event);
+  const observed = eventStates.slice(start, targetIndex);
+  if (observed.length !== length || !observed.every((state, index) =>
+    state.matched === antecedent.states[index]
+  )) return null;
+  if (antecedent.requireBoundaryFlip) {
+    const boundary = eventStates[start - 1];
+    if (!boundary || boundary.matched === antecedent.states[0]) return null;
   }
-  if (rule.family === "continuation") {
-    return targetIndex > length && !states[targetIndex - length - 1].matched;
-  }
-  return true;
+  return observed.map((state, index) => conditionEvidence(state, {
+    event: antecedent.event,
+    expectedMatched: antecedent.states[index],
+  }));
+}
+
+function conditionEvidence(
+  state: RollingPatternEventState,
+  condition: RollingPatternCondition,
+): RollingPatternConditionEvidence {
+  return {
+    issue: state.issue,
+    drawAt: state.drawAt,
+    eventId: condition.event.eventId,
+    eventLabel: eventPhrase(condition.event),
+    expectedMatched: condition.expectedMatched,
+    actualMatched: state.matched,
+    count: state.count,
+  };
+}
+
+function requiredStates(states: EventStateIndex, event: RollingPatternEvent) {
+  const values = states.get(event.eventId);
+  if (!values) throw new Error(`missing event states for ${event.eventId}`);
+  return values;
 }
 
 function sampleLabel(support: number): RollingPatternSignal["sampleLabel"] {
