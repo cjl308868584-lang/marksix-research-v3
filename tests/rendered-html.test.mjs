@@ -46,6 +46,8 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
   assert.match(html, /进入高概率策略/);
   assert.match(html, /href="\/research"/);
+  assert.match(html, /近30期条件规律/);
+  assert.match(html, /href="\/patterns"/);
   assert.doesNotMatch(html, /双轨概率研究实验室/);
   assert.doesNotMatch(html, /三路候选策略/);
   assert.match(html, /历史开奖记录/);
@@ -121,11 +123,11 @@ test("legacy rolling pattern route redirects to the independent page", async () 
 });
 
 test("all research workspaces expose the same three-way navigation", async () => {
-  for (const path of ["/research", "/research/patterns", "/research/review"]) {
+  for (const path of ["/research", "/patterns", "/research/review"]) {
     const response = await render(path);
     const html = await response.text();
     assert.match(html, /href="\/research"/);
-    assert.match(html, /href="\/research\/patterns"/);
+    assert.match(html, /href="\/patterns"/);
     assert.match(html, /href="\/research\/review"/);
   }
 });

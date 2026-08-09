@@ -348,6 +348,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
             <p>香港与新澳门双彩开奖数据实时校验，集中研究6+1生肖、尾数、指定位置单双与大小，并在每期开奖后自动复盘学习。</p>
             <div className="hero-actions">
               <a className="primary-action" href="/research">进入高概率策略 <span>→</span></a>
+              <a className="ghost-action" href="/patterns">近30期条件规律</a>
               <button className="ghost-action" type="button" onClick={() => { setDemo(false); window.setTimeout(() => setDemo(true), 0); }}>
                 预览开奖动效
               </button>
@@ -461,7 +462,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
       <footer>
         <div className="footer-brand">六合智研 <span>MARK SIX INTELLIGENCE</span></div>
         <p>第三方数据研究工具 · 非官方彩票服务 · 不销售彩票 · 不构成投注建议</p>
-        <div className="footer-links"><a href="/research">高概率策略</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
+        <div className="footer-links"><a href="/research">高概率策略</a><a href="/patterns">近30期条件规律</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
       <nav className="mobile-nav" aria-label="手机端快捷导航">
         <a onClick={() => setActiveSection("draws")} className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
