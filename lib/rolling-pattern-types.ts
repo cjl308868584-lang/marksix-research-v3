@@ -1,11 +1,14 @@
 import type { GameId } from "./lottery";
 
-export const ROLLING_PATTERN_ENGINE_VERSION = "conditional-patterns-v2";
+export const ROLLING_PATTERN_ENGINE_VERSION = "conditional-patterns-v3";
 
 export type RollingPatternFamily = "zodiac" | "tail" | "wave" | "head";
+export type RollingPatternScope = "coverage_6_plus_1" | "special";
+export type RollingPatternEventScope = RollingPatternScope | "condition";
 
 export type RollingPatternEvent = {
   eventId: string;
+  scope: RollingPatternEventScope;
   family: RollingPatternFamily;
   value: string;
   label: string;

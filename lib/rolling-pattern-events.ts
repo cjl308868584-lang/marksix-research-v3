@@ -11,27 +11,55 @@ import {
 import type {
   RollingPatternEvent,
   RollingPatternEventState,
+  RollingPatternScope,
 } from "./rolling-pattern-types";
 
 const WAVES: readonly Wave[] = ["red", "blue", "green"];
 
-export function enumerateRollingEvents(expectedDrawAt: string) {
-  const zodiacEvents = ZODIAC_NAMES.map((zodiac) =>
-    makeEvent("zodiac", zodiac, 1, expectedDrawAt)
-  );
-  const tailEvents = Array.from({ length: 10 }, (_, tail) =>
-    makeEvent("tail", `${tail}尾`, 1, expectedDrawAt)
-  );
-  const waveEvents = WAVES.map((wave) =>
-    makeEvent("wave", WAVE_LABEL[wave], 3, expectedDrawAt)
-  );
-  const headEvents = Array.from({ length: 5 }, (_, head) =>
-    makeEvent("head", `${head}头`, 2, expectedDrawAt)
-  );
-  return [...zodiacEvents, ...tailEvents, ...waveEvents, ...headEvents];
+export function enumerateRollingConditionEvents(expectedDrawAt: string) {
+  return enumerateEvents(expectedDrawAt, "condition", [
+    "zodiac",
+    "tail",
+    "wave",
+    "head",
+  ]);
 }
 
-export function evaluateRollingEvent(
+export function enumerateRollingResultEvents(
+  expectedDrawAt: string,
+  scope: RollingPatternScope,
+) {
+  return enumerateEvents(
+    expectedDrawAt,
+    scope,
+    scope === "coverage_6_plus_1"
+      ? ["zodiac", "tail"]
+      : ["zodiac", "tail", "wave", "head"],
+  );
+}
+
+function enumerateEvents(
+  expectedDrawAt: string,
+  scope: RollingPatternEvent["scope"],
+  families: readonly RollingPatternEvent["family"][],
+) {
+  const zodiacEvents = ZODIAC_NAMES.map((zodiac) =>
+    makeEvent(scope, "zodiac", zodiac, 1, expectedDrawAt)
+  );
+  const tailEvents = Array.from({ length: 10 }, (_, tail) =>
+    makeEvent(scope, "tail", `${tail}尾`, 1, expectedDrawAt)
+  );
+  const waveEvents = WAVES.map((wave) =>
+    makeEvent(scope, "wave", WAVE_LABEL[wave], scope === "special" ? 1 : 3, expectedDrawAt)
+  );
+  const headEvents = Array.from({ length: 5 }, (_, head) =>
+    makeEvent(scope, "head", `${head}头`, scope === "special" ? 1 : 2, expectedDrawAt)
+  );
+  const byFamily = { zodiac: zodiacEvents, tail: tailEvents, wave: waveEvents, head: headEvents };
+  return families.flatMap((family) => byFamily[family]);
+}
+
+export function evaluateRollingConditionEvent(
   draw: Draw,
   event: RollingPatternEvent,
 ): RollingPatternEventState {
@@ -46,11 +74,30 @@ export function evaluateRollingEvent(
   };
 }
 
-export function rollingEventBaseline(
+export function evaluateRollingResultEvent(
+  draw: Draw,
+  event: RollingPatternEvent,
+): RollingPatternEventState {
+  const numbers = event.scope === "special"
+    ? [draw.special]
+    : [...draw.numbers, draw.special];
+  const count = numbers.filter((number) =>
+    numberMatchesEvent(number, draw.drawAt, event)
+  ).length;
+  return {
+    issue: draw.issue,
+    drawAt: draw.drawAt,
+    matched: count >= event.threshold,
+    count,
+  };
+}
+
+export function rollingResultEventBaseline(
   event: RollingPatternEvent,
   expectedDrawAt: string,
 ) {
   const members = countMembers(event, expectedDrawAt);
+  if (event.scope === "special") return members / 49;
   return hypergeometricAtLeast(49, members, 7, event.threshold);
 }
 
@@ -71,16 +118,18 @@ export function hypergeometricAtLeast(
 }
 
 function makeEvent(
+  scope: RollingPatternEvent["scope"],
   family: RollingPatternEvent["family"],
   value: string,
   threshold: RollingPatternEvent["threshold"],
   expectedDrawAt: string,
 ): RollingPatternEvent {
   const event = {
-    eventId: `${family}:${value}:gte${threshold}`,
+    eventId: `${scope}:${family}:${value}:gte${threshold}`,
+    scope,
     family,
     value,
-    label: eventLabel(family, value, threshold),
+    label: eventLabel(family, value, threshold, scope),
     threshold,
     memberCount: 0,
   } satisfies RollingPatternEvent;
@@ -92,7 +141,9 @@ function eventLabel(
   family: RollingPatternEvent["family"],
   value: string,
   threshold: number,
+  scope?: RollingPatternEvent["scope"],
 ) {
+  if (scope === "special") return `下一期的特码为${value}`;
   if (family === "wave") return `下一期6+1至少出现${threshold}个${value}`;
   if (family === "head") return `下一期6+1至少出现${threshold}个${value}`;
   return `下一期6+1至少出现一次${value}`;
