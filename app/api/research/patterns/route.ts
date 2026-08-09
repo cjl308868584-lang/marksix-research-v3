@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
+import { summarizeRollingPatterns } from "../../../../lib/rolling-pattern-summary";
 import { readRollingPatternRun } from "../../../../lib/rolling-pattern-store";
 import type { RollingPatternFamily } from "../../../../lib/rolling-pattern-types";
 
@@ -26,6 +27,7 @@ export async function GET(request: NextRequest) {
         run: null,
         signals: [],
         scores: [],
+        summary: null,
         pagination: { page, pageSize: PAGE_SIZE, total: 0, pages: 0 },
       },
       { status: 404, headers: noStore() },
@@ -41,6 +43,7 @@ export async function GET(request: NextRequest) {
       game,
       status: "completed",
       run: { ...envelope.run, signals: [] },
+      summary: summarizeRollingPatterns(filtered),
       signals: filtered.slice(start, start + PAGE_SIZE),
       scores: envelope.scores,
       pagination: {

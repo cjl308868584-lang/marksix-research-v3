@@ -145,8 +145,21 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
     run: null,
     signals: [],
     scores: [],
+    summary: null,
     pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
   });
+});
+
+test("rolling pattern API summarizes all filtered rules before pagination", async () => {
+  const route = await readFile(
+    new URL("../app/api/research/patterns/route.ts", import.meta.url),
+    "utf8",
+  );
+  const summaryIndex = route.indexOf("summarizeRollingPatterns(filtered)");
+  const paginationIndex = route.indexOf("filtered.slice(start, start + PAGE_SIZE)");
+  assert.ok(summaryIndex >= 0, "the API must aggregate the filtered rule set");
+  assert.ok(paginationIndex >= 0, "the API must still paginate detailed cards");
+  assert.ok(summaryIndex < paginationIndex, "summary must use all rules before pagination");
 });
 
 test("public research reads never settle, train, or freeze forecasts", async () => {
