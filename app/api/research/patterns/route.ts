@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
-import { selectRollingPatternView } from "../../../../lib/rolling-pattern-summary";
+import {
+  buildSpecialNumberConsensus,
+  selectRollingPatternView,
+  signalSupportsSpecialNumber,
+} from "../../../../lib/rolling-pattern-summary";
 import { readRollingPatternRun } from "../../../../lib/rolling-pattern-store";
 import type {
   RollingPatternFamily,
@@ -21,7 +25,7 @@ const SCOPES: readonly RollingPatternScope[] = ["coverage_6_plus_1", "special"];
 export async function GET(request: NextRequest) {
   const validation = validateQuery(request);
   if ("error" in validation) return validation.error;
-  const { game, issue, scope, family, result, page } = validation;
+  const { game, issue, scope, family, result, number, page } = validation;
   const envelope = await readRollingPatternRun(game, issue);
   if (!envelope) {
     return NextResponse.json(
@@ -32,6 +36,7 @@ export async function GET(request: NextRequest) {
         signals: [],
         scores: [],
         summary: null,
+        specialNumberConsensus: [],
         pagination: { page, pageSize: PAGE_SIZE, total: 0, pages: 0 },
       },
       { status: 404, headers: noStore() },
@@ -40,7 +45,7 @@ export async function GET(request: NextRequest) {
   const view = selectRollingPatternView(envelope.signals, {
     scope,
     family,
-    resultEventId: result,
+    resultEventId: null,
   });
   if (result && !view.summary.resultGroups.some((group) => group.eventId === result)) {
     return NextResponse.json(
@@ -48,7 +53,17 @@ export async function GET(request: NextRequest) {
       { status: 400, headers: noStore() },
     );
   }
-  const pages = Math.ceil(view.signals.length / PAGE_SIZE);
+  const filteredSignals = result
+    ? view.signals.filter((signal) => signal.rule.event.eventId === result)
+    : number
+      ? view.signals.filter((signal) =>
+          signalSupportsSpecialNumber(signal, number, envelope.run.expectedDrawAt)
+        )
+      : view.signals;
+  const specialNumberConsensus = scope === "special"
+    ? buildSpecialNumberConsensus(view.signals, envelope.run.expectedDrawAt, 15)
+    : [];
+  const pages = Math.ceil(filteredSignals.length / PAGE_SIZE);
   const start = (page - 1) * PAGE_SIZE;
   return NextResponse.json(
     {
@@ -56,12 +71,13 @@ export async function GET(request: NextRequest) {
       status: "completed",
       run: { ...envelope.run, signals: [] },
       summary: view.summary,
-      signals: view.signals.slice(start, start + PAGE_SIZE),
+      specialNumberConsensus,
+      signals: filteredSignals.slice(start, start + PAGE_SIZE),
       scores: envelope.scores,
       pagination: {
         page,
         pageSize: PAGE_SIZE,
-        total: view.signals.length,
+        total: filteredSignals.length,
         pages,
       },
     },
@@ -76,10 +92,11 @@ function validateQuery(request: NextRequest):
       scope: RollingPatternScope;
       family: RollingPatternFamily | null;
       result: string | null;
+      number: number | null;
       page: number;
     }
   | { error: NextResponse } {
-  const allowed = new Set(["game", "issue", "scope", "family", "result", "page"]);
+  const allowed = new Set(["game", "issue", "scope", "family", "result", "number", "page"]);
   if ([...request.nextUrl.searchParams.keys()].some((key) => !allowed.has(key))) {
     return {
       error: NextResponse.json(
@@ -102,6 +119,8 @@ function validateQuery(request: NextRequest):
     ? requestedFamily as RollingPatternFamily
     : null;
   const result = request.nextUrl.searchParams.get("result");
+  const rawNumber = request.nextUrl.searchParams.get("number");
+  const number = rawNumber === null ? null : Number(rawNumber);
   const rawPage = request.nextUrl.searchParams.get("page") ?? "1";
   const page = Number(rawPage);
   if (
@@ -111,6 +130,9 @@ function validateQuery(request: NextRequest):
     (requestedFamily !== null && !family) ||
     (scope === "coverage_6_plus_1" && (family === "wave" || family === "head")) ||
     (result !== null && !/^[^\s]{1,160}$/.test(result)) ||
+    (number !== null && (!Number.isInteger(number) || number < 1 || number > 49)) ||
+    (number !== null && scope !== "special") ||
+    (number !== null && result !== null) ||
     !Number.isInteger(page) ||
     page < 1 ||
     page > 100
@@ -122,7 +144,7 @@ function validateQuery(request: NextRequest):
       ),
     };
   }
-  return { game, issue, scope, family, result, page };
+  return { game, issue, scope, family, result, number, page };
 }
 
 function noStore() {

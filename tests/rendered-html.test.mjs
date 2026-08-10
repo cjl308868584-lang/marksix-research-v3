@@ -165,8 +165,28 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
     signals: [],
     scores: [],
     summary: null,
+    specialNumberConsensus: [],
     pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
   });
+});
+
+test("rolling pattern API accepts only a valid special-number detail filter", async () => {
+  const invalidNumber = await fetchWorker(
+    "/api/research/patterns?game=new_macau&scope=special&number=50",
+  );
+  assert.equal(invalidNumber.status, 400);
+
+  const wrongScope = await fetchWorker(
+    "/api/research/patterns?game=new_macau&scope=coverage_6_plus_1&number=3",
+  );
+  assert.equal(wrongScope.status, 400);
+
+  const valid = await fetchWorker(
+    "/api/research/patterns?game=new_macau&scope=special&number=3",
+  );
+  assert.equal(valid.status, 404);
+  const payload = await valid.json();
+  assert.deepEqual(payload.specialNumberConsensus, []);
 });
 
 test("rolling pattern API rejects a family that is unavailable in the selected scope", async () => {
