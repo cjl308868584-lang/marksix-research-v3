@@ -12,6 +12,7 @@ import type {
   RollingPatternScore,
   RollingPatternSignal,
   RollingPatternSummary,
+  SpecialNumberConsensus,
 } from "../../lib/rolling-pattern-types";
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
@@ -36,6 +37,7 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
   signals: RollingPatternSignal[];
   scores: RollingPatternScore[];
   summary: RollingPatternSummary | null;
+  specialNumberConsensus: SpecialNumberConsensus[];
   pagination: {
     page: number;
     pageSize: number;
@@ -50,13 +52,14 @@ export function RollingPatternWorkspace() {
   const [scope, setScope] = useState<RollingPatternScope>("coverage_6_plus_1");
   const [family, setFamily] = useState<RollingPatternFamily | null>(null);
   const [resultEventId, setResultEventId] = useState<string | null>(null);
+  const [selectedNumber, setSelectedNumber] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [response, setResponse] = useState<{
     key: string;
     data: PatternApiResponse | null;
     error: string;
   }>({ key: "", data: null, error: "" });
-  const requestKey = `${game}:${scope}:${family ?? "all"}:${resultEventId ?? "all"}:${page}`;
+  const requestKey = `${game}:${scope}:${family ?? "all"}:${resultEventId ?? "all"}:${selectedNumber ?? "all"}:${page}`;
   const loading = response.key !== requestKey;
   const data = loading ? null : response.data;
   const error = loading ? "" : response.error;
@@ -66,6 +69,7 @@ export function RollingPatternWorkspace() {
     const query = new URLSearchParams({ game, scope, page: String(page) });
     if (family) query.set("family", family);
     if (resultEventId) query.set("result", resultEventId);
+    if (selectedNumber) query.set("number", String(selectedNumber));
     void fetch(`/api/research/patterns?${query.toString()}`, {
       cache: "no-store",
       signal: controller.signal,
@@ -90,7 +94,7 @@ export function RollingPatternWorkspace() {
         }
       });
     return () => controller.abort();
-  }, [game, scope, family, resultEventId, page, requestKey]);
+  }, [game, scope, family, resultEventId, selectedNumber, page, requestKey]);
 
   const scoreByRule = useMemo(
     () => new Map((data?.scores ?? []).map((score) => [score.ruleId, score])),
@@ -101,6 +105,7 @@ export function RollingPatternWorkspace() {
     if (next === game) return;
     setPage(1);
     setResultEventId(null);
+    setSelectedNumber(null);
     setGame(next);
   };
 
@@ -109,6 +114,7 @@ export function RollingPatternWorkspace() {
     setPage(1);
     setFamily(null);
     setResultEventId(null);
+    setSelectedNumber(null);
     setScope(next);
   };
 
@@ -116,12 +122,20 @@ export function RollingPatternWorkspace() {
     if (next === family) return;
     setPage(1);
     setResultEventId(null);
+    setSelectedNumber(null);
     setFamily(next);
   };
 
   const selectResult = (next: string) => {
     setPage(1);
+    setSelectedNumber(null);
     setResultEventId((current) => current === next ? null : next);
+  };
+
+  const selectNumber = (next: number) => {
+    setPage(1);
+    setResultEventId(null);
+    setSelectedNumber((current) => current === next ? null : next);
   };
 
   const filters = scope === "coverage_6_plus_1"
@@ -211,6 +225,13 @@ export function RollingPatternWorkspace() {
                 onSelectResult={selectResult}
               />
             )}
+            {scope === "special" && (
+              <SpecialNumberConsensusPanel
+                items={data.specialNumberConsensus ?? []}
+                selectedNumber={selectedNumber}
+                onSelectNumber={selectNumber}
+              />
+            )}
             <PatternFunnel run={data.run} scope={scope} />
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
               {filters.map((item) => (
@@ -287,6 +308,68 @@ export function RollingPatternWorkspace() {
         )}
       </main>
     </div>
+  );
+}
+
+function SpecialNumberConsensusPanel({
+  items,
+  selectedNumber,
+  onSelectNumber,
+}: {
+  items: SpecialNumberConsensus[];
+  selectedNumber: number | null;
+  onSelectNumber: (number: number) => void;
+}) {
+  return (
+    <section className="special-number-consensus" aria-labelledby="special-number-consensus-title">
+      <header>
+        <div>
+          <span>SPECIAL BALL · CATEGORY INTERSECTION</span>
+          <h2 id="special-number-consensus-title">特码号码交集前15</h2>
+        </div>
+        <p>
+          把特码生肖、尾数、波色、头数投影到01–49后汇总。比如0头与蓝波的交集包含03、04、09；
+          点击号码可筛选下方所有支持策略。
+        </p>
+      </header>
+      <div className="special-number-consensus-note">
+        规律交集研究分，不是01–49的真实中奖概率；相同结果B先合并，避免相关策略被重复放大。
+      </div>
+      {items.length === 0 ? (
+        <p className="rolling-pattern-result-empty">当前筛选没有可形成号码交集的特码规律。</p>
+      ) : (
+        <div className="special-number-consensus-grid">
+          {items.map((item, index) => (
+            <button
+              type="button"
+              className={selectedNumber === item.number ? "selected" : ""}
+              aria-pressed={selectedNumber === item.number}
+              onClick={() => onSelectNumber(item.number)}
+              key={item.number}
+            >
+              <header>
+                <span>#{String(index + 1).padStart(2, "0")}</span>
+                <strong>{String(item.number).padStart(2, "0")}</strong>
+                <em>研究分 +{(item.score * 100).toFixed(1)}</em>
+              </header>
+              <div className="special-number-consensus-evidence">
+                {item.evidence.map((entry) => (
+                  <span key={entry.eventId}>
+                    <strong>{entry.label}</strong>
+                    <small>{entry.strategyCount}策 · {percent(entry.hitRate)}</small>
+                  </span>
+                ))}
+              </div>
+              <footer>
+                <span>{item.resultCount}类结果</span>
+                <span>{item.strategyCount}条策略</span>
+                <span>命中/失败 {item.hitCount}/{item.missCount}</span>
+              </footer>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 

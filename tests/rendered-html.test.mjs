@@ -114,6 +114,10 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(workspace, /总命中次数/);
   assert.match(workspace, /总失败次数/);
   assert.match(workspace, /结果 B 支持汇总/);
+  assert.match(workspace, /特码号码交集前15/);
+  assert.match(workspace, /规律交集研究分，不是01–49的真实中奖概率/);
+  assert.match(workspace, /query\.set\("number"/);
+  assert.match(workspace, /selectedNumber/);
   assert.match(workspace, /规则审计次数，不是独立期开奖期数/);
 });
 
