@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  buildSpecialNumberConsensus,
   selectRollingPatternView,
+  signalSupportsSpecialNumber,
   summarizeRollingPatterns,
 } from "../lib/rolling-pattern-summary.ts";
 import type {
@@ -200,4 +202,78 @@ test("selects one scope before summary and applies result filtering only to deta
     specialWave.rule.event.eventId,
   ]);
   assert.deepEqual(view.signals.map((item) => item.rule.ruleId), ["special-tail"]);
+});
+
+test("projects special head and wave evidence into the intersecting numbers", () => {
+  const head = signal({
+    ruleId: "head-0",
+    eventId: "special:head:0头:gte1",
+    label: "下一期的特码为0头",
+    value: "0头",
+    family: "head",
+    scope: "special",
+    support: 10,
+    hits: 8,
+    baseline: 9 / 49,
+  });
+  const wave = signal({
+    ruleId: "wave-blue",
+    eventId: "special:wave:蓝波:gte1",
+    label: "下一期的特码为蓝波",
+    value: "蓝波",
+    family: "wave",
+    scope: "special",
+    support: 10,
+    hits: 7,
+    baseline: 16 / 49,
+  });
+
+  const consensus = buildSpecialNumberConsensus(
+    [head, wave],
+    "2026-08-10T13:32:00.000Z",
+    15,
+  );
+
+  assert.deepEqual(consensus.slice(0, 3).map((item) => item.number), [3, 4, 9]);
+  assert.deepEqual(consensus[0].evidence.map((item) => item.label), ["0头", "蓝波"]);
+  assert.equal(consensus[0].strategyCount, 2);
+  assert.equal(consensus[0].hitCount, 15);
+  assert.equal(consensus[0].missCount, 5);
+});
+
+test("deduplicates rules, excludes coverage results, and limits special consensus", () => {
+  const special = signal({
+    ruleId: "special-blue",
+    eventId: "special:wave:蓝波:gte1",
+    label: "下一期的特码为蓝波",
+    value: "蓝波",
+    family: "wave",
+    scope: "special",
+    support: 10,
+    hits: 7,
+    baseline: 16 / 49,
+  });
+  const coverage = signal({
+    ruleId: "coverage-tail",
+    eventId: "coverage_6_plus_1:tail:3尾:gte1",
+    label: "下一期6+1至少出现一次3尾",
+    value: "3尾",
+    family: "tail",
+    support: 10,
+    hits: 8,
+    baseline: 0.55,
+  });
+
+  const consensus = buildSpecialNumberConsensus(
+    [special, special, coverage],
+    "2026-08-10T13:32:00.000Z",
+    15,
+  );
+
+  assert.equal(consensus.length, 15);
+  assert.ok(consensus.every((item) => item.evidence.every((entry) => entry.eventId.startsWith("special:"))));
+  assert.ok(consensus.every((item) => item.strategyCount === 1));
+  assert.equal(signalSupportsSpecialNumber(special, 3, "2026-08-10T13:32:00.000Z"), true);
+  assert.equal(signalSupportsSpecialNumber(special, 1, "2026-08-10T13:32:00.000Z"), false);
+  assert.equal(signalSupportsSpecialNumber(coverage, 3, "2026-08-10T13:32:00.000Z"), false);
 });

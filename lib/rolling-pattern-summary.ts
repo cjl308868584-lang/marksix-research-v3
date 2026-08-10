@@ -4,7 +4,11 @@ import type {
   RollingPatternScope,
   RollingPatternSignal,
   RollingPatternSummary,
+  SpecialNumberConsensus,
+  SpecialNumberEvidence,
 } from "./rolling-pattern-types";
+import { getWave, WAVE_LABEL } from "./lottery";
+import { getZodiac } from "./zodiac";
 
 export function selectRollingPatternView(
   signals: readonly RollingPatternSignal[],
@@ -109,6 +113,116 @@ export function summarizeRollingPatterns(
     experimentalStrategyCount: uniqueSignals.length - strongStrategyCount,
     resultGroups: groups,
   };
+}
+
+export function buildSpecialNumberConsensus(
+  signals: readonly RollingPatternSignal[],
+  expectedDrawAt: string,
+  limit = 15,
+): SpecialNumberConsensus[] {
+  const uniqueSignals = [...new Map(
+    signals
+      .filter((signal) => signal.rule.event.scope === "special")
+      .map((signal) => [signal.rule.ruleId, signal]),
+  ).values()];
+  const byEvent = new Map<string, RollingPatternSignal[]>();
+  for (const signal of uniqueSignals) {
+    const eventId = signal.rule.event.eventId;
+    byEvent.set(eventId, [...(byEvent.get(eventId) ?? []), signal]);
+  }
+  const evidence = [...byEvent.values()].map(summarizeSpecialEvidence);
+  const numbers: SpecialNumberConsensus[] = [];
+
+  for (let number = 1; number <= 49; number += 1) {
+    const matching = evidence.filter((entry) =>
+      numberMatchesSpecialEvent(number, expectedDrawAt, entry)
+    );
+    if (matching.length === 0) continue;
+    const triggerCount = matching.reduce((total, entry) => total + entry.triggerCount, 0);
+    const hitCount = matching.reduce((total, entry) => total + entry.hitCount, 0);
+    numbers.push({
+      number,
+      score: matching.reduce((total, entry) => total + entry.contribution, 0),
+      resultCount: matching.length,
+      strategyCount: matching.reduce((total, entry) => total + entry.strategyCount, 0),
+      triggerCount,
+      hitCount,
+      missCount: triggerCount - hitCount,
+      hitRate: ratio(hitCount, triggerCount),
+      evidence: matching,
+    });
+  }
+
+  return numbers
+    .sort((left, right) =>
+      right.score - left.score ||
+      right.resultCount - left.resultCount ||
+      right.strategyCount - left.strategyCount ||
+      right.hitRate - left.hitRate ||
+      left.number - right.number
+    )
+    .slice(0, Math.max(0, Math.min(49, Math.trunc(limit))));
+}
+
+export function signalSupportsSpecialNumber(
+  signal: RollingPatternSignal,
+  number: number,
+  expectedDrawAt: string,
+) {
+  if (signal.rule.event.scope !== "special" || number < 1 || number > 49) return false;
+  return numberMatchesSpecialEvent(number, expectedDrawAt, {
+    family: signal.rule.event.family,
+    label: signal.rule.event.value,
+  });
+}
+
+function summarizeSpecialEvidence(
+  signals: RollingPatternSignal[],
+): SpecialNumberEvidence {
+  const event = signals[0].rule.event;
+  const triggerCount = signals.reduce((total, signal) => total + signal.support, 0);
+  const hitCount = signals.reduce((total, signal) => total + signal.hits, 0);
+  const baselineWeight = signals.reduce(
+    (total, signal) => total + signal.baseline * signal.support,
+    0,
+  );
+  const posteriorWeight = signals.reduce(
+    (total, signal) => total + signal.posteriorRate * signal.support,
+    0,
+  );
+  const baselineRate = ratio(baselineWeight, triggerCount);
+  const posteriorRate = ratio(posteriorWeight, triggerCount);
+  const reliability = triggerCount / (triggerCount + 10);
+  return {
+    eventId: event.eventId,
+    label: event.value,
+    family: event.family,
+    strategyCount: signals.length,
+    triggerCount,
+    hitCount,
+    missCount: triggerCount - hitCount,
+    hitRate: ratio(hitCount, triggerCount),
+    baselineRate,
+    posteriorRate,
+    contribution: Math.min(0.35, Math.max(0, posteriorRate - baselineRate) * reliability),
+  };
+}
+
+function numberMatchesSpecialEvent(
+  number: number,
+  expectedDrawAt: string,
+  event: Pick<SpecialNumberEvidence, "family" | "label">,
+) {
+  switch (event.family) {
+    case "zodiac":
+      return getZodiac(number, expectedDrawAt) === event.label;
+    case "tail":
+      return `${number % 10}尾` === event.label;
+    case "wave":
+      return WAVE_LABEL[getWave(number)] === event.label;
+    case "head":
+      return `${Math.floor(number / 10)}头` === event.label;
+  }
 }
 
 function ratio(numerator: number, denominator: number) {

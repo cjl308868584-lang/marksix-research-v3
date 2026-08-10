@@ -188,6 +188,32 @@ export type RollingPatternSummary = {
   resultGroups: RollingPatternResultSummary[];
 };
 
+export type SpecialNumberEvidence = {
+  eventId: string;
+  label: string;
+  family: RollingPatternFamily;
+  strategyCount: number;
+  triggerCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number;
+  baselineRate: number;
+  posteriorRate: number;
+  contribution: number;
+};
+
+export type SpecialNumberConsensus = {
+  number: number;
+  score: number;
+  resultCount: number;
+  strategyCount: number;
+  triggerCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number;
+  evidence: SpecialNumberEvidence[];
+};
+
 export type RollingPatternCycleResult =
   | {
       status: "created" | "existing";
