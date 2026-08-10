@@ -118,6 +118,7 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(workspace, /规律交集研究分，不是01–49的真实中奖概率/);
   assert.match(workspace, /query\.set\("number"/);
   assert.match(workspace, /selectedNumber/);
+  assert.match(workspace, /历史汇总.*percent\(item\.hitRate\)/s);
   assert.match(workspace, /规则审计次数，不是独立期开奖期数/);
 });
 

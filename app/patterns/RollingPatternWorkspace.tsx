@@ -363,6 +363,7 @@ function SpecialNumberConsensusPanel({
               <footer>
                 <span>{item.resultCount}类结果</span>
                 <span>{item.strategyCount}条策略</span>
+                <span>历史汇总 {percent(item.hitRate)}</span>
                 <span>命中/失败 {item.hitCount}/{item.missCount}</span>
               </footer>
             </button>
