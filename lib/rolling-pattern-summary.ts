@@ -7,8 +7,10 @@ import type {
   SpecialNumberConsensus,
   SpecialNumberEvidence,
 } from "./rolling-pattern-types";
-import { getWave, WAVE_LABEL } from "./lottery";
-import { getZodiac } from "./zodiac";
+import { getZodiac } from "./zodiac.ts";
+
+const RED_WAVE_NUMBERS = new Set([1, 2, 7, 8, 12, 13, 18, 19, 23, 24, 29, 30, 34, 35, 40, 45, 46]);
+const BLUE_WAVE_NUMBERS = new Set([3, 4, 9, 10, 14, 15, 20, 25, 26, 31, 36, 37, 41, 42, 47, 48]);
 
 export function selectRollingPatternView(
   signals: readonly RollingPatternSignal[],
@@ -219,10 +221,16 @@ function numberMatchesSpecialEvent(
     case "tail":
       return `${number % 10}尾` === event.label;
     case "wave":
-      return WAVE_LABEL[getWave(number)] === event.label;
+      return specialWaveLabel(number) === event.label;
     case "head":
       return `${Math.floor(number / 10)}头` === event.label;
   }
+}
+
+function specialWaveLabel(number: number) {
+  if (RED_WAVE_NUMBERS.has(number)) return "红波";
+  if (BLUE_WAVE_NUMBERS.has(number)) return "蓝波";
+  return "绿波";
 }
 
 function ratio(numerator: number, denominator: number) {
