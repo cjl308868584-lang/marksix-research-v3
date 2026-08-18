@@ -4,6 +4,8 @@ import { createServer, type ViteDevServer } from "vite";
 import type { Draw } from "../lib/lottery";
 import type {
   RollingPatternEnvelope,
+  RollingPatternProduct,
+  RollingPatternProductScore,
   RollingPatternRun,
 } from "../lib/rolling-pattern-types";
 
@@ -21,6 +23,8 @@ class FakePatternD1 {
   runs = new Map<string, RunRow>();
   signals = new Map<string, { run_id: string; rule_id: string; signal_json: string }>();
   scores = new Map<string, { run_id: string; rule_id: string; score_json: string }>();
+  products = new Map<string, { run_id: string; product_id: string; product_json: string }>();
+  productScores = new Map<string, { run_id: string; product_id: string; score_json: string }>();
   currentTargets = new Map<string, string>();
   batchSizes: number[] = [];
 
@@ -74,6 +78,26 @@ class FakePatternD1 {
           });
           return { meta: { changes: 1 } };
         }
+        if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_consensus_ledger")) {
+          const key = `${values[0]}:${values[1]}`;
+          if (this.products.has(key)) return { meta: { changes: 0 } };
+          this.products.set(key, {
+            run_id: String(values[0]),
+            product_id: String(values[1]),
+            product_json: String(values[8]),
+          });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_consensus_scores")) {
+          const key = `${values[0]}:${values[1]}`;
+          if (this.productScores.has(key)) return { meta: { changes: 0 } };
+          this.productScores.set(key, {
+            run_id: String(values[0]),
+            product_id: String(values[1]),
+            score_json: String(values[9]),
+          });
+          return { meta: { changes: 1 } };
+        }
         return { meta: { changes: 0 } };
       },
       first: async <T>() => {
@@ -112,6 +136,20 @@ class FakePatternD1 {
             ) as T[],
           };
         }
+        if (sql.includes("FROM rolling_pattern_consensus_ledger")) {
+          return {
+            results: [...this.products.values()].filter(
+              (row) => row.run_id === String(values[0]),
+            ) as T[],
+          };
+        }
+        if (sql.includes("FROM rolling_pattern_consensus_scores")) {
+          return {
+            results: [...this.productScores.values()].filter(
+              (row) => row.run_id === String(values[0]),
+            ) as T[],
+          };
+        }
         if (sql.includes("FROM rolling_pattern_runs")) {
           return {
             results: [...this.runs.values()].filter(
@@ -144,6 +182,10 @@ type StoreModule = {
     draws: Draw[],
     settledAt: string,
   ): Promise<string>;
+  readRollingPatternValueLedger(
+    game: "new_macau",
+    issue?: string,
+  ): Promise<{ products: RollingPatternProduct[]; scores: RollingPatternProductScore[] } | null>;
 };
 
 let server: ViteDevServer;
@@ -219,6 +261,22 @@ test("replaying one run id restores the immutable result without duplicate signa
   assert.equal(restored?.signals.length, runFixture.signals.length);
 });
 
+test("freezes result-level value products and repairs missing ledger children idempotently", async () => {
+  assert.equal(await store.persistRollingPatternRun(runFixture), "created");
+  const count = db.products.size;
+  assert.ok(count > 0);
+  assert.equal(await store.persistRollingPatternRun(runFixture), "existing");
+  assert.equal(db.products.size, count);
+  const missing = [...db.products.keys()][0];
+  db.products.delete(missing);
+  assert.equal(await store.persistRollingPatternRun(runFixture), "existing");
+  assert.equal(db.products.size, count);
+
+  const ledger = await store.readRollingPatternValueLedger("new_macau", runFixture.targetIssue);
+  assert.equal(ledger?.products.length, count);
+  assert.equal(ledger?.scores.length, 0);
+});
+
 test("large conditional runs are persisted in bounded, retry-safe D1 batches", async () => {
   const seed = runFixture.signals[0];
   assert.ok(seed);
@@ -286,11 +344,13 @@ test("settlement scores only the previously frozen verified target and is idempo
     "ok",
   );
   assert.equal(db.scores.size, runFixture.signals.length);
+  assert.equal(db.productScores.size, db.products.size);
   assert.equal(
     await store.settleRollingPatternRuns("new_macau", [actual], "2026-01-31T13:41:00Z"),
     "ok",
   );
   assert.equal(db.scores.size, runFixture.signals.length);
+  assert.equal(db.productScores.size, db.products.size);
 });
 
 test("rolling lifecycle settles the old target before building and freezing the next window", async () => {

@@ -5,7 +5,12 @@ import {
   selectRollingPatternView,
   signalSupportsSpecialNumber,
 } from "../../../../lib/rolling-pattern-summary";
-import { readRollingPatternRun } from "../../../../lib/rolling-pattern-store";
+import {
+  readRollingPatternRun,
+  readRollingPatternValueHistory,
+  readRollingPatternValueLedger,
+} from "../../../../lib/rolling-pattern-store";
+import { buildRollingPatternProducts } from "../../../../lib/rolling-pattern-value";
 import type {
   RollingPatternFamily,
   RollingPatternScope,
@@ -37,6 +42,8 @@ export async function GET(request: NextRequest) {
         scores: [],
         summary: null,
         specialNumberConsensus: [],
+        valueAnalysis: [],
+        settlementHistory: [],
         pagination: { page, pageSize: PAGE_SIZE, total: 0, pages: 0 },
       },
       { status: 404, headers: noStore() },
@@ -47,6 +54,10 @@ export async function GET(request: NextRequest) {
     family,
     resultEventId: null,
   });
+  const [valueLedger, settlementHistory] = await Promise.all([
+    readRollingPatternValueLedger(game, envelope.run.targetIssue),
+    readRollingPatternValueHistory(game, scope, 8),
+  ]);
   if (result && !view.summary.resultGroups.some((group) => group.eventId === result)) {
     return NextResponse.json(
       { error: "所选结果不属于当前结果域或分类。" },
@@ -63,6 +74,10 @@ export async function GET(request: NextRequest) {
   const specialNumberConsensus = scope === "special"
     ? buildSpecialNumberConsensus(view.signals, envelope.run.expectedDrawAt, 15)
     : [];
+  const frozenProducts = valueLedger?.products.length
+    ? valueLedger.products
+    : buildRollingPatternProducts({ ...envelope.run, signals: envelope.signals });
+  const valueAnalysis = selectValueProducts(frozenProducts.filter((item) => item.scope === scope));
   const pages = Math.ceil(filteredSignals.length / PAGE_SIZE);
   const start = (page - 1) * PAGE_SIZE;
   return NextResponse.json(
@@ -72,6 +87,8 @@ export async function GET(request: NextRequest) {
       run: { ...envelope.run, signals: [] },
       summary: view.summary,
       specialNumberConsensus,
+      valueAnalysis,
+      settlementHistory,
       signals: filteredSignals.slice(start, start + PAGE_SIZE),
       scores: envelope.scores,
       pagination: {
@@ -83,6 +100,26 @@ export async function GET(request: NextRequest) {
     },
     { headers: noStore() },
   );
+}
+
+function selectValueProducts<T extends { kind: string; expectedValue: number }>(products: T[]) {
+  const limits = new Map([
+    ["coverage_zodiac", 5],
+    ["coverage_tail", 5],
+    ["coverage_zodiac_pair", 8],
+    ["coverage_zodiac_triple", 8],
+    ["special_number", 15],
+  ]);
+  const counts = new Map<string, number>();
+  return [...products]
+    .sort((left, right) => right.expectedValue - left.expectedValue)
+    .filter((product) => {
+      const count = counts.get(product.kind) ?? 0;
+      const limit = limits.get(product.kind) ?? 0;
+      if (count >= limit) return false;
+      counts.set(product.kind, count + 1);
+      return true;
+    });
 }
 
 function validateQuery(request: NextRequest):

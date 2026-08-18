@@ -120,6 +120,12 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(workspace, /selectedNumber/);
   assert.match(workspace, /历史汇总.*percent\(item\.hitRate\)/s);
   assert.match(workspace, /规则审计次数，不是独立期开奖期数/);
+  assert.match(workspace, /赔率价值分析/);
+  assert.match(workspace, /二连肖/);
+  assert.match(workspace, /三连肖/);
+  assert.match(workspace, /盈亏平衡/);
+  assert.match(workspace, /逐期汇总结算/);
+  assert.match(workspace, /符合赔率价值/);
 });
 
 test("legacy rolling pattern route redirects to the independent page", async () => {
@@ -171,6 +177,8 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
     scores: [],
     summary: null,
     specialNumberConsensus: [],
+    valueAnalysis: [],
+    settlementHistory: [],
     pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
   });
 });

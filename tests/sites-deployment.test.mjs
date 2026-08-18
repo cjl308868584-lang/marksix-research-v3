@@ -119,3 +119,30 @@ test("the rolling pattern migration creates immutable run, signal and score iden
   ));
   database.close();
 });
+
+test("the value ledger migration enforces one frozen product and score per run", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0009_same_the_enforcers.sql", import.meta.url),
+    "utf8",
+  );
+  const database = new DatabaseSync(":memory:");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) database.exec(statement);
+  }
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_schema
+     WHERE type = 'table' AND name LIKE 'rolling_pattern_consensus_%'
+     ORDER BY name`,
+  ).all().map((row) => row.name);
+  assert.deepEqual(tables, [
+    "rolling_pattern_consensus_ledger",
+    "rolling_pattern_consensus_scores",
+  ]);
+  const row = `('run-1','product-1','new_macau','2026230','coverage_6_plus_1',
+    'coverage_zodiac','马',1,'{}','2026-08-17T14:02:00Z')`;
+  database.exec(`INSERT INTO rolling_pattern_consensus_ledger VALUES ${row}`);
+  assert.throws(() => database.exec(
+    `INSERT INTO rolling_pattern_consensus_ledger VALUES ${row}`,
+  ));
+  database.close();
+});

@@ -611,6 +611,61 @@ export const rollingPatternScores = sqliteTable(
   ],
 );
 
+export const rollingPatternConsensusLedger = sqliteTable(
+  "rolling_pattern_consensus_ledger",
+  {
+    runId: text("run_id").notNull(),
+    productId: text("product_id").notNull(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    scope: text("scope").notNull(),
+    productKind: text("product_kind").notNull(),
+    resultKey: text("result_key").notNull(),
+    rank: integer("rank").notNull(),
+    productJson: text("product_json").notNull(),
+    frozenAt: text("frozen_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_consensus_identity_idx").on(
+      table.runId,
+      table.productId,
+    ),
+    index("rolling_pattern_consensus_issue_idx").on(
+      table.game,
+      table.targetIssue,
+      table.scope,
+    ),
+  ],
+);
+
+export const rollingPatternConsensusScores = sqliteTable(
+  "rolling_pattern_consensus_scores",
+  {
+    runId: text("run_id").notNull(),
+    productId: text("product_id").notNull(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    scope: text("scope").notNull(),
+    productKind: text("product_kind").notNull(),
+    actualMatched: integer("actual_matched", { mode: "boolean" }).notNull(),
+    unitProfit: real("unit_profit").notNull(),
+    actualJson: text("actual_json").notNull(),
+    scoreJson: text("score_json").notNull(),
+    scoredAt: text("scored_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_consensus_score_identity_idx").on(
+      table.runId,
+      table.productId,
+    ),
+    index("rolling_pattern_consensus_score_issue_idx").on(
+      table.game,
+      table.targetIssue,
+      table.scope,
+    ),
+  ],
+);
+
 export const researchModelArtifacts = sqliteTable(
   "research_model_artifacts",
   {

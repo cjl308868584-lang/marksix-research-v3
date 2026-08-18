@@ -1,11 +1,20 @@
 import type { Draw, GameId } from "./lottery";
 import { evaluateRollingResultEvent } from "./rolling-pattern-events";
+import {
+  applyForwardProductHistory,
+  buildRollingPatternProducts,
+  settleRollingPatternProduct,
+} from "./rolling-pattern-value";
 import { ensureResearchV3Store } from "./research-v3-store";
 import type {
   RollingPatternEnvelope,
+  RollingPatternProduct,
+  RollingPatternProductScore,
   RollingPatternRun,
   RollingPatternScore,
   RollingPatternSignal,
+  RollingPatternScope,
+  RollingPatternValueLedgerEntry,
 } from "./rolling-pattern-types";
 import { ROLLING_PATTERN_ENGINE_VERSION } from "./rolling-pattern-types";
 
@@ -16,6 +25,15 @@ const runtime = globalThis as typeof globalThis & {
 type RunRow = { run_id: string; run_json: string };
 type SignalRow = { signal_json: string };
 type ScoreRow = { score_json: string };
+type ProductRow = { product_json: string };
+type ProductScoreRow = { score_json: string };
+type ProductHistoryRow = { product_json: string; score_json: string | null };
+type ProductAggregateRow = {
+  product_kind: string;
+  result_key: string;
+  settled_count: number;
+  hit_count: number;
+};
 const D1_BATCH_SIZE = 80;
 
 export async function ensureRollingPatternStore() {
@@ -75,6 +93,7 @@ export async function persistRollingPatternRun(
       );
       await runBatches(db, statements);
     }
+    await persistRollingPatternProducts(db, run);
     const completed = await db.prepare(
       `UPDATE rolling_pattern_runs SET status = 'completed'
        WHERE run_id = ? AND engine_version = ? AND window_data_hash = ?`,
@@ -83,6 +102,75 @@ export async function persistRollingPatternRun(
     return status;
   } catch {
     return "unavailable";
+  }
+}
+
+export async function readRollingPatternValueLedger(
+  game: GameId,
+  issue?: string | null,
+): Promise<{
+  products: RollingPatternProduct[];
+  scores: RollingPatternProductScore[];
+} | null> {
+  const envelope = await readRollingPatternRun(game, issue);
+  if (!envelope) return null;
+  const db = runtime.__marksixD1;
+  if (!db) return null;
+  try {
+    const [productRows, scoreRows] = await Promise.all([
+      db.prepare(
+        `SELECT product_json FROM rolling_pattern_consensus_ledger
+         WHERE run_id = ? ORDER BY rank ASC, rowid ASC`,
+      ).bind(envelope.run.runId).all<ProductRow>(),
+      db.prepare(
+        `SELECT score_json FROM rolling_pattern_consensus_scores
+         WHERE run_id = ? ORDER BY rowid ASC`,
+      ).bind(envelope.run.runId).all<ProductScoreRow>(),
+    ]);
+    return {
+      products: (productRows.results ?? [])
+        .map((row) => parseJson(row.product_json))
+        .filter(isRollingPatternProduct),
+      scores: (scoreRows.results ?? [])
+        .map((row) => parseJson(row.score_json))
+        .filter(isRollingPatternProductScore),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function readRollingPatternValueHistory(
+  game: GameId,
+  scope: RollingPatternScope,
+  issueLimit = 8,
+): Promise<RollingPatternValueLedgerEntry[]> {
+  if (!await ensureRollingPatternStore()) return [];
+  const db = runtime.__marksixD1;
+  if (!db) return [];
+  const bounded = Math.max(1, Math.min(30, Math.trunc(issueLimit)));
+  try {
+    const rows = await db.prepare(
+      `SELECT l.product_json, s.score_json
+       FROM rolling_pattern_consensus_ledger l
+       LEFT JOIN rolling_pattern_consensus_scores s
+         ON s.run_id = l.run_id AND s.product_id = l.product_id
+       WHERE l.game = ? AND l.scope = ? AND l.rank <= 15
+       ORDER BY l.target_issue DESC, l.rank ASC
+       LIMIT ?`,
+    ).bind(game, scope, bounded * 15).all<ProductHistoryRow>();
+    return (rows.results ?? []).flatMap((row) => {
+      const product = parseJson(row.product_json);
+      const score = row.score_json ? parseJson(row.score_json) : null;
+      return isRollingPatternProduct(product)
+        ? [{
+            product,
+            score: isRollingPatternProductScore(score) ? score : null,
+          }]
+        : [];
+    });
+  } catch {
+    return [];
   }
 }
 
@@ -163,6 +251,8 @@ export async function settleRollingPatternRuns(
         const signals = (signalRows.results ?? [])
           .map((item) => parseJson(item.signal_json))
           .filter(isRollingPatternSignal);
+        const hydratedRun = { ...run, signals };
+        await persistRollingPatternProducts(db, hydratedRun);
         const statements = signals.map((signal) => {
           const actual = evaluateRollingResultEvent(draw, signal.rule.event);
           const score: RollingPatternScore = {
@@ -190,12 +280,103 @@ export async function settleRollingPatternRuns(
           );
         });
         await runBatches(db, statements);
+        const productRows = await db.prepare(
+          `SELECT product_json FROM rolling_pattern_consensus_ledger
+           WHERE run_id = ? ORDER BY rank ASC, rowid ASC`,
+        ).bind(run.runId).all<ProductRow>();
+        const productStatements = (productRows.results ?? [])
+          .map((item) => parseJson(item.product_json))
+          .filter(isRollingPatternProduct)
+          .map((product) => {
+            const score = settleRollingPatternProduct(product, draw, settledAt);
+            return db.prepare(
+              `INSERT OR IGNORE INTO rolling_pattern_consensus_scores (
+                 run_id, product_id, game, target_issue, scope, product_kind,
+                 actual_matched, unit_profit, actual_json, score_json, scored_at
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            ).bind(
+              run.runId,
+              product.productId,
+              game,
+              draw.issue,
+              product.scope,
+              product.kind,
+              score.actualMatched ? 1 : 0,
+              score.unitProfit,
+              JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
+              JSON.stringify(score),
+              settledAt,
+            );
+          });
+        await runBatches(db, productStatements);
       }
     }
     return "ok";
   } catch {
     return "unavailable";
   }
+}
+
+async function persistRollingPatternProducts(
+  db: D1Database,
+  run: RollingPatternRun,
+) {
+  const aggregateRows = await db.prepare(
+    `SELECT l.product_kind, l.result_key,
+            COUNT(*) AS settled_count,
+            SUM(s.actual_matched) AS hit_count
+     FROM rolling_pattern_consensus_ledger l
+     INNER JOIN rolling_pattern_consensus_scores s
+       ON s.run_id = l.run_id AND s.product_id = l.product_id
+     WHERE l.game = ?
+     GROUP BY l.product_kind, l.result_key`,
+  ).bind(run.game).all<ProductAggregateRow>();
+  const history = new Map(
+    (aggregateRows.results ?? [])
+      .filter((row) =>
+        typeof row.product_kind === "string" &&
+        typeof row.result_key === "string" &&
+        Number.isFinite(Number(row.settled_count)) &&
+        Number.isFinite(Number(row.hit_count))
+      )
+      .map((row) => [
+        `${row.product_kind}:${row.result_key}`,
+        { settled: Number(row.settled_count), hits: Number(row.hit_count) },
+      ]),
+  );
+  const products = buildRollingPatternProducts(run)
+    .map((product) => {
+      const previous = history.get(`${product.kind}:${product.values.join("+")}`);
+      return previous
+        ? applyForwardProductHistory(product, previous.settled, previous.hits)
+        : product;
+    })
+    .sort((left, right) =>
+      right.expectedValue - left.expectedValue ||
+      right.support - left.support ||
+      left.label.localeCompare(right.label, "zh-CN")
+    )
+    .map((product, index) => ({ ...product, rank: index + 1 }));
+  const statements = products.map((product) =>
+    db.prepare(
+      `INSERT OR IGNORE INTO rolling_pattern_consensus_ledger (
+         run_id, product_id, game, target_issue, scope, product_kind,
+         result_key, rank, product_json, frozen_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      run.runId,
+      product.productId,
+      run.game,
+      run.targetIssue,
+      product.scope,
+      product.kind,
+      product.values.join("+"),
+      product.rank,
+      JSON.stringify(product),
+      run.frozenAt,
+    )
+  );
+  await runBatches(db, statements);
 }
 
 async function runBatches(
@@ -234,6 +415,25 @@ function isRollingPatternScore(value: unknown): value is RollingPatternScore {
   return typeof score.runId === "string" &&
     typeof score.ruleId === "string" &&
     typeof score.actualMatched === "boolean";
+}
+
+function isRollingPatternProduct(value: unknown): value is RollingPatternProduct {
+  if (!value || typeof value !== "object") return false;
+  const product = value as Partial<RollingPatternProduct>;
+  return typeof product.productId === "string" &&
+    typeof product.targetIssue === "string" &&
+    typeof product.estimatedProbability === "number" &&
+    typeof product.netOdds === "number";
+}
+
+function isRollingPatternProductScore(
+  value: unknown,
+): value is RollingPatternProductScore {
+  if (!value || typeof value !== "object") return false;
+  const score = value as Partial<RollingPatternProductScore>;
+  return typeof score.productId === "string" &&
+    typeof score.actualMatched === "boolean" &&
+    typeof score.unitProfit === "number";
 }
 
 function parseJson(value: string): unknown {

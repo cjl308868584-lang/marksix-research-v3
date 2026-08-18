@@ -6,6 +6,8 @@ import { GAME_META, type GameId } from "../../lib/lottery";
 import type {
   RollingPatternEnvelope,
   RollingPatternFamily,
+  RollingPatternProduct,
+  RollingPatternValueLedgerEntry,
   RollingPatternResultSummary,
   RollingPatternRun,
   RollingPatternScope,
@@ -38,6 +40,8 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
   scores: RollingPatternScore[];
   summary: RollingPatternSummary | null;
   specialNumberConsensus: SpecialNumberConsensus[];
+  valueAnalysis: RollingPatternProduct[];
+  settlementHistory: RollingPatternValueLedgerEntry[];
   pagination: {
     page: number;
     pageSize: number;
@@ -218,6 +222,7 @@ export function RollingPatternWorkspace() {
         {!loading && !error && data?.run && (
           <>
             <PatternRunContext run={data.run} />
+            <ValueAnalysisPanel items={data.valueAnalysis ?? []} scope={scope} />
             {data.summary && (
               <PatternSummaryPanel
                 summary={data.summary}
@@ -225,6 +230,7 @@ export function RollingPatternWorkspace() {
                 onSelectResult={selectResult}
               />
             )}
+            <SettlementHistoryPanel entries={data.settlementHistory ?? []} />
             {scope === "special" && (
               <SpecialNumberConsensusPanel
                 items={data.specialNumberConsensus ?? []}
@@ -308,6 +314,103 @@ export function RollingPatternWorkspace() {
         )}
       </main>
     </div>
+  );
+}
+
+function ValueAnalysisPanel({
+  items,
+  scope,
+}: {
+  items: RollingPatternProduct[];
+  scope: RollingPatternScope;
+}) {
+  return (
+    <section className="rolling-value-panel" aria-labelledby="rolling-value-title">
+      <header>
+        <div>
+          <span>ODDS VALUE · FROZEN BEFORE DRAW</span>
+          <h2 id="rolling-value-title">赔率价值分析</h2>
+        </div>
+        <p>
+          按每投注1单位计算：概率×净赔率－失败概率。没有最低期数限制；样本数和前瞻结算次数同时公开。
+        </p>
+      </header>
+      <div className="rolling-value-legend">
+        {scope === "coverage_6_plus_1"
+          ? "单肖 · 单尾 · 二连肖 · 三连肖"
+          : "特码号码前15 · 净赔率1:47"}
+      </div>
+      {items.length === 0 ? (
+        <p className="rolling-pattern-result-empty">本期还没有冻结的赔率价值项目。</p>
+      ) : (
+        <div className="rolling-value-grid">
+          {items.map((item) => (
+            <article className={`rolling-value-card ${item.valueStatus}`} key={item.productId}>
+              <header>
+                <span>{productKindLabel(item.kind)}</span>
+                <strong>{item.label}</strong>
+                <em>{valueStatusLabel(item.valueStatus)}</em>
+              </header>
+              <div>
+                <p><span>净赔率</span><strong>1:{odds(item.netOdds)}</strong></p>
+                <p><span>盈亏平衡</span><strong>{percent(item.breakEvenProbability)}</strong></p>
+                <p><span>参考概率</span><strong>{percent(item.estimatedProbability)}</strong></p>
+                <p><span>每1单位期望</span><strong className={item.expectedValue > 0 ? "good" : "bad"}>{signedReturn(item.expectedValue)}</strong></p>
+                <p><span>联合历史</span><strong>{item.hits}/{item.support}</strong></p>
+                <p><span>前瞻记录</span><strong>{item.forwardHitCount}/{item.forwardSettledCount}</strong></p>
+              </div>
+              <footer>{item.strategyCount}条策略支持 · 开奖前已冻结</footer>
+            </article>
+          ))}
+        </div>
+      )}
+      <small>价值状态只表示当前概率高于或低于赔率盈亏平衡线，不代表保证盈利，也不会自动下注。</small>
+    </section>
+  );
+}
+
+function SettlementHistoryPanel({ entries }: { entries: RollingPatternValueLedgerEntry[] }) {
+  const periods = entries.reduce<Array<{
+    issue: string;
+    items: RollingPatternValueLedgerEntry[];
+  }>>((groups, entry) => {
+    const current = groups.find((group) => group.issue === entry.product.targetIssue);
+    if (current) current.items.push(entry);
+    else groups.push({ issue: entry.product.targetIssue, items: [entry] });
+    return groups;
+  }, []);
+  return (
+    <section className="rolling-settlement-history" aria-labelledby="rolling-history-title">
+      <header>
+        <span>FORWARD LEDGER · IMMUTABLE</span>
+        <h2 id="rolling-history-title">逐期汇总结算</h2>
+        <p>每期展示冻结时排名前15的项目；开奖后标记命中、失败和每1单位实际盈亏。</p>
+      </header>
+      {periods.length === 0 ? (
+        <p className="rolling-pattern-result-empty">新账本将从本次发布后的冻结期开始逐期累积。</p>
+      ) : (
+        <div className="rolling-settlement-periods">
+          {periods.map((period) => (
+            <details key={period.issue}>
+              <summary>
+                <strong>{period.issue}期</strong>
+                <span>{period.items.filter((item) => item.score?.actualMatched).length}中 / {period.items.filter((item) => item.score && !item.score.actualMatched).length}不中</span>
+              </summary>
+              <div>
+                {period.items.map(({ product, score }) => (
+                  <p key={product.productId}>
+                    <span>{productKindLabel(product.kind)} · <b>{product.label}</b></span>
+                    <strong className={!score ? "pending" : score.actualMatched ? "hit" : "miss"}>
+                      {!score ? "待开奖" : score.actualMatched ? `命中 +${odds(score.unitProfit)}` : "不中 -1"}
+                    </strong>
+                  </p>
+                ))}
+              </div>
+            </details>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -618,6 +721,24 @@ function ruleFamilyLabel(family: RollingPatternSignal["rule"]["family"]) {
   }[family];
 }
 
+function productKindLabel(kind: RollingPatternProduct["kind"]) {
+  return {
+    coverage_zodiac: "单肖",
+    coverage_tail: "单尾",
+    coverage_zodiac_pair: "二连肖",
+    coverage_zodiac_triple: "三连肖",
+    special_number: "特码号码",
+  }[kind];
+}
+
+function valueStatusLabel(status: RollingPatternProduct["valueStatus"]) {
+  return {
+    positive: "符合赔率价值",
+    negative: "不符合",
+    pending: "待积累",
+  }[status];
+}
+
 function percent(value: number) {
   return `${(value * 100).toFixed(1)}%`;
 }
@@ -632,6 +753,14 @@ function statValue(value: number) {
 
 function decimal(value: number) {
   return value.toFixed(1);
+}
+
+function odds(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+
+function signedReturn(value: number) {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
 }
 
 function beijingTime(value: string) {

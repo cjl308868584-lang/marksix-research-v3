@@ -214,6 +214,71 @@ export type SpecialNumberConsensus = {
   evidence: SpecialNumberEvidence[];
 };
 
+export type RollingPatternProductKind =
+  | "coverage_zodiac"
+  | "coverage_tail"
+  | "coverage_zodiac_pair"
+  | "coverage_zodiac_triple"
+  | "special_number";
+
+export type RollingPatternValueStatus = "positive" | "negative" | "pending";
+
+export type RollingPatternProduct = {
+  runId: string;
+  productId: string;
+  game: GameId;
+  targetIssue: string;
+  scope: RollingPatternScope;
+  kind: RollingPatternProductKind;
+  label: string;
+  values: string[];
+  evidenceEventIds: string[];
+  strategyCount: number;
+  support: number;
+  hits: number;
+  misses: number;
+  baselineProbability: number;
+  estimatedProbability: number;
+  netOdds: number;
+  breakEvenProbability: number;
+  expectedValue: number;
+  valueStatus: RollingPatternValueStatus;
+  forwardSettledCount: number;
+  forwardHitCount: number;
+  forwardMissCount: number;
+  rank: number;
+  frozenAt: string;
+};
+
+export type RollingPatternProductScore = {
+  runId: string;
+  productId: string;
+  game: GameId;
+  targetIssue: string;
+  actualMatched: boolean;
+  unitProfit: number;
+  actualNumbers: number[];
+  actualSpecial: number;
+  scoredAt: string;
+};
+
+export type RollingPatternValueHistory = {
+  productId: string;
+  kind: RollingPatternProductKind;
+  label: string;
+  values: string[];
+  settledCount: number;
+  hitCount: number;
+  missCount: number;
+  cumulativeProfit: number;
+  roi: number;
+};
+
+export type RollingPatternValueLedgerEntry = {
+  product: RollingPatternProduct;
+  score: RollingPatternProductScore | null;
+};
+
 export type RollingPatternCycleResult =
   | {
       status: "created" | "existing";
