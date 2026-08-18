@@ -6,6 +6,7 @@ import {
   applyForwardProductHistory,
   buildRollingPatternProducts,
   netOddsForProduct,
+  selectRollingPatternRecommendations,
   settleRollingPatternProduct,
 } from "../lib/rolling-pattern-value.ts";
 import { getZodiac } from "../lib/zodiac.ts";
@@ -186,4 +187,36 @@ test("settles one frozen product once using the actual 6+1 result", () => {
   assert.equal(score.targetIssue, "2026230");
   assert.equal(score.actualMatched, true);
   assert.equal(score.unitProfit, 2);
+});
+
+test("selects at most one positive recommendation for every purchase category", () => {
+  const products = buildRollingPatternProducts(run([
+    signal("马", [["1", true], ["2", true], ["3", false]]),
+    signal("猴", [["1", true], ["2", true], ["3", true]]),
+    signal("鸡", [["1", true], ["2", false], ["3", true]]),
+  ]));
+  const recommendations = selectRollingPatternRecommendations(products, "coverage_6_plus_1");
+
+  assert.deepEqual(
+    recommendations.map((item) => item.kind),
+    ["coverage_zodiac", "coverage_tail", "coverage_zodiac_pair", "coverage_zodiac_triple"],
+  );
+  assert.equal(recommendations.filter((item) => item.product).length, 3);
+  assert.ok(recommendations.every((item) => !item.product || item.product.expectedValue > 0));
+  assert.ok(recommendations.every((item) => item.reason.length > 20));
+  assert.equal(
+    new Set(recommendations.filter((item) => item.product).map((item) => item.kind)).size,
+    recommendations.filter((item) => item.product).length,
+  );
+});
+
+test("explains that a category is not recommended when no item clears its odds line", () => {
+  const weak = buildRollingPatternProducts(run([
+    signal("马", [["1", false], ["2", false], ["3", false]]),
+  ])).filter((item) => item.kind === "coverage_zodiac");
+  const [recommendation] = selectRollingPatternRecommendations(weak, "coverage_6_plus_1");
+
+  assert.equal(recommendation.kind, "coverage_zodiac");
+  assert.equal(recommendation.product, null);
+  assert.match(recommendation.reason, /没有结果高于赔率盈亏平衡线/);
 });

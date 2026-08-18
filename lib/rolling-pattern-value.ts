@@ -4,6 +4,7 @@ import type {
   RollingPatternProduct,
   RollingPatternProductKind,
   RollingPatternProductScore,
+  RollingPatternRecommendation,
   RollingPatternRun,
   RollingPatternSignal,
   RollingPatternValueHistory,
@@ -11,6 +12,13 @@ import type {
 import { getZodiac, ZODIAC_NAMES } from "./zodiac.ts";
 
 const PRIOR_STRENGTH = 4;
+
+const COVERAGE_RECOMMENDATION_KINDS: RollingPatternProductKind[] = [
+  "coverage_zodiac",
+  "coverage_tail",
+  "coverage_zodiac_pair",
+  "coverage_zodiac_triple",
+];
 
 export function netOddsForProduct(
   kind: RollingPatternProductKind,
@@ -36,6 +44,34 @@ export function breakEvenProbability(netOdds: number) {
 
 export function expectedUnitValue(probability: number, netOdds: number) {
   return probability * netOdds - (1 - probability);
+}
+
+export function selectRollingPatternRecommendations(
+  products: readonly RollingPatternProduct[],
+  scope: "coverage_6_plus_1" | "special",
+): RollingPatternRecommendation[] {
+  const kinds = scope === "special"
+    ? (["special_number"] satisfies RollingPatternProductKind[])
+    : COVERAGE_RECOMMENDATION_KINDS;
+  return kinds.map((kind) => {
+    const candidates = products
+      .filter((product) => product.kind === kind && product.expectedValue > 0)
+      .sort((left, right) =>
+        right.expectedValue - left.expectedValue ||
+        right.forwardSettledCount - left.forwardSettledCount ||
+        right.support - left.support ||
+        right.strategyCount - left.strategyCount ||
+        left.label.localeCompare(right.label, "zh-CN")
+      );
+    const product = candidates[0] ?? null;
+    return {
+      kind,
+      product,
+      reason: product
+        ? recommendationReason(product)
+        : "本期不推荐：当前冻结结果中没有结果高于赔率盈亏平衡线。",
+    };
+  });
 }
 
 export function buildRollingPatternProducts(
@@ -174,6 +210,15 @@ export function summarizeProductPerformance(
     groups.set(key, current);
   }
   return [...groups.values()].sort((left, right) => right.roi - left.roi);
+}
+
+function recommendationReason(product: RollingPatternProduct) {
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const expected = `${product.expectedValue >= 0 ? "+" : ""}${product.expectedValue.toFixed(2)}`;
+  const forward = product.forwardSettledCount > 0
+    ? `已前瞻结算${product.forwardSettledCount}期，命中${product.forwardHitCount}期`
+    : "尚无独立前瞻结算";
+  return `当前30期共同审计${product.support}次、命中${product.hits}次；${forward}。参考概率${percent(product.estimatedProbability)}高于赔率盈亏线${percent(product.breakEvenProbability)}，每1单位期望${expected}。`;
 }
 
 function buildSingleProduct(

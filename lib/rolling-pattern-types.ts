@@ -250,6 +250,12 @@ export type RollingPatternProduct = {
   frozenAt: string;
 };
 
+export type RollingPatternRecommendation = {
+  kind: RollingPatternProductKind;
+  product: RollingPatternProduct | null;
+  reason: string;
+};
+
 export type RollingPatternProductScore = {
   runId: string;
   productId: string;
