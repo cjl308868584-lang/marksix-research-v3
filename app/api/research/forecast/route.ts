@@ -27,6 +27,12 @@ export async function GET(request: NextRequest) {
       { headers: noStore() },
     );
   } catch (error) {
+    if (error instanceof Error && error.message === "frozen research snapshot unavailable") {
+      return NextResponse.json(
+        { error: "尚未生成冻结研究预测。" },
+        { status: 404, headers: noStore() },
+      );
+    }
     console.error(
       `research forecast unavailable: ${
         error instanceof Error ? error.message : String(error)

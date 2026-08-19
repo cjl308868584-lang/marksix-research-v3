@@ -5,12 +5,14 @@ import type { Draw } from "../lib/lottery.ts";
 import type {
   ForwardLearningCandidate,
   ForwardLearningForecast,
+  ForwardLearningRun,
 } from "../lib/forward-learning-types.ts";
 
 class FakeLearningD1 {
   forecasts = new Map<string, string>();
   candidates = new Map<string, string>();
   scores = new Map<string, string>();
+  runs = new Map<string, { status: string; run_json: string }>();
 
   prepare(sql: string) {
     let values: unknown[] = [];
@@ -38,11 +40,41 @@ class FakeLearningD1 {
           this.scores.set(key, String(values[16]));
           return { meta: { changes: 1 } };
         }
+        if (sql.includes("INSERT OR IGNORE INTO forward_learning_runs")) {
+          const key = String(values[0]);
+          if (this.runs.has(key)) return { meta: { changes: 0 } };
+          this.runs.set(key, {
+            status: String(values[6]),
+            run_json: String(values[7]),
+          });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE forward_learning_runs SET status = 'completed'")) {
+          const key = String(values[2]);
+          const existing = this.runs.get(key);
+          if (!existing || existing.status !== "processing") {
+            return { meta: { changes: 0 } };
+          }
+          this.runs.set(key, { status: "completed", run_json: String(values[0]) });
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE forward_learning_runs SET run_json = ?")) {
+          const key = String(values[2]);
+          const existing = this.runs.get(key);
+          if (!existing || existing.status !== "completed") {
+            return { meta: { changes: 0 } };
+          }
+          this.runs.set(key, { status: "completed", run_json: String(values[0]) });
+          return { meta: { changes: 1 } };
+        }
         return { meta: { changes: 0 } };
       },
       first: async <T>() => {
         if (sql.includes("SELECT target_issue FROM forward_learning_forecasts")) {
           return { target_issue: "2026230" } as T;
+        }
+        if (sql.includes("FROM forward_learning_runs WHERE run_id")) {
+          return (this.runs.get(String(values[0])) ?? null) as T;
         }
         return null;
       },
@@ -103,6 +135,39 @@ after(async () => {
   delete runtime.__marksixD1;
   delete runtime.__marksixForwardLearningSchemaReady;
   await server.close();
+});
+
+test("a warm learning database does not replay schema DDL in a fresh isolate", async () => {
+  const prepared: string[] = [];
+  runtime.__marksixD1 = {
+    prepare(sql: string) {
+      prepared.push(sql);
+      return {
+        first: async () => ({ present: 13 }),
+        run: async () => ({ meta: { changes: 0 } }),
+      };
+    },
+  };
+  delete runtime.__marksixForwardLearningSchemaReady;
+  assert.equal(await store.ensureForwardLearningStore(), true);
+  assert.equal(prepared.filter((sql) => /^CREATE\s/im.test(sql)).length, 0);
+});
+
+test("a learning database missing one index replays idempotent schema repair", async () => {
+  const prepared: string[] = [];
+  runtime.__marksixD1 = {
+    prepare(sql: string) {
+      prepared.push(sql);
+      return {
+        bind: () => this,
+        first: async () => ({ present: 12 }),
+        run: async () => ({ meta: { changes: 0 } }),
+      };
+    },
+  };
+  delete runtime.__marksixForwardLearningSchemaReady;
+  assert.equal(await store.ensureForwardLearningStore(), true);
+  assert.ok(prepared.some((sql) => /^CREATE UNIQUE INDEX\s/im.test(sql)));
 });
 
 test("freeze writes five official rows once and preserves the first snapshot", async () => {
@@ -178,6 +243,65 @@ test("settlement retry repairs a partially written candidate score batch", async
   assert.equal(repaired.status, "settled");
   assert.equal(repaired.scores.length, 5);
   assert.equal(db.scores.size, 5);
+});
+
+test("run completion is idempotent and preserves the original before-version", async () => {
+  const processing: ForwardLearningRun = {
+    runId: "learning:new_macau:2026230:v1",
+    taskId: "learning:new_macau:2026230:v1",
+    game: "new_macau",
+    settledIssue: "2026230",
+    targetIssue: "2026231",
+    engineVersion: "forward-learning-v1",
+    status: "processing",
+    modelVersionBefore: "m0",
+    modelVersionAfter: null,
+    error: null,
+    startedAt: "2026-08-19T14:00:00.000Z",
+    completedAt: null,
+  };
+  assert.equal(await store.claimForwardLearningRun(processing), "claimed");
+  const recovered = {
+    ...processing,
+    status: "completed" as const,
+    modelVersionBefore: "m1",
+    modelVersionAfter: "m1",
+    completedAt: "2026-08-19T14:05:00.000Z",
+  };
+  assert.equal(await store.completeForwardLearningRun(recovered), true);
+  assert.equal(await store.completeForwardLearningRun(recovered), true);
+  const stored = JSON.parse(db.runs.get(processing.runId)!.run_json) as ForwardLearningRun;
+  assert.equal(stored.modelVersionBefore, "m0");
+  assert.equal(stored.modelVersionAfter, "m1");
+  assert.equal(stored.status, "completed");
+});
+
+test("run completion repairs a legacy completed row missing its after-version", async () => {
+  const run: ForwardLearningRun = {
+    runId: "learning:new_macau:2026230:repair",
+    taskId: "learning:new_macau:2026230:repair",
+    game: "new_macau",
+    settledIssue: "2026230",
+    targetIssue: "2026231",
+    engineVersion: "forward-learning-v1",
+    status: "completed",
+    modelVersionBefore: "m0",
+    modelVersionAfter: null,
+    error: null,
+    startedAt: "2026-08-19T14:00:00.000Z",
+    completedAt: "2026-08-19T14:01:00.000Z",
+  };
+  db.runs.set(run.runId, { status: "completed", run_json: JSON.stringify(run) });
+  assert.equal(await store.completeForwardLearningRun({
+    ...run,
+    modelVersionBefore: "m1",
+    modelVersionAfter: "m1",
+    completedAt: "2026-08-19T14:05:00.000Z",
+  }), true);
+  const repaired = JSON.parse(db.runs.get(run.runId)!.run_json) as ForwardLearningRun;
+  assert.equal(repaired.modelVersionBefore, "m0");
+  assert.equal(repaired.modelVersionAfter, "m1");
+  assert.equal(repaired.startedAt, run.startedAt);
 });
 
 function fiveForecasts(): ForwardLearningForecast[] {

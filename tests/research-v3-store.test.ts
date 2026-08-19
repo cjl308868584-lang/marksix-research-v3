@@ -76,6 +76,7 @@ type Claim =
   | { status: "claimed" | "processing" | "conflict" | "unavailable" }
   | { status: "existing"; response: unknown };
 type StoreModule = {
+  ensureResearchV3Store(): Promise<boolean>;
   isResearchV3Snapshot(value: unknown): boolean;
   claimResearchTask(input: {
     taskId: string;
@@ -145,6 +146,39 @@ test("snapshot reader accepts frozen v3.0 ledgers but rejects unknown future eng
     engineVersion: "high-probability-events-v4.0",
     modelVersion: "champion-challenger-v4.0-deadbeef",
   }), false);
+});
+
+test("a warm research database does not replay schema DDL in a fresh isolate", async () => {
+  const prepared: string[] = [];
+  testRuntime.__marksixD1 = {
+    prepare(sql: string) {
+      prepared.push(sql);
+      return {
+        first: async () => ({ present: 48 }),
+        run: async () => ({ meta: { changes: 0 } }),
+      };
+    },
+  };
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  assert.equal(await store.ensureResearchV3Store(), true);
+  assert.equal(prepared.filter((sql) => /^CREATE\s/im.test(sql)).length, 0);
+});
+
+test("a research database missing one index replays idempotent schema repair", async () => {
+  const prepared: string[] = [];
+  testRuntime.__marksixD1 = {
+    prepare(sql: string) {
+      prepared.push(sql);
+      return {
+        bind: () => this,
+        first: async () => ({ present: 47 }),
+        run: async () => ({ meta: { changes: 0 } }),
+      };
+    },
+  };
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  assert.equal(await store.ensureResearchV3Store(), true);
+  assert.ok(prepared.some((sql) => /^CREATE UNIQUE INDEX\s/im.test(sql)));
 });
 
 test("concurrent task claims allow exactly one learner and restore the immutable result", async () => {

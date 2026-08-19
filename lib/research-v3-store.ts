@@ -39,6 +39,14 @@ export async function ensureResearchV3Store() {
 }
 
 async function initializeResearchV3Schema(db: D1Database) {
+  const expectedObjects = schemaObjectNames(RESEARCH_V3_SCHEMA);
+  const existing = await db.prepare(
+    `SELECT COUNT(*) AS present FROM sqlite_master
+     WHERE type IN ('table', 'index') AND name IN (
+       ${expectedObjects.map((name) => `'${name}'`).join(", ")}
+     )`,
+  ).first<{ present: number }>();
+  if (Number(existing?.present ?? 0) === expectedObjects.length) return;
   const statements = RESEARCH_V3_SCHEMA
     .split(";")
     .map((statement) => statement.trim())
@@ -46,6 +54,12 @@ async function initializeResearchV3Schema(db: D1Database) {
   for (const statement of statements) {
     await db.prepare(statement).run();
   }
+}
+
+function schemaObjectNames(schema: string) {
+  return [...schema.matchAll(
+    /CREATE (?:UNIQUE )?(?:TABLE|INDEX) IF NOT EXISTS\s+([a-zA-Z0-9_]+)/g,
+  )].map((match) => match[1]);
 }
 
 type SnapshotRow = {

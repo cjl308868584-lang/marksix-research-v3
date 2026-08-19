@@ -423,14 +423,45 @@ export async function claimForwardLearningRun(run: ForwardLearningRun) {
 }
 
 export async function completeForwardLearningRun(run: ForwardLearningRun) {
+  if (!await ensureForwardLearningStore()) return false;
   const db = runtime.__marksixD1;
   if (!db) return false;
-  const completed = { ...run, status: "completed" as const };
+  const row = await db.prepare(
+    `SELECT status, run_json FROM forward_learning_runs WHERE run_id = ? LIMIT 1`,
+  ).bind(run.runId).first<JsonRow>();
+  if (!row) return false;
+  const stored = parseJson<ForwardLearningRun>(row.run_json);
+  const completed = {
+    ...(stored ?? run),
+    ...run,
+    status: "completed" as const,
+    modelVersionBefore: stored?.modelVersionBefore ?? run.modelVersionBefore,
+    modelVersionAfter: stored?.modelVersionAfter ?? run.modelVersionAfter ?? null,
+    startedAt: stored?.startedAt ?? run.startedAt,
+    completedAt: stored?.completedAt ?? run.completedAt,
+  };
+  if (row.status === "completed") {
+    if (stored?.modelVersionAfter) return true;
+    if (!completed.modelVersionAfter) return false;
+    const repair = await db.prepare(
+      `UPDATE forward_learning_runs SET run_json = ?, completed_at = ?
+       WHERE run_id = ? AND status = 'completed'`,
+    ).bind(JSON.stringify(completed), completed.completedAt, completed.runId).run();
+    if (Number(repair.meta?.changes ?? 0) > 0) return true;
+    const repaired = await db.prepare(
+      `SELECT run_json FROM forward_learning_runs WHERE run_id = ? LIMIT 1`,
+    ).bind(run.runId).first<JsonRow>();
+    return Boolean(parseJson<ForwardLearningRun>(repaired?.run_json)?.modelVersionAfter);
+  }
   const result = await db.prepare(
     `UPDATE forward_learning_runs SET status = 'completed', run_json = ?, completed_at = ?
      WHERE run_id = ? AND status = 'processing'`,
   ).bind(JSON.stringify(completed), completed.completedAt, completed.runId).run();
-  return Number(result.meta?.changes ?? 0) > 0;
+  if (Number(result.meta?.changes ?? 0) > 0) return true;
+  const current = await db.prepare(
+    `SELECT status FROM forward_learning_runs WHERE run_id = ? LIMIT 1`,
+  ).bind(run.runId).first<JsonRow>();
+  return current?.status === "completed";
 }
 
 export async function readForwardLearningRun(
@@ -543,9 +574,23 @@ function performanceWindow(
 }
 
 async function initializeSchema(db: D1Database) {
+  const expectedObjects = schemaObjectNames(FORWARD_LEARNING_SCHEMA);
+  const existing = await db.prepare(
+    `SELECT COUNT(*) AS present FROM sqlite_master
+     WHERE type IN ('table', 'index') AND name IN (
+       ${expectedObjects.map((name) => `'${name}'`).join(", ")}
+     )`,
+  ).first<{ present: number }>();
+  if (Number(existing?.present ?? 0) === expectedObjects.length) return;
   for (const statement of FORWARD_LEARNING_SCHEMA.split(";").map((item) => item.trim()).filter(Boolean)) {
     await db.prepare(statement).run();
   }
+}
+
+function schemaObjectNames(schema: string) {
+  return [...schema.matchAll(
+    /CREATE (?:UNIQUE )?(?:TABLE|INDEX) IF NOT EXISTS\s+([a-zA-Z0-9_]+)/g,
+  )].map((match) => match[1]);
 }
 
 async function runBatches(db: D1Database, statements: D1PreparedStatement[]) {

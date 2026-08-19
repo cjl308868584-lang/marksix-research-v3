@@ -82,13 +82,14 @@ test("completed cycle retry returns the frozen result without learning twice", a
   }));
   let updates = 0;
   let completions = 0;
+  const completedRuns: Array<{ modelVersionAfter: string | null }> = [];
   const result = await runForwardLearningCycle(
     { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
     {
       readForecast: async (_game, issue) => issue === "2026230" ? previous : issue === "2026231" ? next : [],
       settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
       readCandidates: async () => candidates,
-      readModel: async () => initialStates(),
+      readModel: async () => learnedStates(),
       readHistory: async () => new Map(),
       readRuleWeights: async () => new Map(),
       persistStates: async () => {
@@ -103,16 +104,178 @@ test("completed cycle retry returns the frozen result without learning twice", a
         throw new Error("retry must not freeze again");
       },
       claimRun: async () => "existing" as const,
-      completeRun: async () => {
+      completeRun: async (run) => {
         completions += 1;
-        return false;
+        completedRuns.push(run);
+        return true;
       },
     },
   );
   assert.equal(result.status, "existing");
   assert.equal(result.forecasts.length, 5);
   assert.equal(updates, 0);
-  assert.equal(completions, 0);
+  assert.equal(completions, 1);
+  assert.equal(completedRuns[0]?.modelVersionAfter, "forward-learning-v1:2026230");
+});
+
+test("cycle repairs a settled and frozen run whose model update never persisted", async () => {
+  const candidates = candidateSet();
+  const previous = forecastSet(candidates);
+  const next = forecastSet(candidates).map((forecast) => ({
+    ...forecast,
+    forecastId: forecast.forecastId.replace("old:", "next:"),
+    candidateId: forecast.candidateId.replace("old:", "next:"),
+    targetIssue: "2026231",
+  }));
+  let stateWrites = 0;
+  let freezes = 0;
+  const result = await runForwardLearningCycle(
+    { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
+    {
+      readForecast: async (_game, issue) => issue === "2026230" ? previous : issue === "2026231" ? next : [],
+      settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
+      readCandidates: async () => candidates,
+      readModel: async () => initialStates(),
+      readHistory: async () => new Map(),
+      readRuleWeights: async () => new Map(),
+      persistStates: async () => {
+        stateWrites += 1;
+        return "ok" as const;
+      },
+      persistRuleUpdates: async () => "ok" as const,
+      freeze: async () => {
+        freezes += 1;
+        return "existing" as const;
+      },
+      claimRun: async () => "existing" as const,
+      completeRun: async () => true,
+    },
+  );
+  assert.equal(result.status, "existing");
+  assert.equal(stateWrites, 1);
+  assert.equal(freezes, 0);
+  assert.equal(result.modelVersion, "forward-learning-v1:2026230");
+});
+
+test("cycle rejects a frozen retry when only some model slots persisted", async () => {
+  const candidates = candidateSet();
+  const previous = forecastSet(candidates);
+  const next = forecastSet(candidates).map((forecast) => ({
+    ...forecast,
+    forecastId: forecast.forecastId.replace("old:", "next:"),
+    candidateId: forecast.candidateId.replace("old:", "next:"),
+    targetIssue: "2026231",
+  }));
+  const partial = initialStates().map((state, index) => ({
+    ...state,
+    learnedThroughIssue: index === 0 ? "2026230" : null,
+  }));
+  await assert.rejects(
+    runForwardLearningCycle(
+      { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
+      {
+        readForecast: async (_game, issue) => issue === "2026230" ? previous : issue === "2026231" ? next : [],
+        settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
+        readCandidates: async () => candidates,
+        readModel: async () => partial,
+        readHistory: async () => new Map(),
+        readRuleWeights: async () => new Map(),
+        persistStates: async () => "ok" as const,
+        persistRuleUpdates: async () => "ok" as const,
+        freeze: async () => "existing" as const,
+        claimRun: async () => "existing" as const,
+        completeRun: async () => true,
+      },
+    ),
+    /模型状态不完整/,
+  );
+});
+
+test("cycle refuses to report success when recovery cannot complete the run ledger", async () => {
+  const candidates = candidateSet();
+  const previous = forecastSet(candidates);
+  const next = forecastSet(candidates).map((forecast) => ({
+    ...forecast,
+    forecastId: forecast.forecastId.replace("old:", "next:"),
+    candidateId: forecast.candidateId.replace("old:", "next:"),
+    targetIssue: "2026231",
+  }));
+  await assert.rejects(
+    runForwardLearningCycle(
+      { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
+      {
+        readForecast: async (_game, issue) => issue === "2026230" ? previous : issue === "2026231" ? next : [],
+        settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
+        readCandidates: async () => candidates,
+        readModel: async () => learnedStates(),
+        readHistory: async () => new Map(),
+        readRuleWeights: async () => new Map(),
+        persistStates: async () => "ok" as const,
+        persistRuleUpdates: async () => "ok" as const,
+        freeze: async () => "existing" as const,
+        claimRun: async () => "existing" as const,
+        completeRun: async () => false,
+      },
+    ),
+    /未能完成记账/,
+  );
+});
+
+test("cycle retry reuses a fully persisted model update instead of learning the issue twice", async () => {
+  const candidates = candidateSet();
+  const previous = forecastSet(candidates);
+  const persistedStates = learnedStates();
+  let stateWrites = 0;
+  const result = await runForwardLearningCycle(
+    { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
+    {
+      readForecast: async (_game, issue) => issue === "2026230" ? previous : [],
+      settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
+      readCandidates: async () => candidates,
+      readModel: async () => persistedStates,
+      readHistory: async () => new Map(),
+      readRuleWeights: async () => new Map(),
+      persistStates: async () => {
+        stateWrites += 1;
+        return "ok" as const;
+      },
+      persistRuleUpdates: async () => "ok" as const,
+      freeze: async () => "created" as const,
+      claimRun: async () => "existing" as const,
+      completeRun: async () => true,
+    },
+  );
+  assert.equal(stateWrites, 0);
+  assert.equal(result.modelVersion, "forward-learning-v1:2026230");
+  assert.equal(result.forecasts.length, 5);
+});
+
+test("cycle fails closed when only some model slots claim the issue was learned", async () => {
+  const candidates = candidateSet();
+  const previous = forecastSet(candidates);
+  const partial = initialStates().map((state, index) => ({
+    ...state,
+    learnedThroughIssue: index === 0 ? "2026230" : null,
+  }));
+  await assert.rejects(
+    runForwardLearningCycle(
+      { game: "new_macau", draws: [verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:05:00Z") },
+      {
+        readForecast: async (_game, issue) => issue === "2026230" ? previous : [],
+        settle: async () => ({ status: "existing" as const, scores: scoreSet(candidates) }),
+        readCandidates: async () => candidates,
+        readModel: async () => partial,
+        readHistory: async () => new Map(),
+        readRuleWeights: async () => new Map(),
+        persistStates: async () => "ok" as const,
+        persistRuleUpdates: async () => "ok" as const,
+        freeze: async () => "created" as const,
+        claimRun: async () => "existing" as const,
+        completeRun: async () => true,
+      },
+    ),
+    /模型状态不完整/,
+  );
 });
 
 test("cycle never settles a draw at or after the next target issue", async () => {
@@ -141,6 +304,43 @@ test("cycle never settles a draw at or after the next target issue", async () =>
   );
   assert.equal(settledIssue, "2026230");
   assert.equal(result.settledIssue, "2026230");
+});
+
+test("cycle locates a stale frozen issue with constant forecast reads", async () => {
+  const candidates = candidateSet().map((candidate) => ({
+    ...candidate,
+    candidateId: candidate.candidateId.replace("2026230", "2026151"),
+    targetIssue: "2026151",
+  }));
+  const stale = forecastSet(candidates);
+  const draws = Array.from({ length: 80 }, (_, index) => ({
+    ...verifiedDraw(),
+    issue: String(2026151 + index),
+  }));
+  let forecastReads = 0;
+  const result = await runForwardLearningCycle(
+    { game: "new_macau", draws, rollingRun: rollingRun(), now: new Date("2026-08-19T14:00:00Z") },
+    {
+      readForecast: async (_game, issue) => {
+        forecastReads += 1;
+        if (issue === "2026231") return [];
+        if (issue === undefined || issue === "2026151") return stale;
+        return [];
+      },
+      settle: async () => ({ status: "settled" as const, scores: scoreSet(candidates) }),
+      readCandidates: async () => candidates,
+      readModel: async () => initialStates(),
+      readHistory: async () => new Map(),
+      readRuleWeights: async () => new Map(),
+      persistStates: async () => "ok" as const,
+      persistRuleUpdates: async () => "ok" as const,
+      freeze: async () => "created" as const,
+      claimRun: async () => "claimed" as const,
+      completeRun: async () => true,
+    },
+  );
+  assert.equal(result.settledIssue, "2026151");
+  assert.ok(forecastReads <= 3, `expected at most three reads, received ${forecastReads}`);
 });
 
 function rollingRun(): RollingPatternRun {
@@ -239,6 +439,16 @@ function initialStates(): ForwardLearningModelState[] {
     previousVersion: null,
     learnedThroughIssue: null,
     generatedAt: "2026-08-18T14:00:00Z",
+  }));
+}
+
+function learnedStates(): ForwardLearningModelState[] {
+  return initialStates().map((state) => ({
+    ...state,
+    stateId: `${state.stateId}:learned`,
+    version: "forward-learning-v1:2026230",
+    learnedThroughIssue: "2026230",
+    weights: { baseline: 0.4, rules30: 0.3, forward: 0.3 },
   }));
 }
 

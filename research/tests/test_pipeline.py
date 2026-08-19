@@ -29,6 +29,14 @@ class ResearchPipelineTest(unittest.TestCase):
                     {"draws": [self._draw_payload(latest_issue, verified)]},
                     {"targetIssue": target_issue},
                 ]
+                if verified and int(latest_issue) < int(target_issue):
+                    responses.append(self._forward_forecast_payload(target_issue))
+                    responses.append(
+                        self._http_error(
+                            404,
+                            f"/api/learning/forecast?issue={latest_issue}",
+                        )
+                    )
                 with patch.object(cli, "fetch_json", side_effect=responses):
                     result = cli.check_update_required(
                         "https://example.test",
@@ -77,6 +85,32 @@ class ResearchPipelineTest(unittest.TestCase):
                 )
         self.assertEqual(result, {"status": "awaiting_verification"})
         self.assertEqual(request.call_count, 1)
+
+    def test_capture_preserves_the_retryable_http_status_when_no_wait_was_requested(self):
+        artifact = {
+            "schemaVersion": "python-shadow-v3",
+            "game": "new_macau",
+            "audit": {"datasetVersion": "a" * 64, "newestIssue": "2026216"},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "artifact.json"
+            source.write_text(json.dumps(artifact), encoding="utf-8")
+            with patch.object(
+                cli,
+                "urlopen",
+                side_effect=self._http_error(
+                    503,
+                    "/api/internal/research/settle-and-learn",
+                ),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "HTTP 503"):
+                    cli.capture(
+                        "https://example.test",
+                        "secret",
+                        "new_macau",
+                        str(source),
+                        max_wait_seconds=0,
+                    )
 
     def test_each_cycle_resynchronizes_history_before_capture(self):
         draws = [self._draw_payload("2026216", True)]
@@ -139,6 +173,147 @@ class ResearchPipelineTest(unittest.TestCase):
                     )
         learning.assert_not_called()
 
+    def test_cycle_abstains_from_forward_learning_without_a_30_draw_pattern_window(self):
+        draws = [self._draw_payload("2026090", True)]
+        primary = {
+            "status": "existing",
+            "targetIssue": "2026091",
+            "rollingPatterns": {
+                "status": "insufficient_data",
+                "missing": 20,
+                "qualified": 0,
+            },
+        }
+        with (
+            patch.object(cli, "sync_game_history", return_value=draws),
+            patch.object(cli, "capture", return_value=primary),
+            patch.object(cli, "capture_forward_learning") as learning,
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                result = cli.run_cycle(
+                    "https://example.test",
+                    "secret",
+                    "hk",
+                    directory,
+                )
+        learning.assert_not_called()
+        self.assertEqual(result["forwardLearning"], {
+            "status": "insufficient_data",
+            "missing": 20,
+            "forecastCount": 0,
+        })
+
+    def test_forward_capture_accepts_only_a_complete_five_slot_freeze(self):
+        slots = (
+            "coverage_zodiac",
+            "coverage_tail",
+            "coverage_zodiac_pair",
+            "coverage_zodiac_triple",
+            "special_number",
+        )
+        payload = {
+            "status": "created",
+            "game": "new_macau",
+            "targetIssue": "2026231",
+            "forecasts": [
+                {"slot": slot, "official": True, "targetIssue": "2026231"}
+                for slot in slots
+            ],
+        }
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            result = cli.capture_forward_learning(
+                "https://example.test",
+                "secret",
+                "new_macau",
+                "2026231",
+            )
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(result["targetIssue"], "2026231")
+        self.assertEqual(result["forecastCount"], 5)
+        self.assertNotIn("forecasts", result)
+
+    def test_forward_capture_rejects_a_2xx_response_without_a_complete_freeze(self):
+        invalid_payloads = (
+            {
+                "status": "awaiting_pattern_window",
+                "game": "new_macau",
+                "targetIssue": "2026231",
+                "forecastCount": 0,
+            },
+            {
+                "status": "created",
+                "game": "new_macau",
+                "targetIssue": "2026231",
+                "forecasts": [{"slot": "coverage_zodiac", "official": True}],
+            },
+            {
+                "status": "created",
+                "game": "new_macau",
+                "targetIssue": "2026232",
+                "forecasts": [
+                    {"slot": slot, "official": True}
+                    for slot in (
+                        "coverage_zodiac",
+                        "coverage_tail",
+                        "coverage_zodiac_pair",
+                        "coverage_zodiac_triple",
+                        "special_number",
+                    )
+                ],
+            },
+            {
+                "status": "created",
+                "game": "new_macau",
+                "targetIssue": "2026231",
+                "forecasts": [
+                    {
+                        "slot": slot,
+                        "official": True,
+                        "targetIssue": "2026232" if index == 0 else "2026231",
+                    }
+                    for index, slot in enumerate((
+                        "coverage_zodiac",
+                        "coverage_tail",
+                        "coverage_zodiac_pair",
+                        "coverage_zodiac_triple",
+                        "special_number",
+                    ))
+                ],
+            },
+        )
+        for payload in invalid_payloads:
+            with self.subTest(payload=payload):
+                with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+                    with self.assertRaisesRegex(RuntimeError, "complete five-slot freeze"):
+                        cli.capture_forward_learning(
+                            "https://example.test",
+                            "secret",
+                            "new_macau",
+                            "2026231",
+                        )
+
+    def test_forward_capture_reports_a_missing_prerequisite_without_calling_it_a_timeout(self):
+        error = self._http_error(425, "/api/internal/learning/settle-and-freeze")
+        with patch.object(cli, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "prerequisite unavailable"):
+                cli.capture_forward_learning(
+                    "https://example.test",
+                    "secret",
+                    "hk",
+                    "2026091",
+                )
+
+    def test_forward_capture_preserves_the_retryable_http_status_when_no_wait_was_requested(self):
+        error = self._http_error(503, "/api/internal/learning/settle-and-freeze")
+        with patch.object(cli, "urlopen", side_effect=error):
+            with self.assertRaisesRegex(RuntimeError, "HTTP 503"):
+                cli.capture_forward_learning(
+                    "https://example.test",
+                    "secret",
+                    "hk",
+                    "2026091",
+                )
+
     def test_health_waits_normally_when_latest_draw_is_not_verified(self):
         responses = self._health_responses(verified=False)
         with patch.object(cli, "fetch_json", side_effect=responses):
@@ -170,6 +345,36 @@ class ResearchPipelineTest(unittest.TestCase):
                     "new_macau",
                 )
 
+    def test_health_accepts_a_clean_primary_bootstrap_without_a_fabricated_review(self):
+        responses = [
+            {"draws": [self._draw_payload("2026216", True)]},
+            {
+                "targetIssue": "2026217",
+                "events": [
+                    {"slot": slot, "family": "zodiac" if index == 0 else "parity"}
+                    for index, slot in enumerate((
+                        "zodiac_6_plus_1",
+                        "tail_6_plus_1",
+                        "position_parity",
+                        "position_size",
+                    ))
+                ],
+            },
+            {"reviews": []},
+            {"learningRuns": []},
+            self._http_error(404, "/api/research/forecast?issue=2026216"),
+            self._forward_forecast_payload("2026217"),
+            self._http_error(404, "/api/learning/forecast?issue=2026216"),
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.verify_production_health(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["status"], "frozen")
+        self.assertEqual(result["targetIssue"], "2026217")
+        self.assertIsNone(result["settledIssue"])
+
     def test_health_accepts_only_an_advanced_four_slot_number_free_forecast(self):
         responses = self._health_responses()
         with patch.object(cli, "fetch_json", side_effect=responses):
@@ -182,7 +387,172 @@ class ResearchPipelineTest(unittest.TestCase):
             "game": "new_macau",
             "settledIssue": "2026216",
             "targetIssue": "2026217",
+            "forwardLearningTargetIssue": "2026217",
         })
+
+    def test_health_rejects_a_missing_or_incomplete_five_slot_freeze(self):
+        responses = self._health_responses(
+            forward_payload={
+                "game": "new_macau",
+                "status": "ready",
+                "forecasts": [
+                    {"slot": "coverage_zodiac", "targetIssue": "2026217", "official": True},
+                ],
+            },
+        )
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "five-slot"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_reports_degraded_when_the_30_draw_window_is_unavailable(self):
+        responses = self._health_responses()
+        responses[4] = self._http_error(404, "/api/learning/forecast")
+        responses[5] = self._http_error(404, "/api/research/patterns")
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.verify_production_health(
+                "https://example.test",
+                "hk",
+            )
+        self.assertEqual(result["status"], "degraded")
+        self.assertEqual(result["reason"], "forward_learning_pattern_window_unavailable")
+
+    def test_health_does_not_hide_a_missing_freeze_when_30_verified_draws_exist(self):
+        responses = self._health_responses()
+        responses[0] = {
+            "draws": [
+                self._draw_payload(str(2026216 - index), True)
+                for index in range(30)
+            ],
+        }
+        responses[4] = self._http_error(404, "/api/learning/forecast")
+        responses[5] = self._http_error(404, "/api/research/patterns")
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "missing the five-slot"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_does_not_hide_a_missing_freeze_when_a_pattern_run_exists(self):
+        responses = self._health_responses()
+        responses[4] = self._http_error(404, "/api/learning/forecast")
+        responses[5] = {"game": "hk", "run": {"targetIssue": "2026217"}}
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "missing the five-slot"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "hk",
+                )
+
+    def test_health_requires_a_complete_review_after_a_frozen_learning_issue_draws(self):
+        responses = self._health_responses()
+        responses[5] = self._forward_forecast_payload("2026216")
+        responses.append(self._forward_review_payload("2026216"))
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.verify_production_health(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["status"], "frozen")
+
+        incomplete = self._forward_review_payload("2026216")
+        incomplete["reviews"][0]["scores"] = incomplete["reviews"][0]["scores"][:-1]
+        responses = self._health_responses()
+        responses[5] = self._forward_forecast_payload("2026216")
+        responses.append(incomplete)
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "complete five-slot learning run"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_update_gate_repairs_a_missing_five_slot_freeze_when_30_verified_draws_exist(self):
+        responses = [
+            {
+                "draws": [
+                    self._draw_payload(str(2026216 - index), True)
+                    for index in range(30)
+                ],
+            },
+            {"targetIssue": "2026217"},
+            self._http_error(404, "/api/learning/forecast"),
+            self._http_error(404, "/api/research/patterns"),
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["shouldRun"], True)
+        self.assertEqual(result["reason"], "forward_learning_repair_required")
+
+    def test_update_gate_waits_when_fewer_than_30_verified_draws_exist(self):
+        responses = [
+            {"draws": [self._draw_payload("2026090", True)]},
+            {"targetIssue": "2026091"},
+            self._http_error(404, "/api/learning/forecast"),
+            self._http_error(404, "/api/research/patterns"),
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "hk",
+            )
+        self.assertEqual(result["shouldRun"], False)
+        self.assertEqual(result["reason"], "forward_learning_waiting_for_pattern_window")
+
+    def test_update_gate_repairs_a_missing_freeze_when_a_pattern_run_exists(self):
+        responses = [
+            {"draws": [self._draw_payload("2026090", True)]},
+            {"targetIssue": "2026091"},
+            self._http_error(404, "/api/learning/forecast"),
+            {"game": "hk", "run": {"targetIssue": "2026091"}},
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "hk",
+            )
+        self.assertEqual(result["shouldRun"], True)
+        self.assertEqual(result["reason"], "forward_learning_repair_required")
+
+    def test_update_gate_repairs_an_incomplete_forward_learning_review(self):
+        incomplete = self._forward_review_payload("2026216")
+        incomplete["reviews"][0]["modelAfter"] = []
+        responses = [
+            {"draws": [self._draw_payload("2026216", True)]},
+            {"targetIssue": "2026217"},
+            self._forward_forecast_payload("2026217"),
+            self._forward_forecast_payload("2026216"),
+            incomplete,
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["shouldRun"], True)
+        self.assertEqual(
+            result["reason"],
+            "forward_learning_review_repair_required",
+        )
+
+    def test_update_gate_requests_bootstrap_when_the_main_forecast_is_not_initialized(self):
+        responses = [
+            {"draws": [self._draw_payload("2026216", True)]},
+            self._http_error(404, "/api/research/forecast"),
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["shouldRun"], True)
+        self.assertEqual(result["reason"], "bootstrap_required")
 
     def test_capture_task_id_is_stable_for_retries_and_changes_with_dataset(self):
         artifact = {
@@ -276,6 +646,7 @@ class ResearchPipelineTest(unittest.TestCase):
         target_issue="2026217",
         reviews=None,
         learning_runs=None,
+        forward_payload=None,
     ):
         slots = (
             "zodiac_6_plus_1",
@@ -287,6 +658,8 @@ class ResearchPipelineTest(unittest.TestCase):
             reviews = [{"targetIssue": "2026216"}]
         if learning_runs is None:
             learning_runs = [{"settledIssue": "2026216", "status": "completed"}]
+        if forward_payload is None:
+            forward_payload = cls._forward_forecast_payload(target_issue)
         return [
             {"draws": [cls._draw_payload("2026216", verified)]},
             {
@@ -298,7 +671,61 @@ class ResearchPipelineTest(unittest.TestCase):
             },
             {"reviews": reviews},
             {"learningRuns": learning_runs},
+            forward_payload,
+            cls._http_error(404, "/api/learning/forecast?issue=2026216"),
         ]
+
+    @staticmethod
+    def _forward_forecast_payload(target_issue):
+        slots = (
+            "coverage_zodiac",
+            "coverage_tail",
+            "coverage_zodiac_pair",
+            "coverage_zodiac_triple",
+            "special_number",
+        )
+        return {
+            "game": "new_macau",
+            "status": "ready",
+            "forecasts": [
+                {"slot": slot, "targetIssue": target_issue, "official": True}
+                for slot in slots
+            ],
+        }
+
+    @classmethod
+    def _forward_review_payload(cls, settled_issue):
+        slots = (
+            "coverage_zodiac",
+            "coverage_tail",
+            "coverage_zodiac_pair",
+            "coverage_zodiac_triple",
+            "special_number",
+        )
+        return {
+            "game": "new_macau",
+            "reviews": [{
+                "run": {"settledIssue": settled_issue, "status": "completed"},
+                "scores": [
+                    {"slot": slot, "official": True}
+                    for slot in slots
+                ],
+                "modelAfter": [
+                    {"slot": slot, "learnedThroughIssue": settled_issue}
+                    for slot in slots
+                ],
+            }],
+        }
+
+    @staticmethod
+    def _http_error(code, path):
+        return HTTPError(
+            f"https://example.test{path}",
+            code,
+            "error",
+            {},
+            None,
+        )
 
     def test_user_example_is_in_the_bounded_grammar(self):
         # With fewer than 30 triggers it is generated but correctly excluded

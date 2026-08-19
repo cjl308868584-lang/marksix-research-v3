@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../../lib/lottery.ts";
-import { runStoredForwardLearningCycle } from "../../../../../lib/forward-learning-service.ts";
+import {
+  ForwardLearningPrerequisiteError,
+  runStoredForwardLearningCycle,
+} from "../../../../../lib/forward-learning-service.ts";
 import { getRuntimeEnv } from "../../../../../lib/runtime-env.ts";
 
 export const dynamic = "force-dynamic";
@@ -48,10 +51,27 @@ export async function POST(request: NextRequest) {
       game: body.game,
       asOf: body.asOf ? new Date(body.asOf) : new Date(),
     });
-    return NextResponse.json({ taskId: body.taskId, ...result, immutable: true }, {
+    return NextResponse.json({ taskId: body.taskId, ...result, game: body.game, immutable: true }, {
       headers: { "Cache-Control": "private, no-store" },
     });
-  } catch {
+  } catch (error) {
+    if (error instanceof ForwardLearningPrerequisiteError) {
+      return NextResponse.json({
+        taskId: body.taskId,
+        game: body.game,
+        status: "awaiting_pattern_window",
+        forecastCount: 0,
+        immutable: true,
+      }, {
+        status: 425,
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
+    console.error("forward learning task failed", {
+      taskId: body.taskId,
+      game: body.game,
+      error: error instanceof Error ? error.message : "unknown",
+    });
     return NextResponse.json(
       { error: "逐期学习任务暂时失败，既有模型和冻结预测未被覆盖。" },
       { status: 503 },

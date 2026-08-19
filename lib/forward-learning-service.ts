@@ -65,6 +65,13 @@ const DEFAULT_DEPENDENCIES: ForwardLearningDependencies = {
   completeRun: completeForwardLearningRun,
 };
 
+export class ForwardLearningPrerequisiteError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForwardLearningPrerequisiteError";
+  }
+}
+
 export async function runStoredForwardLearningCycle({
   game,
   asOf = new Date(),
@@ -80,7 +87,9 @@ export async function runStoredForwardLearningCycle({
     loadServerDraws(game, 500, asOf),
     readRollingPatternRun(game),
   ]);
-  if (!envelope) throw new Error("当前30期规律尚未冻结");
+  if (!envelope) {
+    throw new ForwardLearningPrerequisiteError("当前30期规律尚未冻结");
+  }
   return runForwardLearningCycle({
     game,
     draws: history.draws,
@@ -106,15 +115,25 @@ export async function runForwardLearningCycle(
       draw.issue.localeCompare(input.rollingRun.targetIssue, "en", { numeric: true }) < 0
     )
     .sort((left, right) => right.issue.localeCompare(left.issue, "en", { numeric: true }));
+  const existingNext = await dependencies.readForecast(input.game, input.rollingRun.targetIssue);
   let previousDraw: Draw | null = null;
   let previousForecasts: ForwardLearningForecast[] = [];
-  for (const draw of verified) {
-    if (draw.issue === input.rollingRun.targetIssue) continue;
-    const forecasts = await dependencies.readForecast(input.game, draw.issue);
-    if (forecasts.length === FORWARD_LEARNING_SLOTS.length) {
-      previousDraw = draw;
-      previousForecasts = forecasts;
-      break;
+  if (verified.length > 0) {
+    const latestVerified = verified[0];
+    const latestVerifiedForecasts = await dependencies.readForecast(input.game, latestVerified.issue);
+    if (latestVerifiedForecasts.length === FORWARD_LEARNING_SLOTS.length) {
+      previousDraw = latestVerified;
+      previousForecasts = latestVerifiedForecasts;
+    } else if (existingNext.length !== FORWARD_LEARNING_SLOTS.length) {
+      const latestFrozen = await dependencies.readForecast(input.game);
+      const frozenIssue = latestFrozen[0]?.targetIssue ?? null;
+      const matchingDraw = frozenIssue
+        ? verified.find((draw) => draw.issue === frozenIssue) ?? null
+        : null;
+      if (matchingDraw && latestFrozen.length === FORWARD_LEARNING_SLOTS.length) {
+        previousDraw = matchingDraw;
+        previousForecasts = latestFrozen;
+      }
     }
   }
 
@@ -130,33 +149,39 @@ export async function runForwardLearningCycle(
       input.now.toISOString(),
     );
     if (settlement.status === "not_found") throw new Error("找不到开奖前冻结的学习预测");
+    const learnedSlots = new Set(modelStates
+      .filter((state) => state.learnedThroughIssue === previousDraw.issue)
+      .map((state) => state.slot));
+    if (learnedSlots.size > 0 && learnedSlots.size !== FORWARD_LEARNING_SLOTS.length) {
+      throw new Error("逐期学习模型状态不完整，拒绝重复或部分更新");
+    }
+    const modelAlreadyLearned = learnedSlots.size === FORWARD_LEARNING_SLOTS.length;
     if (claim === "existing" && settlement.status === "existing") {
-      const frozenNext = await dependencies.readForecast(
-        input.game,
-        input.rollingRun.targetIssue,
-      );
-      if (frozenNext.length === FORWARD_LEARNING_SLOTS.length) {
+      if (existingNext.length === FORWARD_LEARNING_SLOTS.length && modelAlreadyLearned) {
+        await completeRecoveredRun(run, modelStates, input.now, dependencies);
         return {
           status: "existing",
           runId: run.runId,
           settledIssue: previousDraw.issue,
           targetIssue: input.rollingRun.targetIssue,
           modelVersion: modelStates[0]?.version ?? `${FORWARD_LEARNING_ENGINE_VERSION}:bootstrap`,
-          forecasts: frozenNext,
+          forecasts: existingNext,
         };
       }
     }
     const previousCandidates = await dependencies.readCandidates(input.game, previousDraw.issue);
-    modelStates = updateModelStates(
-      input.game,
-      previousDraw.issue,
-      input.now.toISOString(),
-      modelStates,
-      previousCandidates,
-      settlement.scores,
-    );
-    if (await dependencies.persistStates(modelStates) !== "ok") {
-      throw new Error("新模型状态未能持久化");
+    if (!modelAlreadyLearned) {
+      modelStates = updateModelStates(
+        input.game,
+        previousDraw.issue,
+        input.now.toISOString(),
+        modelStates,
+        previousCandidates,
+        settlement.scores,
+      );
+      if (await dependencies.persistStates(modelStates) !== "ok") {
+        throw new Error("新模型状态未能持久化");
+      }
     }
     const priorRuleWeights = await dependencies.readRuleWeights(input.game);
     const ruleUpdates = buildRuleUpdates(
@@ -171,14 +196,9 @@ export async function runForwardLearningCycle(
     }
   }
 
-  const existingNext = await dependencies.readForecast(
-    input.game,
-    input.rollingRun.targetIssue,
-  );
   if (existingNext.length === FORWARD_LEARNING_SLOTS.length) {
     if (run) {
-      const completed = { ...run, status: "completed" as const, completedAt: input.now.toISOString() };
-      await dependencies.completeRun(completed);
+      await completeRecoveredRun(run, modelStates, input.now, dependencies);
     }
     return {
       status: "existing",
@@ -226,6 +246,23 @@ export async function runForwardLearningCycle(
     modelVersion: modelStates[0]?.version ?? `${FORWARD_LEARNING_ENGINE_VERSION}:bootstrap`,
     forecasts,
   };
+}
+
+async function completeRecoveredRun(
+  run: ForwardLearningRun,
+  modelStates: readonly ForwardLearningModelState[],
+  now: Date,
+  dependencies: ForwardLearningDependencies,
+) {
+  const completed = {
+    ...run,
+    status: "completed" as const,
+    modelVersionAfter: modelStates[0]?.version ?? null,
+    completedAt: now.toISOString(),
+  };
+  if (!await dependencies.completeRun(completed)) {
+    throw new Error("逐期学习任务未能完成记账");
+  }
 }
 
 function updateModelStates(

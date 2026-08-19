@@ -35,3 +35,18 @@ test("learning API validators reject unknown query parameters", async () => {
     assert.match(source, /GAME_IDS/);
   }
 });
+
+test("signed learning treats a missing 30-draw prerequisite as an explicit abstention", async () => {
+  const route = await readFile(
+    new URL("app/api/internal/learning/settle-and-freeze/route.ts", root),
+    "utf8",
+  );
+  const service = await readFile(
+    new URL("lib/forward-learning-service.ts", root),
+    "utf8",
+  );
+  assert.match(service, /ForwardLearningPrerequisiteError/);
+  assert.match(route, /instanceof ForwardLearningPrerequisiteError/);
+  assert.match(route, /awaiting_pattern_window/);
+  assert.match(route, /status:\s*425/);
+});
