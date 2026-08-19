@@ -146,3 +146,29 @@ test("the value ledger migration enforces one frozen product and score per run",
   ));
   database.close();
 });
+
+test("the forward learning migration creates seven independent learning tables", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0010_forward_learning.sql", import.meta.url),
+    "utf8",
+  );
+  const database = new DatabaseSync(":memory:");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) database.exec(statement);
+  }
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_schema
+     WHERE type = 'table' AND name LIKE 'forward_learning_%'
+     ORDER BY name`,
+  ).all().map((row) => row.name);
+  assert.deepEqual(tables, [
+    "forward_learning_candidates",
+    "forward_learning_forecasts",
+    "forward_learning_model_states",
+    "forward_learning_rule_snapshots",
+    "forward_learning_rule_updates",
+    "forward_learning_runs",
+    "forward_learning_scores",
+  ]);
+  database.close();
+});
