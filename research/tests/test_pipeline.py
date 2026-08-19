@@ -87,9 +87,19 @@ class ResearchPipelineTest(unittest.TestCase):
             captured_issues.append(artifact["audit"]["newestIssue"])
             return {"status": "completed", "targetIssue": "2026217"}
 
+        def capture_learning(_site, _secret, game, target_issue, **_kwargs):
+            self.assertEqual(game, "new_macau")
+            self.assertEqual(target_issue, "2026217")
+            return {"status": "created", "forecastCount": 5}
+
         with (
             patch.object(cli, "sync_game_history", return_value=draws) as sync,
             patch.object(cli, "capture", side_effect=capture_artifact) as capture,
+            patch.object(
+                cli,
+                "capture_forward_learning",
+                side_effect=capture_learning,
+            ) as learning,
         ):
             with tempfile.TemporaryDirectory() as directory:
                 first = cli.run_cycle(
@@ -108,7 +118,26 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(second["status"], "completed")
         self.assertEqual(sync.call_count, 2)
         self.assertEqual(capture.call_count, 2)
+        self.assertEqual(learning.call_count, 2)
         self.assertEqual(captured_issues, ["2026216", "2026216"])
+        self.assertEqual(first["forwardLearning"]["forecastCount"], 5)
+
+    def test_cycle_does_not_start_forward_learning_until_primary_capture_succeeds(self):
+        draws = [self._draw_payload("2026216", True)]
+        with (
+            patch.object(cli, "sync_game_history", return_value=draws),
+            patch.object(cli, "capture", side_effect=RuntimeError("primary failed")),
+            patch.object(cli, "capture_forward_learning") as learning,
+        ):
+            with tempfile.TemporaryDirectory() as directory:
+                with self.assertRaisesRegex(RuntimeError, "primary failed"):
+                    cli.run_cycle(
+                        "https://example.test",
+                        "secret",
+                        "new_macau",
+                        directory,
+                    )
+        learning.assert_not_called()
 
     def test_health_waits_normally_when_latest_draw_is_not_verified(self):
         responses = self._health_responses(verified=False)

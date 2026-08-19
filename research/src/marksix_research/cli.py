@@ -303,13 +303,83 @@ def run_cycle(
         json.dumps(artifact, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-    return capture(
+    primary = capture(
         site_url,
         secret,
         game,
         str(artifact_path),
         max_wait_seconds=0,
     )
+    if primary.get("status") == "awaiting_verification":
+        return primary
+    target_issue = str(primary.get("targetIssue") or "")
+    if not target_issue:
+        raise RuntimeError(f"{game} primary capture returned no target issue")
+    forward = capture_forward_learning(
+        site_url,
+        secret,
+        game,
+        target_issue,
+        max_wait_seconds=0,
+    )
+    return {**primary, "forwardLearning": forward}
+
+
+def capture_forward_learning(
+    site_url: str,
+    secret: str,
+    game: str,
+    target_issue: str,
+    max_wait_seconds: int = 0,
+) -> dict[str, object]:
+    base = site_url.rstrip("/")
+    body = json.dumps(
+        {
+            "taskId": f"forward-learning-v1:{game}:{target_issue}",
+            "game": game,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    deadline = time.monotonic() + max(0, max_wait_seconds)
+    while True:
+        timestamp = str(int(time.time() * 1000))
+        signature = hmac.new(
+            secret.encode("utf-8"),
+            timestamp.encode("utf-8") + b"." + body,
+            hashlib.sha256,
+        ).hexdigest()
+        request = Request(
+            f"{base}/api/internal/learning/settle-and-freeze",
+            data=body,
+            method="POST",
+            headers={
+                **HTTP_HEADERS,
+                "content-type": "application/json",
+                "origin": base,
+                "referer": f"{base}/learning",
+                "x-research-timestamp": timestamp,
+                "x-research-signature": signature,
+            },
+        )
+        try:
+            with urlopen(request, timeout=75) as response:
+                result = json.loads(response.read().decode("utf-8"))
+                if not isinstance(result, dict):
+                    raise ValueError(f"invalid forward learning response for {game}")
+                forecasts = result.get("forecasts")
+                if isinstance(forecasts, list):
+                    result["forecastCount"] = len(forecasts)
+                    result.pop("forecasts", None)
+                return result
+        except HTTPError as error:
+            if error.code not in (409, 425, 429, 502, 503, 504):
+                raise
+        except URLError:
+            pass
+        if time.monotonic() >= deadline:
+            raise TimeoutError(f"forward learning capture timed out for {game}")
+        time.sleep(min(30, max(1, deadline - time.monotonic())))
 
 
 def capture(
