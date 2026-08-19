@@ -1,4 +1,5 @@
 import json
+from io import BytesIO
 from pathlib import Path
 import tempfile
 import unittest
@@ -223,6 +224,24 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(result["targetIssue"], "2026217")
         self.assertEqual(result["forecastCount"], 5)
         self.assertNotIn("forecasts", result)
+
+    def test_forward_capture_accepts_a_resolved_v2_revision_one(self):
+        payload = {
+            **self._raw_forward_payload("2026217", revision=1),
+            "status": "created",
+            "game": "new_macau",
+            "targetIssue": "2026217",
+            "revision": 1,
+        }
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            result = cli.capture_forward_learning(
+                "https://example.test",
+                "secret",
+                "new_macau",
+                "2026217",
+            )
+        self.assertEqual(result["revision"], 1)
+        self.assertEqual(result["forecastCount"], 5)
 
     def test_forward_capture_rejects_a_2xx_response_without_a_complete_freeze(self):
         invalid_payloads = (
@@ -454,6 +473,15 @@ class ResearchPipelineTest(unittest.TestCase):
             )
         self.assertEqual(result["revision"], 2)
 
+    def test_health_accepts_a_complete_resolved_v2_revision_one(self):
+        responses = _V2HealthResponses(self, revision=1, models=[])
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            result = cli.verify_production_health(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["revision"], 1)
+
     def test_health_rejects_prior_scores_from_a_lower_revision(self):
         responses = self._v2_health_responses(models=[])
         responses.learning_reviews["reviews"][0]["scores"][0]["revision"] = 1
@@ -587,6 +615,54 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(result["shouldRun"], True)
         self.assertEqual(result["reason"], "unified_revision_repair_required")
 
+    def test_update_gate_repairs_when_patterns_lack_a_committed_resolved_revision(self):
+        responses = [
+            {"draws": [self._draw_payload("2026090", True)]},
+            {"targetIssue": "2026091"},
+            self._http_error(404, "/api/learning/forecast"),
+            self._http_json_error(
+                503,
+                "/api/research/patterns",
+                {"error": "权威五项与冻结规律运行不一致。"},
+            ),
+        ]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            result = cli.check_update_required(
+                "https://example.test",
+                "hk",
+            )
+        self.assertTrue(result["shouldRun"])
+        self.assertEqual(result["reason"], "unified_revision_repair_required")
+
+    def test_update_gate_keeps_other_patterns_503_failures_visible(self):
+        messages = (
+            "权威五项来源不完整或混合，暂不展示部分结果。",
+            "database unavailable",
+        )
+        for message in messages:
+            with self.subTest(message=message):
+                responses = [
+                    {"draws": [self._draw_payload("2026090", True)]},
+                    {"targetIssue": "2026091"},
+                    self._http_error(404, "/api/learning/forecast"),
+                    self._http_json_error(
+                        503,
+                        "/api/research/patterns",
+                        {"error": message},
+                    ),
+                ]
+                with patch.object(cli, "fetch_json", side_effect=responses):
+                    with self.assertRaises(HTTPError) as raised:
+                        cli.check_update_required(
+                            "https://example.test",
+                            "hk",
+                        )
+                self.assertEqual(raised.exception.code, 503)
+                self.assertEqual(
+                    json.loads(raised.exception.read().decode("utf-8"))["error"],
+                    message,
+                )
+
     def test_update_gate_repairs_an_incomplete_forward_learning_review(self):
         incomplete = self._forward_review_payload("2026216")
         incomplete["reviews"][0]["scores"] = incomplete["reviews"][0]["scores"][:-1]
@@ -618,6 +694,16 @@ class ResearchPipelineTest(unittest.TestCase):
             )
         self.assertTrue(result["shouldRun"])
         self.assertEqual(result["reason"], "unified_revision_repair_required")
+
+    def test_update_gate_accepts_a_complete_resolved_v2_revision_one(self):
+        responses = _V2HealthResponses(self, revision=1)
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertFalse(result["shouldRun"])
+        self.assertEqual(result["reason"], "forecast_ahead")
 
     def test_update_gate_repairs_a_target_with_no_committed_revision(self):
         responses = self._v2_health_responses()
@@ -767,12 +853,12 @@ class ResearchPipelineTest(unittest.TestCase):
         ]
 
     @staticmethod
-    def _forward_forecast_payload(target_issue):
-        return _resolved_recommendation_payloads(target_issue)[1]
+    def _forward_forecast_payload(target_issue, revision=2):
+        return _resolved_recommendation_payloads(target_issue, revision)[1]
 
     @classmethod
-    def _raw_forward_payload(cls, target_issue):
-        payload = cls._forward_forecast_payload(target_issue)
+    def _raw_forward_payload(cls, target_issue, revision=2):
+        payload = cls._forward_forecast_payload(target_issue, revision)
         for forecast in payload["forecasts"]:
             forecast["selectionPolicy"] = "rolling-product-ev-v2"
         return payload
@@ -821,7 +907,18 @@ class ResearchPipelineTest(unittest.TestCase):
 
     @classmethod
     def _v1_only_target_responses(cls):
-        return _V2HealthResponses(cls, revision=1)
+        responses = _V2HealthResponses(cls)
+        responses.learning["forecasts"] = [
+            {
+                "slot": slot,
+                "official": True,
+                "targetIssue": "2026217",
+                "resultKey": result_key,
+                "values": values,
+            }
+            for slot, result_key, values in _V2HealthResponses.slots
+        ]
+        return responses
 
     @staticmethod
     def _http_error(code, path):
@@ -831,6 +928,16 @@ class ResearchPipelineTest(unittest.TestCase):
             "error",
             {},
             None,
+        )
+
+    @staticmethod
+    def _http_json_error(code, path, payload):
+        return HTTPError(
+            f"https://example.test{path}",
+            code,
+            "error",
+            {"content-type": "application/json"},
+            BytesIO(json.dumps(payload, ensure_ascii=False).encode("utf-8")),
         )
 
     def test_user_example_is_in_the_bounded_grammar(self):
@@ -885,7 +992,7 @@ def _resolved_recommendation_payloads(target_issue, revision=2):
             "values": values,
             "sourceRunId": source_run_id,
             "dataVersion": data_version,
-            "revision": 2,
+            "revision": revision,
             "p30": 0.5,
             "legacySeedProbability": 0.52,
             "learnedProbability": learned_probability,
@@ -945,14 +1052,14 @@ class _V2HealthResponses:
                 "run": {
                     "settledIssue": "2026216",
                     "status": "completed",
-                    "revision": 2,
+                    "revision": revision,
                     "revisionSource": "resolved-v2",
                 },
                 "scores": [
                     {
                         "slot": slot,
                         "official": True,
-                        "revision": 2,
+                        "revision": revision,
                         "targetIssue": "2026216",
                     }
                     for slot, _result_key, _values in self.slots

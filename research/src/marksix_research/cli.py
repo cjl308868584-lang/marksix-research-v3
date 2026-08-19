@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import hmac
+from io import BytesIO
 import json
 from pathlib import Path
 import time
@@ -44,6 +45,7 @@ RECOMMENDATION_FIELDS = (
     "expectedValue",
 )
 UNIFIED_SELECTION_POLICY = "rolling-product-ev-v2"
+PATTERN_REVISION_REPAIR_ERROR = "权威五项与冻结规律运行不一致。"
 
 
 def main() -> None:
@@ -181,6 +183,33 @@ def fetch_optional_json(url: str, referer: str) -> dict[str, object] | None:
         raise
 
 
+def fetch_update_patterns(
+    url: str,
+    referer: str,
+) -> tuple[dict[str, object] | None, bool]:
+    try:
+        return fetch_optional_json(url, referer), False
+    except HTTPError as error:
+        if error.code != 503:
+            raise
+        try:
+            body = error.read()
+        except AttributeError:
+            raise
+        error.fp = error.file = BytesIO(body)
+        error.read = error.file.read
+        try:
+            payload = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            raise
+        if (
+            isinstance(payload, dict)
+            and payload.get("error") == PATTERN_REVISION_REPAIR_ERROR
+        ):
+            return None, True
+        raise
+
+
 def is_complete_forward_learning_freeze(
     payload: dict[str, object] | None,
     game: str,
@@ -263,7 +292,7 @@ def _resolved_forward_learning_revision(
     ):
         return None
     revision = next(iter(revisions))
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 2:
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         return None
     return revision
 
@@ -296,7 +325,7 @@ def _pattern_recommendations(
     if slots != FORWARD_LEARNING_SLOTS or len(revisions) != 1:
         return None
     revision = next(iter(revisions))
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 2:
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
         return None
     for recommendation in typed:
         product = recommendation.get("product")
@@ -563,10 +592,18 @@ def check_update_required(
             f"{base}/learning",
         )
         if not is_complete_forward_learning_freeze(forward, game, target_issue):
-            patterns = fetch_optional_json(
+            patterns, revision_repair = fetch_update_patterns(
                 f"{base}/api/research/patterns?game={game}",
                 f"{base}/patterns",
             )
+            if revision_repair:
+                return {
+                    "shouldRun": True,
+                    "reason": "unified_revision_repair_required",
+                    "game": game,
+                    "latestIssue": latest_issue,
+                    "targetIssue": target_issue,
+                }
             if patterns is None and verified_count < 30:
                 return {
                     "shouldRun": False,
@@ -586,10 +623,18 @@ def check_update_required(
                 "latestIssue": latest_issue,
                 "targetIssue": target_issue,
             }
-        patterns = fetch_optional_json(
+        patterns, revision_repair = fetch_update_patterns(
             f"{base}/api/research/patterns?game={game}",
             f"{base}/patterns",
         )
+        if revision_repair:
+            return {
+                "shouldRun": True,
+                "reason": "unified_revision_repair_required",
+                "game": game,
+                "latestIssue": latest_issue,
+                "targetIssue": target_issue,
+            }
         try:
             _validate_recommendation_alignment(
                 patterns,
