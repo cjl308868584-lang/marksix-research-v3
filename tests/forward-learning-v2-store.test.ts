@@ -147,6 +147,24 @@ test("the highest committed revision is the only settlement source", async () =>
   assert.equal(db.count("forward_learning_scores"), 0);
 });
 
+test("resolved settlement rejects a v1 snapshot frozen after the draw", async () => {
+  const forecasts = v1FiveForecasts("2026231").map((item) => ({
+    ...item,
+    frozenAt: "2026-08-19T14:00:00.000Z",
+  }));
+  await seedV1Snapshot(db, forecasts);
+
+  await assert.rejects(
+    store.settleResolvedForwardSnapshot(
+      "new_macau",
+      verifiedDraw("2026231"),
+      "2026-08-19T15:00:00.000Z",
+    ),
+    /开奖前冻结/,
+  );
+  assert.equal(db.count("forward_learning_scores"), 0);
+});
+
 test("a committed revision rejects the same id with different content", async () => {
   const original = revisionSnapshot("2026231", 2);
   assert.equal(await store.freezeForwardLearningRevision(original), "created");
@@ -157,6 +175,37 @@ test("a committed revision rejects the same id with different content", async ()
       index === 0 ? { ...item, learnedProbability: 0.99, finalProbability: 0.99 } : item
     ),
   }), "conflict");
+});
+
+test("official forecasts cannot disguise five zodiac candidates as five distinct slots", async () => {
+  await store.ensureForwardLearningV2Store();
+  const snapshot = revisionSnapshot("2026231", 2);
+  const zodiacCandidates = snapshot.candidates.filter((item) =>
+    item.slot === "coverage_zodiac"
+  ).slice(0, snapshot.forecasts.length);
+  const disguised = snapshot.forecasts.map((forecast, index) => {
+    const candidate = zodiacCandidates[index];
+    return {
+      ...candidate,
+      slot: forecast.slot,
+      forecastId: `forecast:${candidate.candidateId}`,
+      official: true as const,
+      rank: 1 as const,
+      previousResultKey: null,
+      previousProbability: null,
+      probabilityDelta: null,
+      topAlternative: null,
+      explanation: ["disguised slot"],
+    };
+  });
+
+  const result = await store.freezeForwardLearningRevision({
+    ...snapshot,
+    forecasts: disguised,
+  });
+
+  assert.equal(result, "conflict");
+  assert.equal(db.count("forward_learning_revisions"), 0);
 });
 
 test("a production database with only v1 tables repairs the complete v2 schema on first use", async () => {

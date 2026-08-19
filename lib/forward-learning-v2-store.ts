@@ -260,13 +260,16 @@ export async function settleResolvedForwardSnapshot(
   }
   const resolved = await readResolvedForwardSnapshot(game, draw.issue);
   if (!resolved) return { status: "not_found", source: null, revision: null, scores: [] };
+  if ([...resolved.candidates, ...resolved.forecasts].some((item) => {
+    const frozenAt = Date.parse(item.frozenAt);
+    return !Number.isFinite(frozenAt) || frozenAt >= Date.parse(draw.drawAt);
+  })) {
+    throw new Error("预测必须在开奖前冻结");
+  }
   if (resolved.source === "v1") return settleV1Snapshot(resolved, draw, scoredAt);
   const db = runtime.__marksixD1;
   if (!db || !resolved.revisionId) {
     return { status: "not_found", source: null, revision: null, scores: [] };
-  }
-  if (resolved.candidates.some((item) => Date.parse(item.frozenAt) >= Date.parse(draw.drawAt))) {
-    throw new Error("预测必须在开奖前冻结");
   }
   const existingRows = await db.prepare(
     `SELECT candidate_id, score_json FROM forward_learning_revision_scores
@@ -388,11 +391,45 @@ function validRevisionSnapshot(snapshot: ForwardLearningRevisionSnapshot) {
     const candidate = candidates.get(forecast.candidateId);
     if (!candidate || slots.has(forecast.slot) || !forecast.official ||
       forecast.forecastId !== `forecast:${forecast.candidateId}` ||
-      forecast.resultKey !== candidate.resultKey ||
-      !sameRevisionIdentity(forecast, snapshot)) return false;
+      !sameCandidateMirror(candidate, forecast)) return false;
     slots.add(forecast.slot);
   }
   return FORWARD_LEARNING_SLOTS.every((slot) => slots.has(slot));
+}
+
+function sameCandidateMirror(
+  candidate: ForwardLearningCandidateV2,
+  forecast: ForwardLearningForecastV2,
+) {
+  const {
+    forecastId: _forecastId,
+    official: _official,
+    rank: _rank,
+    previousResultKey: _previousResultKey,
+    previousProbability: _previousProbability,
+    probabilityDelta: _probabilityDelta,
+    topAlternative: _topAlternative,
+    explanation: _explanation,
+    ...candidateMirror
+  } = forecast;
+  const candidateKeys = Object.keys(candidate).sort();
+  const mirrorKeys = Object.keys(candidateMirror).sort();
+  return candidateKeys.length === mirrorKeys.length &&
+    candidateKeys.every((key, index) => key === mirrorKeys[index]) &&
+    canonicalJson(candidate) === canonicalJson(candidateMirror);
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  }
+  if (value && typeof value === "object") {
+    const object = value as Record<string, unknown>;
+    return `{${Object.keys(object).sort().map((key) =>
+      `${JSON.stringify(key)}:${canonicalJson(object[key])}`
+    ).join(",")}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function canonicalRolloutJson(rollout: ForwardLearningRollout) {
