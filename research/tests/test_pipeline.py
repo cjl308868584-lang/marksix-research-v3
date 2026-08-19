@@ -31,6 +31,7 @@ class ResearchPipelineTest(unittest.TestCase):
                 ]
                 if verified and int(latest_issue) < int(target_issue):
                     responses.append(self._forward_forecast_payload(target_issue))
+                    responses.append(self._pattern_payload(target_issue))
                     responses.append(
                         self._http_error(
                             404,
@@ -204,31 +205,22 @@ class ResearchPipelineTest(unittest.TestCase):
         })
 
     def test_forward_capture_accepts_only_a_complete_five_slot_freeze(self):
-        slots = (
-            "coverage_zodiac",
-            "coverage_tail",
-            "coverage_zodiac_pair",
-            "coverage_zodiac_triple",
-            "special_number",
-        )
         payload = {
+            **self._raw_forward_payload("2026217"),
             "status": "created",
             "game": "new_macau",
-            "targetIssue": "2026231",
-            "forecasts": [
-                {"slot": slot, "official": True, "targetIssue": "2026231"}
-                for slot in slots
-            ],
+            "targetIssue": "2026217",
+            "revision": 2,
         }
         with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
             result = cli.capture_forward_learning(
                 "https://example.test",
                 "secret",
                 "new_macau",
-                "2026231",
+                "2026217",
             )
         self.assertEqual(result["status"], "created")
-        self.assertEqual(result["targetIssue"], "2026231")
+        self.assertEqual(result["targetIssue"], "2026217")
         self.assertEqual(result["forecastCount"], 5)
         self.assertNotIn("forecasts", result)
 
@@ -291,6 +283,39 @@ class ResearchPipelineTest(unittest.TestCase):
                             "new_macau",
                             "2026231",
                         )
+
+    def test_forward_capture_rejects_a_mixed_resolved_v2_policy(self):
+        payload = {
+            **self._raw_forward_payload("2026217"),
+            "status": "created",
+            "targetIssue": "2026217",
+            "revision": 2,
+        }
+        payload["forecasts"][0]["selectionPolicy"] = "forward-learning-v1"
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            with self.assertRaisesRegex(RuntimeError, "resolved-v2"):
+                cli.capture_forward_learning(
+                    "https://example.test",
+                    "secret",
+                    "new_macau",
+                    "2026217",
+                )
+
+    def test_forward_capture_rejects_a_mismatched_response_revision(self):
+        payload = {
+            **self._raw_forward_payload("2026217"),
+            "status": "created",
+            "targetIssue": "2026217",
+            "revision": 1,
+        }
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            with self.assertRaisesRegex(RuntimeError, "resolved-v2"):
+                cli.capture_forward_learning(
+                    "https://example.test",
+                    "secret",
+                    "new_macau",
+                    "2026217",
+                )
 
     def test_forward_capture_reports_a_missing_prerequisite_without_calling_it_a_timeout(self):
         error = self._http_error(425, "/api/internal/learning/settle-and-freeze")
@@ -364,6 +389,7 @@ class ResearchPipelineTest(unittest.TestCase):
             {"learningRuns": []},
             self._http_error(404, "/api/research/forecast?issue=2026216"),
             self._forward_forecast_payload("2026217"),
+            self._pattern_payload("2026217"),
             self._http_error(404, "/api/learning/forecast?issue=2026216"),
         ]
         with patch.object(cli, "fetch_json", side_effect=responses):
@@ -388,6 +414,7 @@ class ResearchPipelineTest(unittest.TestCase):
             "settledIssue": "2026216",
             "targetIssue": "2026217",
             "forwardLearningTargetIssue": "2026217",
+            "revision": 2,
         })
 
     def test_health_rejects_a_missing_or_incomplete_five_slot_freeze(self):
@@ -402,6 +429,46 @@ class ResearchPipelineTest(unittest.TestCase):
         )
         with patch.object(cli, "fetch_json", side_effect=responses):
             with self.assertRaisesRegex(RuntimeError, "five-slot"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_rejects_patterns_learning_recommendation_drift(self):
+        responses = self._v2_health_responses()
+        responses.patterns["recommendations"][0]["resultKey"] = "猴"
+        responses.learning["forecasts"][0]["resultKey"] = "马"
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            with self.assertRaisesRegex(RuntimeError, "recommendation mismatch"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_accepts_a_complete_revision_without_expert_model_states(self):
+        responses = self._v2_health_responses(models=[])
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            result = cli.verify_production_health(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["revision"], 2)
+
+    def test_health_rejects_prior_scores_from_a_lower_revision(self):
+        responses = self._v2_health_responses(models=[])
+        responses.learning_reviews["reviews"][0]["scores"][0]["revision"] = 1
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            with self.assertRaisesRegex(RuntimeError, "learning run.*resolved-v2"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_rejects_prior_scores_for_another_target(self):
+        responses = self._v2_health_responses(models=[])
+        responses.learning_reviews["reviews"][0]["scores"][0]["targetIssue"] = "2026215"
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            with self.assertRaisesRegex(RuntimeError, "learning run.*resolved-v2"):
                 cli.verify_production_health(
                     "https://example.test",
                     "new_macau",
@@ -449,7 +516,7 @@ class ResearchPipelineTest(unittest.TestCase):
 
     def test_health_requires_a_complete_review_after_a_frozen_learning_issue_draws(self):
         responses = self._health_responses()
-        responses[5] = self._forward_forecast_payload("2026216")
+        responses[6] = self._forward_forecast_payload("2026216")
         responses.append(self._forward_review_payload("2026216"))
         with patch.object(cli, "fetch_json", side_effect=responses):
             result = cli.verify_production_health(
@@ -461,7 +528,7 @@ class ResearchPipelineTest(unittest.TestCase):
         incomplete = self._forward_review_payload("2026216")
         incomplete["reviews"][0]["scores"] = incomplete["reviews"][0]["scores"][:-1]
         responses = self._health_responses()
-        responses[5] = self._forward_forecast_payload("2026216")
+        responses[6] = self._forward_forecast_payload("2026216")
         responses.append(incomplete)
         with patch.object(cli, "fetch_json", side_effect=responses):
             with self.assertRaisesRegex(RuntimeError, "complete five-slot learning run"):
@@ -518,15 +585,16 @@ class ResearchPipelineTest(unittest.TestCase):
                 "hk",
             )
         self.assertEqual(result["shouldRun"], True)
-        self.assertEqual(result["reason"], "forward_learning_repair_required")
+        self.assertEqual(result["reason"], "unified_revision_repair_required")
 
     def test_update_gate_repairs_an_incomplete_forward_learning_review(self):
         incomplete = self._forward_review_payload("2026216")
-        incomplete["reviews"][0]["modelAfter"] = []
+        incomplete["reviews"][0]["scores"] = incomplete["reviews"][0]["scores"][:-1]
         responses = [
             {"draws": [self._draw_payload("2026216", True)]},
             {"targetIssue": "2026217"},
             self._forward_forecast_payload("2026217"),
+            self._pattern_payload("2026217"),
             self._forward_forecast_payload("2026216"),
             incomplete,
         ]
@@ -540,6 +608,28 @@ class ResearchPipelineTest(unittest.TestCase):
             result["reason"],
             "forward_learning_review_repair_required",
         )
+
+    def test_update_gate_repairs_a_v1_only_target(self):
+        responses = self._v1_only_target_responses()
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertTrue(result["shouldRun"])
+        self.assertEqual(result["reason"], "unified_revision_repair_required")
+
+    def test_update_gate_repairs_a_target_with_no_committed_revision(self):
+        responses = self._v2_health_responses()
+        for forecast in responses.learning["forecasts"]:
+            forecast.pop("revision")
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            result = cli.check_update_required(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertTrue(result["shouldRun"])
+        self.assertEqual(result["reason"], "unified_revision_repair_required")
 
     def test_update_gate_requests_bootstrap_when_the_main_forecast_is_not_initialized(self):
         responses = [
@@ -672,26 +762,24 @@ class ResearchPipelineTest(unittest.TestCase):
             {"reviews": reviews},
             {"learningRuns": learning_runs},
             forward_payload,
+            cls._pattern_payload(target_issue),
             cls._http_error(404, "/api/learning/forecast?issue=2026216"),
         ]
 
     @staticmethod
     def _forward_forecast_payload(target_issue):
-        slots = (
-            "coverage_zodiac",
-            "coverage_tail",
-            "coverage_zodiac_pair",
-            "coverage_zodiac_triple",
-            "special_number",
-        )
-        return {
-            "game": "new_macau",
-            "status": "ready",
-            "forecasts": [
-                {"slot": slot, "targetIssue": target_issue, "official": True}
-                for slot in slots
-            ],
-        }
+        return _resolved_recommendation_payloads(target_issue)[1]
+
+    @classmethod
+    def _raw_forward_payload(cls, target_issue):
+        payload = cls._forward_forecast_payload(target_issue)
+        for forecast in payload["forecasts"]:
+            forecast["selectionPolicy"] = "rolling-product-ev-v2"
+        return payload
+
+    @staticmethod
+    def _pattern_payload(target_issue):
+        return _resolved_recommendation_payloads(target_issue)[0]
 
     @classmethod
     def _forward_review_payload(cls, settled_issue):
@@ -705,9 +793,19 @@ class ResearchPipelineTest(unittest.TestCase):
         return {
             "game": "new_macau",
             "reviews": [{
-                "run": {"settledIssue": settled_issue, "status": "completed"},
+                "run": {
+                    "settledIssue": settled_issue,
+                    "status": "completed",
+                    "revision": 2,
+                    "revisionSource": "resolved-v2",
+                },
                 "scores": [
-                    {"slot": slot, "official": True}
+                    {
+                        "slot": slot,
+                        "official": True,
+                        "revision": 2,
+                        "targetIssue": settled_issue,
+                    }
                     for slot in slots
                 ],
                 "modelAfter": [
@@ -716,6 +814,14 @@ class ResearchPipelineTest(unittest.TestCase):
                 ],
             }],
         }
+
+    @classmethod
+    def _v2_health_responses(cls, *, models=None):
+        return _V2HealthResponses(cls, models=models)
+
+    @classmethod
+    def _v1_only_target_responses(cls):
+        return _V2HealthResponses(cls, revision=1)
 
     @staticmethod
     def _http_error(code, path):
@@ -763,6 +869,140 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertTrue(rules)
         self.assertTrue(all(rule["support"] <= 80 for rule in rules))
         self.assertEqual(artifact["blackBox"]["sampleSize"], 80)
+
+
+def _resolved_recommendation_payloads(target_issue, revision=2):
+    slots = _V2HealthResponses.slots
+    source_run_id = f"pattern:{target_issue}"
+    data_version = "data-v2"
+    recommendations = []
+    for index, (kind, result_key, values) in enumerate(slots):
+        net_odds = 47 if kind == "special_number" else 1
+        learned_probability = 0.01 if kind == "special_number" else 0.55 + index * 0.01
+        recommendations.append({
+            "kind": kind,
+            "resultKey": result_key,
+            "values": values,
+            "sourceRunId": source_run_id,
+            "dataVersion": data_version,
+            "revision": 2,
+            "p30": 0.5,
+            "legacySeedProbability": 0.52,
+            "learnedProbability": learned_probability,
+            "netOdds": net_odds,
+            "breakEvenProbability": 1 / (net_odds + 1),
+            "expectedValue": learned_probability * net_odds - (1 - learned_probability),
+            "product": {
+                "targetIssue": target_issue,
+            },
+        })
+    patterns = {
+        "game": "new_macau",
+        "status": "completed",
+        "run": {"runId": source_run_id, "targetIssue": target_issue},
+        "recommendations": recommendations,
+    }
+    forecasts = json.loads(json.dumps(recommendations))
+    for forecast, (slot, _result_key, _values) in zip(forecasts, slots):
+        forecast.update({
+            "slot": slot,
+            "official": True,
+            "targetIssue": target_issue,
+            "revision": revision,
+        })
+        forecast.pop("product", None)
+    learning = {
+        "game": "new_macau",
+        "status": "ready",
+        "forecasts": forecasts,
+    }
+    return patterns, learning
+
+
+class _V2HealthResponses:
+    slots = (
+        ("coverage_zodiac", "猴", ["猴"]),
+        ("coverage_tail", "8尾", ["8尾"]),
+        ("coverage_zodiac_pair", "蛇+猴", ["蛇", "猴"]),
+        ("coverage_zodiac_triple", "蛇+马+猴", ["蛇", "马", "猴"]),
+        ("special_number", "01", ["01"]),
+    )
+
+    def __init__(self, testcase, *, revision=2, models=None):
+        target_issue = "2026217"
+        self.patterns, self.learning = _resolved_recommendation_payloads(
+            target_issue,
+            revision,
+        )
+        prior = json.loads(json.dumps(self.learning))
+        for forecast in prior["forecasts"]:
+            forecast["targetIssue"] = "2026216"
+            forecast["sourceRunId"] = "pattern:2026216"
+        self.prior_learning = prior
+        self.learning_reviews = {
+            "game": "new_macau",
+            "reviews": [{
+                "run": {
+                    "settledIssue": "2026216",
+                    "status": "completed",
+                    "revision": 2,
+                    "revisionSource": "resolved-v2",
+                },
+                "scores": [
+                    {
+                        "slot": slot,
+                        "official": True,
+                        "revision": 2,
+                        "targetIssue": "2026216",
+                    }
+                    for slot, _result_key, _values in self.slots
+                ],
+                "modelAfter": (
+                    [
+                        {"slot": slot, "learnedThroughIssue": "2026216"}
+                        for slot, _result_key, _values in self.slots
+                    ]
+                    if models is None else models
+                ),
+            }],
+        }
+        primary_slots = (
+            "zodiac_6_plus_1",
+            "tail_6_plus_1",
+            "position_parity",
+            "position_size",
+        )
+        self.lottery = {"draws": [testcase._draw_payload("2026216", True)]}
+        self.primary = {
+            "targetIssue": target_issue,
+            "events": [
+                {"slot": slot, "family": "zodiac" if index == 0 else "parity"}
+                for index, slot in enumerate(primary_slots)
+            ],
+        }
+        self.primary_reviews = {"reviews": [{"targetIssue": "2026216"}]}
+        self.primary_learning = {
+            "learningRuns": [{"settledIssue": "2026216", "status": "completed"}],
+        }
+
+    def sequence(self, url, _referer):
+        if "/api/lottery?" in url:
+            return self.lottery
+        if "/api/research/forecast?" in url:
+            if "&issue=" in url:
+                raise HTTPError(url, 404, "error", {}, None)
+            return self.primary
+        if "/api/research/reviews?" in url:
+            return self.primary_reviews
+        if "/api/research/learning-runs?" in url:
+            return self.primary_learning
+        if "/api/research/patterns?" in url:
+            return self.patterns
+        if "/api/learning/forecast?" in url:
+            return self.prior_learning if "&issue=2026216" in url else self.learning
+        if "/api/learning/reviews?" in url:
+            return self.learning_reviews
+        raise AssertionError(f"unexpected health URL: {url}")
 
 
 class _FakeResponse:

@@ -29,6 +29,22 @@ FORWARD_LEARNING_SLOTS = {
     "special_number",
 }
 
+RECOMMENDATION_FIELDS = (
+    "kind",
+    "resultKey",
+    "values",
+    "sourceRunId",
+    "dataVersion",
+    "revision",
+    "p30",
+    "legacySeedProbability",
+    "learnedProbability",
+    "netOdds",
+    "breakEvenProbability",
+    "expectedValue",
+)
+UNIFIED_SELECTION_POLICY = "rolling-product-ev-v2"
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="marksix-research")
@@ -170,24 +186,13 @@ def is_complete_forward_learning_freeze(
     game: str,
     target_issue: str,
 ) -> bool:
-    if not isinstance(payload, dict) or payload.get("game") != game:
-        return False
-    forecasts = payload.get("forecasts")
-    if not isinstance(forecasts, list) or len(forecasts) != len(FORWARD_LEARNING_SLOTS):
-        return False
-    slots = {
-        forecast.get("slot")
-        for forecast in forecasts
-        if isinstance(forecast, dict)
-        and forecast.get("official") is True
-        and str(forecast.get("targetIssue") or "") == target_issue
-    }
-    return slots == FORWARD_LEARNING_SLOTS
+    return _resolved_forward_learning_revision(payload, game, target_issue) is not None
 
 
 def is_complete_forward_learning_review(
     payload: dict[str, object] | None,
     settled_issue: str,
+    revision: int,
 ) -> bool:
     if not isinstance(payload, dict):
         return False
@@ -202,6 +207,8 @@ def is_complete_forward_learning_review(
             not isinstance(run, dict)
             or str(run.get("settledIssue") or "") != settled_issue
             or run.get("status") != "completed"
+            or run.get("revisionSource") != "resolved-v2"
+            or run.get("revision") != revision
         ):
             continue
         scores = review.get("scores")
@@ -210,24 +217,136 @@ def is_complete_forward_learning_review(
             if isinstance(scores, list)
             and isinstance(score, dict)
             and score.get("official") is True
+            and score.get("revision") == revision
+            and str(score.get("targetIssue") or "") == settled_issue
         } if isinstance(scores, list) else set()
-        model_after = review.get("modelAfter")
-        model_slots = {
-            state.get("slot") for state in model_after
-            if isinstance(model_after, list)
-            and isinstance(state, dict)
-            and str(state.get("learnedThroughIssue") or "") == settled_issue
-        } if isinstance(model_after, list) else set()
         if (
             isinstance(scores, list)
             and len(scores) == len(FORWARD_LEARNING_SLOTS)
             and score_slots == FORWARD_LEARNING_SLOTS
-            and isinstance(model_after, list)
-            and len(model_after) == len(FORWARD_LEARNING_SLOTS)
-            and model_slots == FORWARD_LEARNING_SLOTS
         ):
             return True
     return False
+
+
+def _resolved_forward_learning_revision(
+    payload: dict[str, object] | None,
+    game: str,
+    target_issue: str,
+    *,
+    require_policy: bool = False,
+) -> int | None:
+    if not isinstance(payload, dict) or payload.get("game") != game:
+        return None
+    forecasts = payload.get("forecasts")
+    if not isinstance(forecasts, list) or len(forecasts) != len(FORWARD_LEARNING_SLOTS):
+        return None
+    if not all(isinstance(forecast, dict) for forecast in forecasts):
+        return None
+    typed_forecasts = [forecast for forecast in forecasts if isinstance(forecast, dict)]
+    slots = {forecast.get("slot") for forecast in typed_forecasts}
+    revisions = {forecast.get("revision") for forecast in typed_forecasts}
+    if (
+        slots != FORWARD_LEARNING_SLOTS
+        or len(revisions) != 1
+        or any(
+            forecast.get("official") is not True
+            or str(forecast.get("targetIssue") or "") != target_issue
+            or (
+                require_policy
+                and forecast.get("selectionPolicy") != UNIFIED_SELECTION_POLICY
+            )
+            or forecast.get("kind") != forecast.get("slot")
+            or any(field not in forecast for field in RECOMMENDATION_FIELDS)
+            for forecast in typed_forecasts
+        )
+    ):
+        return None
+    revision = next(iter(revisions))
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 2:
+        return None
+    return revision
+
+
+def _pattern_recommendations(
+    payload: dict[str, object] | None,
+    game: str,
+    target_issue: str,
+) -> tuple[int, dict[str, dict[str, object]]] | None:
+    if not isinstance(payload, dict) or payload.get("game") != game:
+        return None
+    run = payload.get("run")
+    if (
+        not isinstance(run, dict)
+        or str(run.get("targetIssue") or "") != target_issue
+        or not str(run.get("runId") or "")
+    ):
+        return None
+    run_id = str(run["runId"])
+    recommendations = payload.get("recommendations")
+    if (
+        not isinstance(recommendations, list)
+        or len(recommendations) != len(FORWARD_LEARNING_SLOTS)
+        or not all(isinstance(item, dict) for item in recommendations)
+    ):
+        return None
+    typed = [item for item in recommendations if isinstance(item, dict)]
+    slots = {item.get("kind") for item in typed}
+    revisions = {item.get("revision") for item in typed}
+    if slots != FORWARD_LEARNING_SLOTS or len(revisions) != 1:
+        return None
+    revision = next(iter(revisions))
+    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 2:
+        return None
+    for recommendation in typed:
+        product = recommendation.get("product")
+        if (
+            not isinstance(product, dict)
+            or str(product.get("targetIssue") or "") != target_issue
+            or recommendation.get("sourceRunId") != run_id
+            or any(field not in recommendation for field in RECOMMENDATION_FIELDS)
+        ):
+            return None
+    return revision, {
+        str(recommendation["kind"]): recommendation
+        for recommendation in typed
+    }
+
+
+def _validate_recommendation_alignment(
+    patterns: dict[str, object] | None,
+    learning: dict[str, object] | None,
+    game: str,
+    target_issue: str,
+) -> int:
+    learning_revision = _resolved_forward_learning_revision(
+        learning,
+        game,
+        target_issue,
+    )
+    resolved_patterns = _pattern_recommendations(patterns, game, target_issue)
+    forecasts = learning.get("forecasts") if isinstance(learning, dict) else None
+    if learning_revision is None or resolved_patterns is None:
+        raise RuntimeError(
+            f"{game} target {target_issue} has an invalid resolved-v2 five-slot revision"
+        )
+    pattern_revision, by_kind = resolved_patterns
+    if pattern_revision != learning_revision:
+        raise RuntimeError(
+            f"{game} target {target_issue} recommendation mismatch: revision"
+        )
+    assert isinstance(forecasts, list)
+    for forecast in forecasts:
+        assert isinstance(forecast, dict)
+        recommendation = by_kind.get(str(forecast.get("slot") or ""))
+        if recommendation is None or any(
+            recommendation.get(field) != forecast.get(field)
+            for field in RECOMMENDATION_FIELDS
+        ):
+            raise RuntimeError(
+                f"{game} target {target_issue} recommendation mismatch"
+            )
+    return learning_revision
 
 
 def verify_production_health(
@@ -344,27 +463,42 @@ def verify_production_health(
         raise RuntimeError(
             f"{game} target {target_issue} is missing the five-slot forward freeze"
         )
-    if not is_complete_forward_learning_freeze(forward, game, target_issue):
-        raise RuntimeError(
-            f"{game} target {target_issue} has an invalid five-slot forward freeze"
-        )
+    patterns = fetch_optional_json(
+        f"{base}/api/research/patterns?game={game}",
+        f"{base}/patterns",
+    )
+    revision = _validate_recommendation_alignment(
+        patterns,
+        forward,
+        game,
+        target_issue,
+    )
 
     previous_forward = fetch_optional_json(
         f"{base}/api/learning/forecast?game={game}&issue={latest_issue}",
         f"{base}/learning",
     )
     if previous_forward is not None:
-        if not is_complete_forward_learning_freeze(previous_forward, game, latest_issue):
+        previous_revision = _resolved_forward_learning_revision(
+            previous_forward,
+            game,
+            latest_issue,
+        )
+        if previous_revision is None:
             raise RuntimeError(
-                f"{game} verified issue {latest_issue} has an invalid prior five-slot freeze"
+                f"{game} verified issue {latest_issue} has an invalid prior resolved-v2 freeze"
             )
         forward_reviews = fetch_json(
             f"{base}/api/learning/reviews?game={game}&limit=5",
             f"{base}/learning",
         )
-        if not is_complete_forward_learning_review(forward_reviews, latest_issue):
+        if not is_complete_forward_learning_review(
+            forward_reviews,
+            latest_issue,
+            previous_revision,
+        ):
             raise RuntimeError(
-                f"{game} forward review for {latest_issue} is not a complete five-slot learning run"
+                f"{game} forward review for {latest_issue} is not a complete five-slot learning run (resolved-v2)"
             )
     return {
         "status": "frozen",
@@ -372,6 +506,7 @@ def verify_production_health(
         "settledIssue": None if primary_bootstrap else latest_issue,
         "targetIssue": target_issue,
         "forwardLearningTargetIssue": target_issue,
+        "revision": revision,
     }
 
 
@@ -442,7 +577,30 @@ def check_update_required(
                 }
             return {
                 "shouldRun": True,
-                "reason": "forward_learning_repair_required",
+                "reason": (
+                    "forward_learning_repair_required"
+                    if patterns is None
+                    else "unified_revision_repair_required"
+                ),
+                "game": game,
+                "latestIssue": latest_issue,
+                "targetIssue": target_issue,
+            }
+        patterns = fetch_optional_json(
+            f"{base}/api/research/patterns?game={game}",
+            f"{base}/patterns",
+        )
+        try:
+            _validate_recommendation_alignment(
+                patterns,
+                forward,
+                game,
+                target_issue,
+            )
+        except RuntimeError:
+            return {
+                "shouldRun": True,
+                "reason": "unified_revision_repair_required",
                 "game": game,
                 "latestIssue": latest_issue,
                 "targetIssue": target_issue,
@@ -452,11 +610,12 @@ def check_update_required(
             f"{base}/learning",
         )
         if previous_forward is not None:
-            if not is_complete_forward_learning_freeze(
+            previous_revision = _resolved_forward_learning_revision(
                 previous_forward,
                 game,
                 latest_issue,
-            ):
+            )
+            if previous_revision is None:
                 return {
                     "shouldRun": True,
                     "reason": "forward_learning_review_repair_required",
@@ -468,7 +627,11 @@ def check_update_required(
                 f"{base}/api/learning/reviews?game={game}&limit=5",
                 f"{base}/learning",
             )
-            if not is_complete_forward_learning_review(reviews, latest_issue):
+            if not is_complete_forward_learning_review(
+                reviews,
+                latest_issue,
+                previous_revision,
+            ):
                 return {
                     "shouldRun": True,
                     "reason": "forward_learning_review_repair_required",
@@ -588,25 +751,23 @@ def capture_forward_learning(
                 if not isinstance(result, dict):
                     raise ValueError(f"invalid forward learning response for {game}")
                 forecasts = result.get("forecasts")
-                slots = {
-                    forecast.get("slot")
-                    for forecast in forecasts
-                    if isinstance(forecasts, list)
-                    and isinstance(forecast, dict)
-                    and forecast.get("official") is True
-                    and str(forecast.get("targetIssue") or "") == target_issue
-                } if isinstance(forecasts, list) else set()
+                resolved_revision = _resolved_forward_learning_revision(
+                    result,
+                    game,
+                    target_issue,
+                    require_policy=True,
+                )
                 if (
                     result.get("status") not in ("created", "existing")
                     or result.get("game") != game
                     or str(result.get("targetIssue") or "") != target_issue
-                    or not isinstance(forecasts, list)
-                    or len(forecasts) != len(FORWARD_LEARNING_SLOTS)
-                    or slots != FORWARD_LEARNING_SLOTS
+                    or resolved_revision is None
+                    or result.get("revision") != resolved_revision
                 ):
                     raise RuntimeError(
-                        f"{game} forward learning did not return a complete five-slot freeze"
+                        f"{game} forward learning did not return a complete five-slot freeze for resolved-v2"
                     )
+                assert isinstance(forecasts, list)
                 result["forecastCount"] = len(forecasts)
                 result.pop("forecasts", None)
                 return result
