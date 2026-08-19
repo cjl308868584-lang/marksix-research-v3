@@ -8,6 +8,7 @@ import {
 import { ensureResearchV3Store } from "./research-v3-store";
 import type {
   RollingPatternEnvelope,
+  ProductHistoryCounts,
   RollingPatternProduct,
   RollingPatternProductScore,
   RollingPatternRun,
@@ -171,6 +172,57 @@ export async function readRollingPatternValueHistory(
     });
   } catch {
     return [];
+  }
+}
+
+export async function readBoundedLegacyProductHistory(
+  game: GameId,
+  beforeIssue: string,
+): Promise<{
+  legacy: Map<string, ProductHistoryCounts>;
+  legacyProductIds: Map<string, string>;
+}> {
+  const empty = () => ({
+    legacy: new Map<string, ProductHistoryCounts>(),
+    legacyProductIds: new Map<string, string>(),
+  });
+  if (!await ensureRollingPatternStore()) return empty();
+  const db = runtime.__marksixD1;
+  if (!db) return empty();
+  try {
+    const rows = await db.prepare(
+      `SELECT l.product_json, s.score_json
+       FROM rolling_pattern_consensus_ledger l
+       INNER JOIN rolling_pattern_consensus_scores s
+         ON s.run_id = l.run_id AND s.product_id = l.product_id
+       WHERE l.game = ?
+         AND CAST(l.target_issue AS INTEGER) < CAST(? AS INTEGER)
+       ORDER BY CAST(l.target_issue AS INTEGER) DESC, l.rowid DESC`,
+    ).bind(game, beforeIssue).all<ProductHistoryRow>();
+    const result = empty();
+    for (const row of rows.results ?? []) {
+      const product = parseJson(row.product_json);
+      const score = row.score_json ? parseJson(row.score_json) : null;
+      if (!isRollingPatternProduct(product) ||
+        !isRollingPatternProductScore(score) ||
+        product.game !== game ||
+        compareIssues(product.targetIssue, beforeIssue) >= 0 ||
+        score.runId !== product.runId || score.productId !== product.productId) {
+        continue;
+      }
+      const key = `${product.kind}:${product.values.join("+")}`;
+      const previous = result.legacy.get(key) ?? { settledCount: 0, hitCount: 0 };
+      result.legacy.set(key, {
+        settledCount: previous.settledCount + 1,
+        hitCount: previous.hitCount + (score.actualMatched ? 1 : 0),
+      });
+      if (!result.legacyProductIds.has(key) && product.productId.trim()) {
+        result.legacyProductIds.set(key, product.productId);
+      }
+    }
+    return result;
+  } catch {
+    return empty();
   }
 }
 
@@ -386,6 +438,10 @@ async function runBatches(
   for (let index = 0; index < statements.length; index += D1_BATCH_SIZE) {
     await db.batch(statements.slice(index, index + D1_BATCH_SIZE));
   }
+}
+
+function compareIssues(left: string, right: string) {
+  return left.localeCompare(right, "en", { numeric: true });
 }
 
 function isRollingPatternRun(value: unknown): value is RollingPatternRun {

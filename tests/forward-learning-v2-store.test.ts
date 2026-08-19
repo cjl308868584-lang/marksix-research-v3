@@ -244,10 +244,22 @@ test("a rollout cutoff is immutable per game", async () => {
 
   assert.equal(await store.persistForwardLearningRollout(rollout), "created");
   assert.equal(await store.persistForwardLearningRollout(rollout), "existing");
+  assert.deepEqual(await store.readForwardLearningRollout("new_macau"), rollout);
   assert.equal(await store.persistForwardLearningRollout({
     ...rollout,
     firstUnifiedTargetIssue: "2026232",
   }), "conflict");
+});
+
+test("score presence includes committed v2 candidate scores", async () => {
+  assert.equal(await store.freezeForwardLearningRevision(revisionSnapshot("2026232", 1)), "created");
+  await store.settleResolvedForwardSnapshot(
+    "new_macau",
+    verifiedDraw("2026232"),
+    "2026-08-20T14:00:00.000Z",
+  );
+
+  assert.equal(await store.readForwardLearningScoreCount("new_macau", "2026232"), 357);
 });
 
 test("partial settlement is repaired without changing already frozen scores", async () => {

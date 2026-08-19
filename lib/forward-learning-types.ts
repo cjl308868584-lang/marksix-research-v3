@@ -246,10 +246,11 @@ export type ForwardLearningReview = {
 };
 
 export type ForwardLearningCycleResult = {
-  status: "created" | "existing" | "awaiting_verification";
+  status: "created" | "existing" | "awaiting_verification" | "awaiting_rollout";
   runId: string | null;
   settledIssue: string | null;
   targetIssue: string;
+  revision: number | null;
   modelVersion: string;
   forecasts: ForwardLearningForecast[];
 };

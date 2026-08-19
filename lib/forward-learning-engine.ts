@@ -11,11 +11,23 @@ import {
   FORWARD_LEARNING_SLOTS,
   type ExpertWeights,
   type ForwardLearningCandidate,
+  type ForwardLearningCandidateV2,
   type ForwardLearningForecast,
   type ForwardLearningModelState,
   type ForwardLearningSlot,
   type ForwardRuleContribution,
 } from "./forward-learning-types.ts";
+
+export function compareForwardLearningExpectedValue(
+  left: Pick<ForwardLearningCandidateV2, "expectedValue" | "learningSettledCount" | "support" | "rawRuleCount" | "resultKey">,
+  right: Pick<ForwardLearningCandidateV2, "expectedValue" | "learningSettledCount" | "support" | "rawRuleCount" | "resultKey">,
+) {
+  return right.expectedValue - left.expectedValue ||
+    right.learningSettledCount - left.learningSettledCount ||
+    right.support - left.support ||
+    right.rawRuleCount - left.rawRuleCount ||
+    stableCompare(left.resultKey, right.resultKey);
+}
 
 const PRIOR_STRENGTH = 4;
 const DEFAULT_WEIGHTS: ExpertWeights = {

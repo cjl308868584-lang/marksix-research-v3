@@ -61,6 +61,41 @@ export async function persistForwardLearningRollout(
   return stored?.rollout_json === rolloutJson ? "existing" : "conflict";
 }
 
+export async function readForwardLearningRollout(
+  game: GameId,
+): Promise<ForwardLearningRollout | null> {
+  await ensureForwardLearningV2Store();
+  const db = runtime.__marksixD1;
+  if (!db) return null;
+  const row = await db.prepare(
+    `SELECT rollout_json FROM forward_learning_rollouts WHERE game = ? LIMIT 1`,
+  ).bind(game).first<{ rollout_json: string }>();
+  const rollout = parseJson<ForwardLearningRollout>(row?.rollout_json);
+  return rollout && canonicalRolloutJson(rollout) === row?.rollout_json
+    ? rollout
+    : null;
+}
+
+export async function readForwardLearningScoreCount(
+  game: GameId,
+  targetIssue: string,
+): Promise<number> {
+  await ensureForwardLearningV2Store();
+  const db = runtime.__marksixD1;
+  if (!db) return 0;
+  const [v1, v2] = await Promise.all([
+    db.prepare(
+      `SELECT COUNT(*) AS score_count FROM forward_learning_scores
+       WHERE game = ? AND target_issue = ?`,
+    ).bind(game, targetIssue).first<{ score_count: number }>(),
+    db.prepare(
+      `SELECT COUNT(*) AS score_count FROM forward_learning_revision_scores
+       WHERE game = ? AND target_issue = ?`,
+    ).bind(game, targetIssue).first<{ score_count: number }>(),
+  ]);
+  return Number(v1?.score_count ?? 0) + Number(v2?.score_count ?? 0);
+}
+
 export async function freezeForwardLearningRevision(
   snapshot: ForwardLearningRevisionSnapshot,
 ): Promise<"created" | "existing" | "conflict" | "unavailable"> {

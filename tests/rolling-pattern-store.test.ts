@@ -122,6 +122,19 @@ class FakePatternD1 {
         return null;
       },
       all: async <T>() => {
+        if (sql.includes("CAST(l.target_issue AS INTEGER) < CAST(? AS INTEGER)")) {
+          const game = String(values[0]);
+          const cutoff = Number(values[1]);
+          return {
+            results: [...this.products.values()].flatMap((row) => {
+              const product = JSON.parse(row.product_json) as RollingPatternProduct;
+              const score = this.productScores.get(`${row.run_id}:${row.product_id}`);
+              return product.game === game && Number(product.targetIssue) < cutoff && score
+                ? [{ product_json: row.product_json, score_json: score.score_json } as T]
+                : [];
+            }),
+          };
+        }
         if (sql.includes("FROM rolling_pattern_signals")) {
           return {
             results: [...this.signals.values()].filter(
@@ -186,6 +199,13 @@ type StoreModule = {
     game: "new_macau",
     issue?: string,
   ): Promise<{ products: RollingPatternProduct[]; scores: RollingPatternProductScore[] } | null>;
+  readBoundedLegacyProductHistory(
+    game: "new_macau",
+    beforeIssue: string,
+  ): Promise<{
+    legacy: Map<string, { settledCount: number; hitCount: number }>;
+    legacyProductIds: Map<string, string>;
+  }>;
 };
 
 let server: ViteDevServer;
@@ -259,6 +279,46 @@ test("replaying one run id restores the immutable result without duplicate signa
   const restored = await store.readRollingPatternRun("new_macau");
   assert.equal(restored?.run.runId, runFixture.runId);
   assert.equal(restored?.signals.length, runFixture.signals.length);
+});
+
+test("legacy seed aggregation excludes the rollout target and later rows", async () => {
+  const before = legacyProductFixture("legacy-before", "2026230", true);
+  const cutoff = legacyProductFixture("legacy-cutoff", "2026231", false);
+  db.products.set(`${before.runId}:${before.productId}`, {
+    run_id: before.runId,
+    product_id: before.productId,
+    product_json: JSON.stringify(before),
+  });
+  db.products.set(`${cutoff.runId}:${cutoff.productId}`, {
+    run_id: cutoff.runId,
+    product_id: cutoff.productId,
+    product_json: JSON.stringify(cutoff),
+  });
+  for (const product of [before, cutoff]) {
+    db.productScores.set(`${product.runId}:${product.productId}`, {
+      run_id: product.runId,
+      product_id: product.productId,
+      score_json: JSON.stringify({
+        runId: product.runId,
+        productId: product.productId,
+        game: product.game,
+        targetIssue: product.targetIssue,
+        actualMatched: product.runId === "legacy-before",
+        unitProfit: product.runId === "legacy-before" ? 1 : -1,
+        actualNumbers: [1, 2, 3, 4, 5, 6, 7],
+        actualSpecial: 7,
+        scoredAt: "2026-08-19T14:00:00.000Z",
+      }),
+    });
+  }
+
+  const history = await store.readBoundedLegacyProductHistory("new_macau", "2026231");
+
+  assert.deepEqual(history.legacy.get("coverage_zodiac:猴"), {
+    settledCount: 1,
+    hitCount: 1,
+  });
+  assert.equal(history.legacyProductIds.get("coverage_zodiac:猴"), before.productId);
 });
 
 test("freezes result-level value products and repairs missing ledger children idempotently", async () => {
@@ -417,4 +477,48 @@ function patternDraws() {
     source: "双源一致测试",
     verified: true,
   })).reverse();
+}
+
+function legacyProductFixture(
+  runId: string,
+  targetIssue: string,
+  matched: boolean,
+): RollingPatternProduct {
+  return {
+    runId,
+    productId: `${runId}:coverage_zodiac:猴`,
+    dataVersion: `${runId}-data`,
+    game: "new_macau",
+    targetIssue,
+    scope: "coverage_6_plus_1",
+    kind: "coverage_zodiac",
+    label: "猴",
+    values: ["猴"],
+    evidenceEventIds: [],
+    strategyCount: 0,
+    support: 0,
+    hits: 0,
+    misses: 0,
+    baselineProbability: 0.47,
+    patternProbability: 0.47,
+    legacySeedProbability: 0.47,
+    estimatedProbability: 0.47,
+    netOdds: 1,
+    breakEvenProbability: 0.5,
+    expectedValue: -0.06,
+    valueStatus: "negative",
+    legacySettledCount: 0,
+    legacyHitCount: 0,
+    learningSettledCount: 0,
+    learningHitCount: 0,
+    learningMissCount: 0,
+    sourceKind: "derived_baseline",
+    sourceProductId: null,
+    derivedDefinitionHash: "fixture-definition",
+    forwardSettledCount: 0,
+    forwardHitCount: 0,
+    forwardMissCount: 0,
+    rank: matched ? 1 : 2,
+    frozenAt: "2026-08-18T12:00:00.000Z",
+  };
 }
