@@ -1,6 +1,9 @@
 import type { Draw } from "./lottery.ts";
 import { buildSpecialNumberConsensus } from "./rolling-pattern-summary.ts";
+import { exactSlotBaseline } from "./forward-learning-math.ts";
 import type {
+  AuthoritativeRecommendation,
+  ProductHistoryCounts,
   RollingPatternProduct,
   RollingPatternProductKind,
   RollingPatternProductScore,
@@ -8,6 +11,7 @@ import type {
   RollingPatternRun,
   RollingPatternSignal,
   RollingPatternValueHistory,
+  UnifiedProductHistories,
 } from "./rolling-pattern-types.ts";
 import { getZodiac, ZODIAC_NAMES } from "./zodiac.ts";
 
@@ -18,6 +22,11 @@ const COVERAGE_RECOMMENDATION_KINDS: RollingPatternProductKind[] = [
   "coverage_tail",
   "coverage_zodiac_pair",
   "coverage_zodiac_triple",
+];
+
+const MANDATORY_PRODUCT_KINDS: RollingPatternProductKind[] = [
+  ...COVERAGE_RECOMMENDATION_KINDS,
+  "special_number",
 ];
 
 export function netOddsForProduct(
@@ -54,23 +63,23 @@ export function selectRollingPatternRecommendations(
     ? (["special_number"] satisfies RollingPatternProductKind[])
     : COVERAGE_RECOMMENDATION_KINDS;
   return kinds.map((kind) => {
-    const candidates = products
-      .filter((product) => product.kind === kind && product.expectedValue > 0)
-      .sort((left, right) =>
-        right.expectedValue - left.expectedValue ||
-        right.forwardSettledCount - left.forwardSettledCount ||
-        right.support - left.support ||
-        right.strategyCount - left.strategyCount ||
-        left.label.localeCompare(right.label, "zh-CN")
-      );
-    const product = candidates[0] ?? null;
+    const selected = selectProductRecommendation(products, kind, 0);
     return {
       kind,
-      product,
-      reason: product
-        ? recommendationReason(product)
-        : "本期不推荐：当前冻结结果中没有结果高于赔率盈亏平衡线。",
+      product: selected?.product ?? null,
+      reason: selected?.reason ?? "当前冻结结果中缺少该类别产品。",
     };
+  });
+}
+
+export function selectMandatoryProductRecommendations(
+  products: readonly RollingPatternProduct[],
+  revision: number,
+): AuthoritativeRecommendation[] {
+  return MANDATORY_PRODUCT_KINDS.map((kind) => {
+    const selected = selectProductRecommendation(products, kind, revision);
+    if (!selected) throw new Error(`统一产品类别缺失：${kind}`);
+    return selected;
   });
 }
 
@@ -126,6 +135,87 @@ export function buildRollingPatternProducts(
     .map((product, index) => ({ ...product, rank: index + 1 }));
 }
 
+export function buildUnifiedRollingPatternProducts(
+  run: RollingPatternRun,
+  histories?: UnifiedProductHistories,
+): RollingPatternProduct[] {
+  const coverage = run.signals.filter((signal) =>
+    signal.rule.event.scope === "coverage_6_plus_1"
+  );
+  const special = run.signals.filter((signal) =>
+    signal.rule.event.scope === "special"
+  );
+  const coverageGroups = groupByEvent(coverage);
+  const zodiacGroups = new Map(ZODIAC_NAMES.map((value) => [
+    value,
+    coverageGroups.get(`coverage_6_plus_1:zodiac:${value}:gte1`),
+  ]));
+  const singles = [
+    ...ZODIAC_NAMES.map((value) => {
+      const signals = zodiacGroups.get(value);
+      return signals?.length
+        ? buildSingleProduct(run, signals, histories)
+        : buildBaselineProduct(run, "coverage_zodiac", [value], histories);
+    }),
+    ...Array.from({ length: 10 }, (_, tail) => `${tail}尾`).map((value) => {
+      const signals = coverageGroups.get(`coverage_6_plus_1:tail:${value}:gte1`);
+      return signals?.length
+        ? buildSingleProduct(run, signals, histories)
+        : buildBaselineProduct(run, "coverage_tail", [value], histories);
+    }),
+  ];
+  const zodiacValues = [...ZODIAC_NAMES];
+  const pairs = combinations(zodiacValues, 2).map((values) => {
+    const groups = values.map((value) => zodiacGroups.get(value));
+    return groups.every((group): group is RollingPatternSignal[] => Boolean(group?.length))
+      ? buildZodiacCombinationProduct(run, groups, "coverage_zodiac_pair", histories)
+      : buildBaselineProduct(run, "coverage_zodiac_pair", values, histories);
+  });
+  const triples = combinations(zodiacValues, 3).map((values) => {
+    const groups = values.map((value) => zodiacGroups.get(value));
+    return groups.every((group): group is RollingPatternSignal[] => Boolean(group?.length))
+      ? buildZodiacCombinationProduct(run, groups, "coverage_zodiac_triple", histories)
+      : buildBaselineProduct(run, "coverage_zodiac_triple", values, histories);
+  });
+  const specialEvidence = new Map(buildSpecialNumberConsensus(
+    special,
+    run.expectedDrawAt,
+    49,
+  ).map((entry) => [entry.number, entry]));
+  const specialNumbers = Array.from({ length: 49 }, (_, index) => index + 1).map((number) => {
+    const value = String(number).padStart(2, "0");
+    const entry = specialEvidence.get(number);
+    return entry
+      ? finalizeProduct(run, {
+        kind: "special_number",
+        label: value,
+        values: [value],
+        evidenceEventIds: entry.evidence.map((item) => item.eventId),
+        strategyCount: entry.strategyCount,
+        support: 0,
+        hits: 0,
+        baselineProbability: exactSlotBaseline(
+          "special_number",
+          [value],
+          run.expectedDrawAt,
+        ),
+      }, histories)
+      : buildBaselineProduct(run, "special_number", [value], histories);
+  });
+  const products = [...singles, ...pairs, ...triples, ...specialNumbers]
+    .sort((left, right) =>
+      right.expectedValue - left.expectedValue ||
+      right.support - left.support ||
+      right.strategyCount - left.strategyCount ||
+      left.label.localeCompare(right.label, "zh-CN")
+    )
+    .map((product, index) => ({ ...product, rank: index + 1 }));
+  if (products.length !== 357) {
+    throw new Error(`统一产品候选不完整：${products.length}/357`);
+  }
+  return products;
+}
+
 export function applyForwardProductHistory(
   product: RollingPatternProduct,
   settledCount: number,
@@ -134,14 +224,19 @@ export function applyForwardProductHistory(
   const boundedSettled = Math.max(0, Math.trunc(settledCount));
   const boundedHits = Math.max(0, Math.min(boundedSettled, Math.trunc(hitCount)));
   if (boundedSettled === 0) return product;
-  const estimatedProbability = (boundedHits + product.estimatedProbability * PRIOR_STRENGTH) /
-    (boundedSettled + PRIOR_STRENGTH);
+  const estimatedProbability = posteriorFromHistory(
+    product.legacySeedProbability ?? product.patternProbability ?? product.estimatedProbability,
+    { settledCount: boundedSettled, hitCount: boundedHits },
+  );
   const expectedValue = expectedUnitValue(estimatedProbability, product.netOdds);
   return {
     ...product,
     estimatedProbability,
     expectedValue,
     valueStatus: expectedValue > 0 ? "positive" : "negative",
+    learningSettledCount: boundedSettled,
+    learningHitCount: boundedHits,
+    learningMissCount: boundedSettled - boundedHits,
     forwardSettledCount: boundedSettled,
     forwardHitCount: boundedHits,
     forwardMissCount: boundedSettled - boundedHits,
@@ -215,15 +310,22 @@ export function summarizeProductPerformance(
 function recommendationReason(product: RollingPatternProduct) {
   const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
   const expected = `${product.expectedValue >= 0 ? "+" : ""}${product.expectedValue.toFixed(2)}`;
-  const forward = product.forwardSettledCount > 0
-    ? `已前瞻结算${product.forwardSettledCount}期，命中${product.forwardHitCount}期`
+  const learningSettledCount = product.learningSettledCount ??
+    product.forwardSettledCount ?? 0;
+  const learningHitCount = product.learningHitCount ?? product.forwardHitCount ?? 0;
+  const forward = learningSettledCount > 0
+    ? `已前瞻结算${learningSettledCount}期，命中${learningHitCount}期`
     : "尚无独立前瞻结算";
-  return `当前30期共同审计${product.support}次、命中${product.hits}次；${forward}。参考概率${percent(product.estimatedProbability)}高于赔率盈亏线${percent(product.breakEvenProbability)}，每1单位期望${expected}。`;
+  const risk = product.expectedValue >= 0
+    ? `高于赔率盈亏线${percent(product.breakEvenProbability)}`
+    : `低于赔率盈亏线${percent(product.breakEvenProbability)}，属于负期望风险项`;
+  return `当前30期共同审计${product.support}次、命中${product.hits}次；${forward}。参考概率${percent(product.estimatedProbability)}${risk}，每1单位期望${expected}。`;
 }
 
 function buildSingleProduct(
   run: RollingPatternRun,
   signals: RollingPatternSignal[],
+  histories?: UnifiedProductHistories,
 ) {
   const event = signals[0].rule.event;
   const audit = combinedAudit(signals);
@@ -236,13 +338,14 @@ function buildSingleProduct(
     support: audit.size,
     hits: [...audit.values()].filter(Boolean).length,
     baselineProbability: weightedBaseline(signals),
-  });
+  }, histories);
 }
 
 function buildZodiacCombinationProduct(
   run: RollingPatternRun,
   groups: RollingPatternSignal[][],
   kind: "coverage_zodiac_pair" | "coverage_zodiac_triple",
+  histories?: UnifiedProductHistories,
 ) {
   const audits = groups.map(combinedAudit);
   const sharedIssues = [...audits[0].keys()].filter((issue) =>
@@ -265,7 +368,7 @@ function buildZodiacCombinationProduct(
     baselineProbability: zodiacCombinationBaseline(
       groups.map((signals) => signals[0].rule.event.memberCount),
     ),
-  });
+  }, histories);
 }
 
 function finalizeProduct(
@@ -280,14 +383,24 @@ function finalizeProduct(
     hits: number;
     baselineProbability: number;
   },
+  histories?: UnifiedProductHistories,
 ): RollingPatternProduct {
-  const estimatedProbability = (input.hits + input.baselineProbability * PRIOR_STRENGTH) /
+  const patternProbability = (input.hits + input.baselineProbability * PRIOR_STRENGTH) /
     (input.support + PRIOR_STRENGTH);
+  const historyKey = `${input.kind}:${input.values.join("+")}`;
+  const legacyHistory = boundedHistory(histories?.legacy.get(historyKey));
+  const learnedHistory = boundedHistory(histories?.learned.get(historyKey));
+  const legacySeedProbability = posteriorFromHistory(patternProbability, legacyHistory);
+  const estimatedProbability = posteriorFromHistory(legacySeedProbability, learnedHistory);
   const netOdds = netOddsForProduct(input.kind, input.values);
   const expectedValue = expectedUnitValue(estimatedProbability, netOdds);
+  const sourceProductId = histories?.legacyProductIds.has(historyKey)
+    ? histories.legacyProductIds.get(historyKey) ?? null
+    : null;
   return {
     runId: run.runId,
     productId: `${run.runId}:${input.kind}:${input.values.join("-")}`,
+    dataVersion: run.window.dataHash,
     game: run.game,
     targetIssue: run.targetIssue,
     scope: input.kind === "special_number" ? "special" : "coverage_6_plus_1",
@@ -300,17 +413,133 @@ function finalizeProduct(
     hits: input.hits,
     misses: input.support - input.hits,
     baselineProbability: input.baselineProbability,
+    patternProbability,
+    legacySeedProbability,
     estimatedProbability,
     netOdds,
     breakEvenProbability: breakEvenProbability(netOdds),
     expectedValue,
     valueStatus: expectedValue > 0 ? "positive" : "negative",
-    forwardSettledCount: 0,
-    forwardHitCount: 0,
-    forwardMissCount: 0,
+    legacySettledCount: legacyHistory?.settledCount ?? 0,
+    legacyHitCount: legacyHistory?.hitCount ?? 0,
+    learningSettledCount: learnedHistory?.settledCount ?? 0,
+    learningHitCount: learnedHistory?.hitCount ?? 0,
+    learningMissCount: (learnedHistory?.settledCount ?? 0) -
+      (learnedHistory?.hitCount ?? 0),
+    sourceKind: sourceProductId === null ? "derived_baseline" : "ledger",
+    sourceProductId,
+    derivedDefinitionHash: definitionHash(input.kind, input.values),
+    forwardSettledCount: learnedHistory?.settledCount ?? 0,
+    forwardHitCount: learnedHistory?.hitCount ?? 0,
+    forwardMissCount: (learnedHistory?.settledCount ?? 0) -
+      (learnedHistory?.hitCount ?? 0),
     rank: 0,
     frozenAt: run.frozenAt,
   };
+}
+
+function buildBaselineProduct(
+  run: RollingPatternRun,
+  kind: RollingPatternProductKind,
+  values: string[],
+  histories?: UnifiedProductHistories,
+) {
+  return finalizeProduct(run, {
+    kind,
+    label: values.join("＋"),
+    values,
+    evidenceEventIds: [],
+    strategyCount: 0,
+    support: 0,
+    hits: 0,
+    baselineProbability: exactSlotBaseline(kind, values, run.expectedDrawAt),
+  }, histories);
+}
+
+function posteriorFromHistory(
+  prior: number,
+  history: ProductHistoryCounts | undefined,
+): number {
+  if (!history || history.settledCount === 0) return prior;
+  return (history.hitCount + prior * 4) / (history.settledCount + 4);
+}
+
+function boundedHistory(
+  history: ProductHistoryCounts | undefined,
+): ProductHistoryCounts | undefined {
+  if (!history) return undefined;
+  const settledCount = Math.max(0, Math.trunc(history.settledCount));
+  return {
+    settledCount,
+    hitCount: Math.max(0, Math.min(settledCount, Math.trunc(history.hitCount))),
+  };
+}
+
+function compareProductsForRecommendation(
+  left: RollingPatternProduct,
+  right: RollingPatternProduct,
+) {
+  return right.expectedValue - left.expectedValue ||
+    (right.learningSettledCount ?? right.forwardSettledCount ?? 0) -
+      (left.learningSettledCount ?? left.forwardSettledCount ?? 0) ||
+    right.support - left.support ||
+    right.strategyCount - left.strategyCount ||
+    asciiCompare(left.values.join("+"), right.values.join("+"));
+}
+
+function selectProductRecommendation(
+  products: readonly RollingPatternProduct[],
+  kind: RollingPatternProductKind,
+  revision: number,
+): AuthoritativeRecommendation | null {
+  const product = products
+    .filter((candidate) => candidate.kind === kind)
+    .sort(compareProductsForRecommendation)[0];
+  if (!product) return null;
+  const sourceKind = product.sourceKind ?? "ledger";
+  const patternProbability = product.patternProbability ?? product.estimatedProbability;
+  const legacySeedProbability = product.legacySeedProbability ?? patternProbability;
+  const learningSettledCount = product.learningSettledCount ??
+    product.forwardSettledCount ?? 0;
+  const learningHitCount = product.learningHitCount ?? product.forwardHitCount ?? 0;
+  return {
+    kind,
+    resultKey: product.values.join("+"),
+    values: [...product.values],
+    sourceRunId: product.runId,
+    sourceProductId: sourceKind === "ledger"
+      ? product.sourceProductId ?? product.productId
+      : null,
+    sourceKind,
+    dataVersion: product.dataVersion ?? product.runId,
+    revision,
+    p30: patternProbability,
+    legacySeedProbability,
+    learnedProbability: product.estimatedProbability,
+    netOdds: product.netOdds,
+    breakEvenProbability: product.breakEvenProbability,
+    expectedValue: product.expectedValue,
+    legacySettledCount: product.legacySettledCount ?? 0,
+    legacyHitCount: product.legacyHitCount ?? 0,
+    learningSettledCount,
+    learningHitCount,
+    product,
+    reason: recommendationReason(product),
+  };
+}
+
+function asciiCompare(left: string, right: string) {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function definitionHash(kind: RollingPatternProductKind, values: readonly string[]) {
+  const definition = `rolling-pattern-product-v2:${kind}:${values.join("+")}`;
+  let hash = 2166136261;
+  for (let index = 0; index < definition.length; index += 1) {
+    hash ^= definition.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
 function groupByEvent(signals: readonly RollingPatternSignal[]) {

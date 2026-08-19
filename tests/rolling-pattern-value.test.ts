@@ -5,6 +5,7 @@ import {
   breakEvenProbability,
   applyForwardProductHistory,
   buildRollingPatternProducts,
+  buildUnifiedRollingPatternProducts,
   netOddsForProduct,
   selectRollingPatternRecommendations,
   settleRollingPatternProduct,
@@ -189,8 +190,8 @@ test("settles one frozen product once using the actual 6+1 result", () => {
   assert.equal(score.unitProfit, 2);
 });
 
-test("selects at most one positive recommendation for every purchase category", () => {
-  const products = buildRollingPatternProducts(run([
+test("selects exactly one recommendation for every requested purchase category", () => {
+  const products = buildUnifiedRollingPatternProducts(run([
     signal("马", [["1", true], ["2", true], ["3", false]]),
     signal("猴", [["1", true], ["2", true], ["3", true]]),
     signal("鸡", [["1", true], ["2", false], ["3", true]]),
@@ -201,8 +202,8 @@ test("selects at most one positive recommendation for every purchase category", 
     recommendations.map((item) => item.kind),
     ["coverage_zodiac", "coverage_tail", "coverage_zodiac_pair", "coverage_zodiac_triple"],
   );
-  assert.equal(recommendations.filter((item) => item.product).length, 3);
-  assert.ok(recommendations.every((item) => !item.product || item.product.expectedValue > 0));
+  assert.equal(recommendations.filter((item) => item.product).length, 4);
+  assert.ok(recommendations.some((item) => item.product && item.product.expectedValue < 0));
   assert.ok(recommendations.every((item) => item.reason.length > 20));
   assert.equal(
     new Set(recommendations.filter((item) => item.product).map((item) => item.kind)).size,
@@ -210,13 +211,13 @@ test("selects at most one positive recommendation for every purchase category", 
   );
 });
 
-test("explains that a category is not recommended when no item clears its odds line", () => {
-  const weak = buildRollingPatternProducts(run([
-    signal("马", [["1", false], ["2", false], ["3", false]]),
-  ])).filter((item) => item.kind === "coverage_zodiac");
-  const [recommendation] = selectRollingPatternRecommendations(weak, "coverage_6_plus_1");
+test("selects a concrete negative-EV item with explicit risk wording", () => {
+  const products = buildUnifiedRollingPatternProducts(run([]));
+  const [recommendation] = selectRollingPatternRecommendations(products, "special");
 
-  assert.equal(recommendation.kind, "coverage_zodiac");
-  assert.equal(recommendation.product, null);
-  assert.match(recommendation.reason, /没有结果高于赔率盈亏平衡线/);
+  assert.equal(recommendation.kind, "special_number");
+  assert.ok(recommendation.product);
+  assert.ok(recommendation.product.expectedValue < 0);
+  assert.match(recommendation.reason, /负期望风险项/);
+  assert.doesNotMatch(recommendation.reason, /本期不推荐/);
 });

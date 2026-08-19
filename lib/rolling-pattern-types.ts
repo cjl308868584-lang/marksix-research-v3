@@ -226,6 +226,7 @@ export type RollingPatternValueStatus = "positive" | "negative" | "pending";
 export type RollingPatternProduct = {
   runId: string;
   productId: string;
+  dataVersion: string;
   game: GameId;
   targetIssue: string;
   scope: RollingPatternScope;
@@ -238,16 +239,60 @@ export type RollingPatternProduct = {
   hits: number;
   misses: number;
   baselineProbability: number;
+  patternProbability: number;
+  legacySeedProbability: number;
   estimatedProbability: number;
   netOdds: number;
   breakEvenProbability: number;
   expectedValue: number;
   valueStatus: RollingPatternValueStatus;
+  legacySettledCount: number;
+  legacyHitCount: number;
+  learningSettledCount: number;
+  learningHitCount: number;
+  learningMissCount: number;
+  sourceKind: "ledger" | "derived_baseline";
+  sourceProductId: string | null;
+  derivedDefinitionHash: string;
   forwardSettledCount: number;
   forwardHitCount: number;
   forwardMissCount: number;
   rank: number;
   frozenAt: string;
+};
+
+export type ProductHistoryCounts = {
+  settledCount: number;
+  hitCount: number;
+};
+
+export type UnifiedProductHistories = {
+  legacy: ReadonlyMap<string, ProductHistoryCounts>;
+  learned: ReadonlyMap<string, ProductHistoryCounts>;
+  legacyProductIds: ReadonlyMap<string, string>;
+};
+
+export type AuthoritativeRecommendation = {
+  kind: RollingPatternProductKind;
+  resultKey: string;
+  values: string[];
+  sourceRunId: string;
+  sourceProductId: string | null;
+  sourceKind: "ledger" | "derived_baseline";
+  dataVersion: string;
+  revision: number;
+  p30: number;
+  legacySeedProbability: number;
+  learnedProbability: number;
+  netOdds: number;
+  breakEvenProbability: number;
+  expectedValue: number;
+  legacySettledCount: number;
+  legacyHitCount: number;
+  learningSettledCount: number;
+  learningHitCount: number;
+  product: RollingPatternProduct;
+  reason: string;
 };
 
 export type RollingPatternRecommendation = {
