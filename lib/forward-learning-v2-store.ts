@@ -322,15 +322,7 @@ export async function readResolvedProductRecommendations(
      ORDER BY revision DESC LIMIT 1`,
   ).bind(game, targetIssue).first<JsonRow>();
   if (!row) return null;
-  const revision = parseJson<ForwardLearningRevision>(row?.revision_json);
-  if (!revision || row.status !== "committed" || row.game !== game ||
-    row.target_issue !== targetIssue || Number(row.revision) !== revision.revision ||
-    revision.status !== "committed" || revision.game !== row.game ||
-    revision.targetIssue !== row.target_issue || revision.revisionId !== row.revision_id) {
-    throw new ForwardLearningDataIntegrityError(
-      "resolved-v2 committed revision manifest完整性校验失败",
-    );
-  }
+  const revision = validatedCommittedRevision(row, game, targetIssue);
   const forecastRows = await db.prepare(
     `SELECT forecast_json FROM forward_learning_revision_forecasts
      WHERE revision_id = ? ORDER BY slot`,
@@ -369,17 +361,23 @@ export async function settleResolvedForwardSnapshot(
   if (!db || !resolved.revisionId) {
     return { status: "not_found", source: null, revision: null, scores: [] };
   }
+  const forecasts = resolved.forecasts as ForwardLearningForecastV2[];
+  const officialByCandidate = new Map(forecasts.map((item) => [item.candidateId, item]));
+  const scores = (resolved.candidates as ForwardLearningCandidateV2[]).map((candidate) =>
+    scoreV2Candidate(candidate, officialByCandidate.get(candidate.candidateId) ?? null, draw, scoredAt)
+  );
+  assertCompleteV2ScoreSet(scores);
+  const expectedByCandidate = new Map(scores.map((score) => [score.candidateId, score]));
   const existingRows = await db.prepare(
-    `SELECT candidate_id, score_json FROM forward_learning_revision_scores
+    `SELECT score_id, forecast_id, candidate_id, revision_id, game,
+            target_issue, revision, slot, result_key, official,
+            actual_matched, score_json, scored_at
+     FROM forward_learning_revision_scores
      WHERE revision_id = ? ORDER BY slot, result_key`,
   ).bind(resolved.revisionId).all<JsonRow>();
-  const existing = rowsAs<ForwardLearningScoreV2>(existingRows.results, "score_json");
-  const candidateIds = new Set(resolved.candidates.map((item) => item.candidateId));
-  if (existing.length > resolved.candidates.length ||
-    existing.some((score) => !candidateIds.has(score.candidateId))) {
-    throw new Error("新版逐期学习评分账本数量异常");
-  }
-  if (existing.length === resolved.candidates.length) {
+  const existing = validateStoredV2Scores(existingRows.results, expectedByCandidate);
+  if (existing.length === scores.length) {
+    assertCompleteV2ScoreSet(existing);
     return {
       status: "existing",
       source: "v2",
@@ -387,12 +385,9 @@ export async function settleResolvedForwardSnapshot(
       scores: existing,
     };
   }
-  const forecasts = resolved.forecasts as ForwardLearningForecastV2[];
-  const officialByCandidate = new Map(forecasts.map((item) => [item.candidateId, item]));
-  const scores = (resolved.candidates as ForwardLearningCandidateV2[]).map((candidate) =>
-    scoreV2Candidate(candidate, officialByCandidate.get(candidate.candidateId) ?? null, draw, scoredAt)
-  );
-  await runBatches(db, scores.map((score) => db.prepare(
+  const existingIds = new Set(existing.map((score) => score.candidateId));
+  const missing = scores.filter((score) => !existingIds.has(score.candidateId));
+  await runBatches(db, missing.map((score) => db.prepare(
     `INSERT OR IGNORE INTO forward_learning_revision_scores (
        score_id, forecast_id, candidate_id, revision_id, game, target_issue,
        revision, slot, result_key, official, actual_matched, score_json, scored_at
@@ -413,13 +408,14 @@ export async function settleResolvedForwardSnapshot(
     score.scoredAt,
   )));
   const completedRows = await db.prepare(
-    `SELECT score_json FROM forward_learning_revision_scores
+    `SELECT score_id, forecast_id, candidate_id, revision_id, game,
+            target_issue, revision, slot, result_key, official,
+            actual_matched, score_json, scored_at
+     FROM forward_learning_revision_scores
      WHERE revision_id = ? ORDER BY slot, result_key`,
   ).bind(resolved.revisionId).all<JsonRow>();
-  const completed = rowsAs<ForwardLearningScoreV2>(completedRows.results, "score_json");
-  if (completed.length !== resolved.candidates.length) {
-    throw new Error("新版逐期学习评分未完整持久化");
-  }
+  const completed = validateStoredV2Scores(completedRows.results, expectedByCandidate);
+  assertCompleteV2ScoreSet(completed);
   return {
     status: existing.length > 0 ? "repaired" : "settled",
     source: "v2",
@@ -432,41 +428,138 @@ export async function readUnifiedCandidateHistory(
   game: GameId,
   beforeIssue: string,
 ): Promise<Map<string, ForwardResultHistory>> {
+  const scores = await readValidatedHighestCommittedScores(game, {
+    beforeIssue,
+    requireCompleteCandidateSet: true,
+  });
+  const aggregates = new Map<string, {
+    settledCount: number;
+    hitCount: number;
+    brier: number;
+    baselineBrier: number;
+  }>();
+  for (const score of scores) {
+    const key = `${score.slot}:${score.resultKey}`;
+    const aggregate = aggregates.get(key) ?? {
+      settledCount: 0,
+      hitCount: 0,
+      brier: 0,
+      baselineBrier: 0,
+    };
+    aggregate.settledCount += 1;
+    aggregate.hitCount += score.actualMatched ? 1 : 0;
+    aggregate.brier += score.brier;
+    aggregate.baselineBrier += score.baselineBrier;
+    aggregates.set(key, aggregate);
+  }
+  return new Map([...aggregates].map(([key, aggregate]) => [key, {
+    settledCount: aggregate.settledCount,
+    hitCount: aggregate.hitCount,
+    brier: aggregate.brier / aggregate.settledCount,
+    baselineBrier: aggregate.baselineBrier / aggregate.settledCount,
+  }]));
+}
+
+export async function readValidatedHighestCommittedScores(
+  game: GameId,
+  options: {
+    beforeIssue?: string;
+    officialOnly?: boolean;
+    requireCompleteCandidateSet?: boolean;
+  } = {},
+): Promise<ForwardLearningScoreV2[]> {
   await ensureForwardLearningV2Store();
   const db = runtime.__marksixD1;
-  if (!db) return new Map();
+  if (!db) return [];
+  const revisions = await readValidatedHighestCommittedRevisions(
+    db,
+    game,
+    options.beforeIssue,
+  );
+  if (!revisions.length) return [];
+  const revisionIds = new Set(revisions.map((revision) => revision.revisionId));
   const rows = await db.prepare(
-    `SELECT scores.slot, scores.result_key,
-            COUNT(*) AS settled_count,
-            SUM(scores.actual_matched) AS hit_count,
-            AVG(CAST(json_extract(scores.score_json, '$.brier') AS REAL)) AS brier,
-            AVG(CAST(json_extract(scores.score_json, '$.baselineBrier') AS REAL)) AS baseline_brier
-     FROM forward_learning_revision_scores scores
-     INNER JOIN forward_learning_revisions revisions
-       ON revisions.revision_id = scores.revision_id
-      AND revisions.status = 'committed'
+    `SELECT score_id, forecast_id, candidate_id, revision_id, game,
+            target_issue, revision, slot, result_key, official,
+            actual_matched, score_json, scored_at
+     FROM forward_learning_revision_scores
+     WHERE game = ? AND revision_id IN (${revisions.map(() => "?").join(", ")})
+     ORDER BY CAST(target_issue AS INTEGER) DESC, slot, result_key`,
+  ).bind(game, ...revisions.map((revision) => revision.revisionId)).all<JsonRow>();
+  const revisionById = new Map(revisions.map((revision) => [revision.revisionId, revision]));
+  const scores = (rows.results ?? []).map((row) => {
+    const score = parseJson<ForwardLearningScoreV2>(row.score_json);
+    const revision = score ? revisionById.get(score.revisionId) : null;
+    if (!score || !revision || !revisionIds.has(String(row.revision_id)) ||
+      !storedScoreRowMatchesJson(row, score) ||
+      score.game !== revision.game ||
+      score.targetIssue !== revision.targetIssue ||
+      score.revision !== revision.revision) {
+      throw new ForwardLearningDataIntegrityError(
+        "resolved-v2 committed score与manifest完整性校验失败",
+      );
+    }
+    return score;
+  });
+  if (options.requireCompleteCandidateSet) {
+    for (const revision of revisions) {
+      const revisionScores = scores.filter((score) => score.revisionId === revision.revisionId);
+      if (revisionScores.length) assertCompleteV2ScoreSet(revisionScores);
+    }
+  }
+  return options.officialOnly ? scores.filter((score) => score.official) : scores;
+}
+
+async function readValidatedHighestCommittedRevisions(
+  db: D1Database,
+  game: GameId,
+  beforeIssue?: string,
+) {
+  const cutoff = beforeIssue
+    ? "AND CAST(target_issue AS INTEGER) < CAST(? AS INTEGER)"
+    : "";
+  const rows = await db.prepare(
+    `SELECT revisions.revision_id, revisions.game, revisions.target_issue,
+            revisions.revision, revisions.status, revisions.revision_json
+     FROM forward_learning_revisions revisions
      INNER JOIN (
        SELECT game, target_issue, MAX(revision) AS revision
        FROM forward_learning_revisions
-       WHERE status = 'committed' AND game = ?
-         AND CAST(target_issue AS INTEGER) < CAST(? AS INTEGER)
+       WHERE status = 'committed' AND game = ? ${cutoff}
        GROUP BY game, target_issue
      ) latest
-       ON latest.game = scores.game
-      AND latest.target_issue = scores.target_issue
-      AND latest.revision = scores.revision
-     WHERE scores.game = ?
-     GROUP BY scores.slot, scores.result_key`,
-  ).bind(game, beforeIssue, game).all<JsonRow>();
-  return new Map((rows.results ?? []).map((row) => [
-    `${row.slot}:${row.result_key}`,
-    {
-      settledCount: Number(row.settled_count),
-      hitCount: Number(row.hit_count),
-      brier: Number(row.brier),
-      baselineBrier: Number(row.baseline_brier),
-    },
-  ]));
+       ON latest.game = revisions.game
+      AND latest.target_issue = revisions.target_issue
+      AND latest.revision = revisions.revision
+     WHERE revisions.status = 'committed' AND revisions.game = ?
+     ORDER BY CAST(revisions.target_issue AS INTEGER) DESC`,
+  ).bind(
+    game,
+    ...(beforeIssue ? [beforeIssue] : []),
+    game,
+  ).all<JsonRow>();
+  return (rows.results ?? []).map((row) =>
+    validatedCommittedRevision(row, game, String(row.target_issue))
+  );
+}
+
+function validatedCommittedRevision(
+  row: JsonRow,
+  game: GameId,
+  targetIssue: string,
+) {
+  const revision = parseJson<ForwardLearningRevision>(row.revision_json);
+  if (!revision || row.status !== "committed" || row.game !== game ||
+    row.target_issue !== targetIssue || Number(row.revision) !== revision.revision ||
+    revision.status !== "committed" || revision.game !== row.game ||
+    revision.targetIssue !== row.target_issue || revision.revisionId !== row.revision_id ||
+    revision.selectionPolicy !== "rolling-product-ev-v2" ||
+    !revision.sourceRunId?.trim() || !revision.dataVersion?.trim()) {
+    throw new ForwardLearningDataIntegrityError(
+      "resolved-v2 committed revision manifest完整性校验失败",
+    );
+  }
+  return revision;
 }
 
 function validRevisionSnapshot(snapshot: ForwardLearningRevisionSnapshot) {
@@ -499,17 +592,19 @@ function sameCandidateMirror(
   candidate: ForwardLearningCandidateV2,
   forecast: ForwardLearningForecastV2,
 ) {
-  const {
-    forecastId: _forecastId,
-    official: _official,
-    rank: _rank,
-    previousResultKey: _previousResultKey,
-    previousProbability: _previousProbability,
-    probabilityDelta: _probabilityDelta,
-    topAlternative: _topAlternative,
-    explanation: _explanation,
-    ...candidateMirror
-  } = forecast;
+  const forecastOnlyFields = new Set([
+    "forecastId",
+    "official",
+    "rank",
+    "previousResultKey",
+    "previousProbability",
+    "probabilityDelta",
+    "topAlternative",
+    "explanation",
+  ]);
+  const candidateMirror = Object.fromEntries(
+    Object.entries(forecast).filter(([key]) => !forecastOnlyFields.has(key)),
+  );
   const candidateKeys = Object.keys(candidate).sort();
   const mirrorKeys = Object.keys(candidateMirror).sort();
   return candidateKeys.length === mirrorKeys.length &&
@@ -666,6 +761,66 @@ function scoreV2Candidate(
     actualSpecial: draw.special,
     scoredAt,
   };
+}
+
+function validateStoredV2Scores(
+  rows: JsonRow[] | undefined,
+  expectedByCandidate: ReadonlyMap<string, ForwardLearningScoreV2>,
+) {
+  if ((rows?.length ?? 0) > expectedByCandidate.size) {
+    throw new Error("新版逐期学习评分账本数量异常");
+  }
+  const seen = new Set<string>();
+  return (rows ?? []).map((row) => {
+    const score = parseJson<ForwardLearningScoreV2>(row.score_json);
+    const expected = score ? expectedByCandidate.get(score.candidateId) : null;
+    if (!score || !expected || seen.has(score.candidateId) ||
+      !storedScoreRowMatchesJson(row, score) ||
+      deterministicScoreJson(score) !== deterministicScoreJson(expected)) {
+      throw new Error("新版逐期学习既有评分与本次开奖冲突");
+    }
+    seen.add(score.candidateId);
+    return score;
+  });
+}
+
+function storedScoreRowMatchesJson(
+  row: JsonRow,
+  score: ForwardLearningScoreV2,
+) {
+  return row.score_id === score.scoreId &&
+    row.forecast_id === score.forecastId &&
+    row.candidate_id === score.candidateId &&
+    row.revision_id === score.revisionId &&
+    row.game === score.game &&
+    row.target_issue === score.targetIssue &&
+    Number(row.revision) === score.revision &&
+    row.slot === score.slot &&
+    row.result_key === score.resultKey &&
+    Boolean(Number(row.official)) === score.official &&
+    Boolean(Number(row.actual_matched)) === score.actualMatched &&
+    row.scored_at === score.scoredAt;
+}
+
+function deterministicScoreJson(score: ForwardLearningScoreV2) {
+  return canonicalJson(Object.fromEntries(
+    Object.entries(score).filter(([key]) => key !== "scoredAt"),
+  ));
+}
+
+function assertCompleteV2ScoreSet(
+  scores: readonly ForwardLearningScoreV2[],
+) {
+  const candidateIds = new Set(scores.map((score) => score.candidateId));
+  const results = new Set(scores.map((score) => `${score.slot}:${score.resultKey}`));
+  const official = scores.filter((score) => score.official);
+  const officialSlots = new Set(official.map((score) => score.slot));
+  if (scores.length !== 357 || candidateIds.size !== 357 || results.size !== 357 ||
+    official.length !== FORWARD_LEARNING_SLOTS.length ||
+    officialSlots.size !== FORWARD_LEARNING_SLOTS.length ||
+    !FORWARD_LEARNING_SLOTS.every((slot) => officialSlots.has(slot))) {
+    throw new Error("新版逐期学习评分必须恰好包含357候选和5项正式结果");
+  }
 }
 
 async function settleV1Snapshot(

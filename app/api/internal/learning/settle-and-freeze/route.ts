@@ -4,6 +4,8 @@ import {
   ForwardLearningPrerequisiteError,
   runStoredForwardLearningCycle,
 } from "../../../../../lib/forward-learning-service.ts";
+import { projectResolvedLearningForecasts } from "../../../../../lib/forward-learning-store.ts";
+import { readResolvedProductRecommendations } from "../../../../../lib/forward-learning-v2-store.ts";
 import { getRuntimeEnv } from "../../../../../lib/runtime-env.ts";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +53,21 @@ export async function POST(request: NextRequest) {
       game: body.game,
       asOf: body.asOf ? new Date(body.asOf) : new Date(),
     });
-    return NextResponse.json({ taskId: body.taskId, ...result, game: body.game, immutable: true }, {
+    let forecasts: unknown[] = result.forecasts;
+    if (result.status === "created" || result.status === "existing") {
+      const resolved = await readResolvedProductRecommendations(body.game, result.targetIssue);
+      if (!resolved || resolved.revision !== result.revision) {
+        throw new Error("内部任务未能读取刚冻结的权威五项");
+      }
+      forecasts = projectResolvedLearningForecasts(resolved);
+    }
+    return NextResponse.json({
+      taskId: body.taskId,
+      ...result,
+      forecasts,
+      game: body.game,
+      immutable: true,
+    }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {

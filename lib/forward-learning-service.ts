@@ -33,6 +33,7 @@ import {
 } from "./forward-learning-rollouts.ts";
 import {
   canCorrectV1Bootstrap,
+  hashAuthoritativeRecommendations,
   mapProductsToRevisionSnapshot,
 } from "./unified-product-learning.ts";
 
@@ -144,14 +145,16 @@ export async function runForwardLearningCycle(
   dependencies: ForwardLearningDependencies = DEFAULT_DEPENDENCIES,
 ): Promise<ForwardLearningCycleResult> {
   validateCycleInput(input);
-  const rollout = await resolveImmutableRollout(input.rollingRun, dependencies);
-  if (!rollout) return awaitingRollout(input.rollingRun.targetIssue);
+  let rollout = await resolveStoredOrFixedRollout(input.rollingRun, dependencies);
+  if (rollout === "unavailable") return awaitingRollout(input.rollingRun.targetIssue);
 
   const existing = await dependencies.readResolved(
     input.game,
     input.rollingRun.targetIssue,
   );
-  const prior = await findPriorResolvedV2(input, rollout, dependencies);
+  const prior = rollout
+    ? await findPriorResolvedV2(input, rollout, dependencies)
+    : null;
   let learningRun: ForwardLearningRun | null = null;
   let priorForecasts: readonly ForwardLearningForecast[] = [];
   if (prior) {
@@ -170,6 +173,7 @@ export async function runForwardLearningCycle(
   }
 
   if (existing?.source === "v2") {
+    if (!rollout) return awaitingRollout(input.rollingRun.targetIssue);
     if (learningRun) await completeLearningRun(learningRun, input.now, dependencies);
     return resolvedResult("existing", existing, learningRun?.runId ?? null, prior?.draw.issue ?? null);
   }
@@ -178,37 +182,49 @@ export async function runForwardLearningCycle(
     return resolvedResult("existing", existing, learningRun?.runId ?? null, prior?.draw.issue ?? null);
   }
 
-  const legacy = await dependencies.readLegacyHistory(
-    input.game,
-    rollout.firstUnifiedTargetIssue,
-  );
-  if (!legacy) {
-    throw new ForwardLearningPrerequisiteError("旧产品种子历史不可用");
-  }
-  const learned = await dependencies.readV2History(
-    input.game,
-    input.rollingRun.targetIssue,
-  );
-  const histories: UnifiedProductHistories = {
-    legacy: legacy.legacy,
-    learned,
-    legacyProductIds: correctionProvenanceIdentities(
-      input.rollingRun,
-      legacy.legacyProductIds,
-    ),
-  };
   const revision = existing?.source === "v1" ? 2 : 1;
-  const products = buildUnifiedRollingPatternProducts(input.rollingRun, histories);
-  const recommendations = selectMandatoryProductRecommendations(products, revision);
+  let state = await buildUnifiedState(
+    input,
+    rollout?.firstUnifiedTargetIssue ?? input.rollingRun.targetIssue,
+    revision,
+    dependencies,
+  );
+  if (!rollout) {
+    const proposed = initialRollout(
+      input.rollingRun,
+      hashAuthoritativeRecommendations(state.recommendations),
+    );
+    const persisted = await dependencies.persistRollout(proposed);
+    if (persisted === "unavailable") return awaitingRollout(input.rollingRun.targetIssue);
+    if (persisted === "conflict") {
+      const concurrent = await dependencies.readRollout(input.game);
+      if (!concurrent || !rolloutAppliesToRun(concurrent, input.rollingRun)) {
+        return awaitingRollout(input.rollingRun.targetIssue);
+      }
+      rollout = concurrent;
+      state = await buildUnifiedState(
+        input,
+        rollout.firstUnifiedTargetIssue,
+        revision,
+        dependencies,
+      );
+    } else {
+      rollout = proposed;
+    }
+  }
   const snapshot = mapProductsToRevisionSnapshot({
     run: input.rollingRun,
-    products,
-    recommendations,
+    products: state.products,
+    recommendations: state.recommendations,
     rollout,
     revision,
     reason: revision === 2 ? "correct-v1-bootstrap" : "initial",
     previousForecasts: priorForecasts,
   });
+  if (input.rollingRun.targetIssue === rollout.firstUnifiedTargetIssue &&
+    rollout.authoritativeRecommendationHash !== snapshot.recommendationHash) {
+    throw new Error("首期权威五项哈希与不可变启动记录不一致");
+  }
 
   if (existing?.source === "v1") {
     const verifiedMatchingDraw = input.draws.find((draw) =>
@@ -251,21 +267,24 @@ export async function runForwardLearningCycle(
   };
 }
 
-async function resolveImmutableRollout(
+async function resolveStoredOrFixedRollout(
   run: RollingPatternRun,
   dependencies: ForwardLearningDependencies,
-) {
+): Promise<ForwardLearningRollout | null | "unavailable"> {
   const stored = await dependencies.readRollout(run.game);
-  const rollout = isNewMacauBootstrap(run)
-    ? NEW_MACAU_2026231_ROLLOUT
-    : stored ?? initialRollout(run);
-  const persisted = await dependencies.persistRollout(rollout);
-  if (persisted === "conflict" || persisted === "unavailable") return null;
-  return rollout;
+  if (!isNewMacauBootstrap(run)) {
+    if (!stored) return null;
+    return rolloutAppliesToRun(stored, run) ? stored : "unavailable";
+  }
+  const persisted = await dependencies.persistRollout(NEW_MACAU_2026231_ROLLOUT);
+  if (persisted === "conflict" || persisted === "unavailable") return "unavailable";
+  return NEW_MACAU_2026231_ROLLOUT;
 }
 
-function initialRollout(run: RollingPatternRun): ForwardLearningRollout {
-  if (isNewMacauBootstrap(run)) return NEW_MACAU_2026231_ROLLOUT;
+function initialRollout(
+  run: RollingPatternRun,
+  authoritativeRecommendationHash: string,
+): ForwardLearningRollout {
   return {
     game: run.game,
     firstUnifiedTargetIssue: run.targetIssue,
@@ -273,9 +292,61 @@ function initialRollout(run: RollingPatternRun): ForwardLearningRollout {
     seedQueryVersion: "legacy-target-cutoff-v1",
     sourceRunId: run.runId,
     sourceDataHash: run.window.dataHash,
-    authoritativeRecommendationHash: run.window.dataHash,
+    authoritativeRecommendationHash,
     createdAt: run.frozenAt,
   };
+}
+
+async function buildUnifiedState(
+  input: {
+    game: GameId;
+    rollingRun: RollingPatternRun;
+  },
+  firstUnifiedTargetIssue: string,
+  revision: number,
+  dependencies: ForwardLearningDependencies,
+) {
+  const legacy = await dependencies.readLegacyHistory(
+    input.game,
+    firstUnifiedTargetIssue,
+  );
+  if (!legacy) {
+    throw new ForwardLearningPrerequisiteError("旧产品种子历史不可用");
+  }
+  const learned = await dependencies.readV2History(
+    input.game,
+    input.rollingRun.targetIssue,
+  );
+  const histories: UnifiedProductHistories = {
+    legacy: legacy.legacy,
+    learned,
+    legacyProductIds: legacy.legacyProductIds,
+  };
+  const products = buildUnifiedRollingPatternProducts(input.rollingRun, histories);
+  return {
+    products,
+    recommendations: selectMandatoryProductRecommendations(products, revision),
+  };
+}
+
+function rolloutAppliesToRun(
+  rollout: ForwardLearningRollout,
+  run: RollingPatternRun,
+) {
+  if (rollout.game !== run.game ||
+    compareIssues(run.targetIssue, rollout.firstUnifiedTargetIssue) < 0 ||
+    rollout.seedQueryVersion !== "legacy-target-cutoff-v1" ||
+    compareIssues(rollout.legacySeedThroughIssue, rollout.firstUnifiedTargetIssue) >= 0 ||
+    !rollout.firstUnifiedTargetIssue.trim() ||
+    !rollout.legacySeedThroughIssue.trim() ||
+    !rollout.sourceRunId.trim() ||
+    !rollout.sourceDataHash.trim() ||
+    !rollout.authoritativeRecommendationHash.trim() ||
+    !Number.isFinite(Date.parse(rollout.createdAt))) return false;
+  return run.targetIssue !== rollout.firstUnifiedTargetIssue || (
+    rollout.sourceRunId === run.runId &&
+    rollout.sourceDataHash === run.window.dataHash
+  );
 }
 
 async function findPriorResolvedV2(
@@ -302,27 +373,6 @@ async function findPriorResolvedV2(
     }
   }
   return null;
-}
-
-function correctionProvenanceIdentities(
-  run: RollingPatternRun,
-  legacyProductIds: ReadonlyMap<string, string>,
-) {
-  const identities = new Map(legacyProductIds);
-  if (!isNewMacauBootstrap(run)) return identities;
-  for (const [kind, values] of [
-    ["coverage_zodiac", ["猴"]],
-    ["coverage_tail", ["8尾"]],
-    ["coverage_zodiac_pair", ["蛇", "猴"]],
-    ["coverage_zodiac_triple", ["蛇", "马", "猴"]],
-    ["special_number", ["01"]],
-  ] as const) {
-    identities.set(
-      `${kind}:${values.join("+")}`,
-      `${run.runId}:${kind}:${values.join("-")}`,
-    );
-  }
-  return identities;
 }
 
 function validateCycleInput(input: {

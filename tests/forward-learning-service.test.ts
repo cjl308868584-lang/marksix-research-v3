@@ -60,6 +60,130 @@ test("a missing rollout never falls back to an unbounded legacy query", async ()
   assert.equal(dependencies.legacyQueryCount, 0);
 });
 
+test("a dynamic first rollout freezes the real five-item recommendation hash", async () => {
+  const persisted: ForwardLearningRollout[] = [];
+  const frozen: ForwardLearningRevisionSnapshot[] = [];
+  const dependencies = correctionDependencies();
+  const result = await runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...dependencies,
+    readResolved: async () => null,
+    readRollout: async () => null,
+    persistRollout: async (rollout) => {
+      persisted.push(rollout);
+      return "created" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+    readV2History: async () => new Map(),
+    freezeRevision: async (snapshot) => {
+      frozen.push(snapshot);
+      return "created" as const;
+    },
+  });
+
+  assert.equal(result.status, "created");
+  assert.equal(persisted.length, 1);
+  assert.equal(frozen.length, 1);
+  assert.notEqual(
+    persisted[0].authoritativeRecommendationHash,
+    persisted[0].sourceDataHash,
+  );
+  assert.equal(
+    persisted[0].authoritativeRecommendationHash,
+    frozen[0].recommendationHash,
+  );
+});
+
+test("a concurrent dynamic rollout is reread and recomputed from stored identity", async () => {
+  let stored: ForwardLearningRollout | null = null;
+  let rolloutReads = 0;
+  let legacyReads = 0;
+  const frozen: ForwardLearningRevisionSnapshot[] = [];
+  const dependencies = correctionDependencies();
+  const result = await runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...dependencies,
+    readResolved: async () => null,
+    readRollout: async () => {
+      rolloutReads += 1;
+      return stored;
+    },
+    persistRollout: async (rollout) => {
+      stored = { ...rollout };
+      return "conflict" as const;
+    },
+    readLegacyHistory: async () => {
+      legacyReads += 1;
+      return authoritativeLegacyHistories("2026232");
+    },
+    readV2History: async () => new Map(),
+    freezeRevision: async (snapshot) => {
+      frozen.push(snapshot);
+      return "created" as const;
+    },
+  });
+
+  assert.equal(result.status, "created");
+  assert.equal(rolloutReads, 2);
+  assert.equal(legacyReads, 2);
+  assert.ok(stored);
+  assert.equal(frozen.length, 1);
+  assert.equal(
+    frozen[0].rollout.authoritativeRecommendationHash,
+    frozen[0].recommendationHash,
+  );
+});
+
+test("a concurrent dynamic rollout with an invalid stored cutoff fails closed", async () => {
+  let stored: ForwardLearningRollout | null = null;
+  let freezeCount = 0;
+  const result = await runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...correctionDependencies(),
+    readResolved: async () => null,
+    readRollout: async () => stored,
+    persistRollout: async (rollout) => {
+      stored = {
+        ...rollout,
+        legacySeedThroughIssue: rollout.firstUnifiedTargetIssue,
+      };
+      return "conflict" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+    readV2History: async () => new Map(),
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  });
+
+  assert.equal(result.status, "awaiting_rollout");
+  assert.equal(freezeCount, 0);
+});
+
+test("bootstrap never synthesizes missing legacy product provenance", async () => {
+  const histories = authoritativeLegacyHistories();
+  histories.legacyProductIds.delete("coverage_zodiac:猴");
+  let freezeCount = 0;
+
+  await assert.rejects(() => runForwardLearningCycle(correctionInput(), {
+    ...correctionDependencies(),
+    readLegacyHistory: async () => histories,
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  }), /权威五项哈希/);
+
+  assert.equal(freezeCount, 0);
+});
+
 test("a conflicting bootstrap rollout is rejected before legacy history", async () => {
   let legacyQueryCount = 0;
   const result = await runForwardLearningCycle(correctionInput(), {

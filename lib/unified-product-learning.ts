@@ -197,6 +197,12 @@ export function canonicalRecommendationPayload(
     })));
 }
 
+export function hashAuthoritativeRecommendations(
+  recommendations: readonly AuthoritativeRecommendation[],
+) {
+  return sha256Hex(canonicalRecommendationPayload(recommendations));
+}
+
 export function canonicalRevisionPayload(
   snapshot: ForwardLearningRevisionSnapshot,
 ): string {

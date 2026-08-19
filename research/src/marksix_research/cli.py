@@ -43,6 +43,8 @@ RECOMMENDATION_FIELDS = (
     "netOdds",
     "breakEvenProbability",
     "expectedValue",
+    "learningSettledCount",
+    "learningHitCount",
 )
 UNIFIED_SELECTION_POLICY = "rolling-product-ev-v2"
 PATTERN_REVISION_REPAIR_ERROR = "权威五项与冻结规律运行不一致。"

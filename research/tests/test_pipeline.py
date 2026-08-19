@@ -1,6 +1,7 @@
 import json
 from io import BytesIO
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 from urllib.error import HTTPError
@@ -18,6 +19,28 @@ from marksix_research.cli import capture_task_id
 
 
 class ResearchPipelineTest(unittest.TestCase):
+    def test_signed_internal_route_payload_satisfies_the_python_capture_contract(self):
+        root = Path(__file__).resolve().parents[2]
+        rendered = subprocess.run(
+            ["node", "tests/support/render-internal-forward-learning-response.ts"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(rendered.stdout)
+
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            result = cli.capture_forward_learning(
+                "https://example.test",
+                "secret",
+                "hk",
+                "2099001",
+            )
+
+        self.assertEqual(result["revision"], 1)
+        self.assertEqual(result["forecastCount"], 5)
+
     def test_update_gate_only_runs_when_verified_result_reaches_frozen_target(self):
         cases = (
             ("2026216", True, "2026217", False, "forecast_ahead"),
@@ -457,6 +480,23 @@ class ResearchPipelineTest(unittest.TestCase):
         responses = self._v2_health_responses()
         responses.patterns["recommendations"][0]["resultKey"] = "猴"
         responses.learning["forecasts"][0]["resultKey"] = "马"
+        with patch.object(cli, "fetch_json", side_effect=responses.sequence):
+            with self.assertRaisesRegex(RuntimeError, "recommendation mismatch"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_rejects_learning_counter_drift(self):
+        responses = self._v2_health_responses()
+        for recommendation in responses.patterns["recommendations"]:
+            recommendation["learningSettledCount"] = 4
+            recommendation["learningHitCount"] = 2
+        for forecast in responses.learning["forecasts"]:
+            forecast["learningSettledCount"] = 4
+            forecast["learningHitCount"] = 2
+        responses.learning["forecasts"][0]["learningHitCount"] = 3
+
         with patch.object(cli, "fetch_json", side_effect=responses.sequence):
             with self.assertRaisesRegex(RuntimeError, "recommendation mismatch"):
                 cli.verify_production_health(
@@ -999,6 +1039,8 @@ def _resolved_recommendation_payloads(target_issue, revision=2):
             "netOdds": net_odds,
             "breakEvenProbability": 1 / (net_odds + 1),
             "expectedValue": learned_probability * net_odds - (1 - learned_probability),
+            "learningSettledCount": 2,
+            "learningHitCount": 1,
             "product": {
                 "targetIssue": target_issue,
             },

@@ -267,6 +267,77 @@ test("settlement retry cannot duplicate any candidate or official score", async 
   assert.equal(first.scores.filter((item) => item.official).length, 5);
 });
 
+test("a completed settlement rejects a retry with a different draw", async () => {
+  assert.equal(await store.freezeForwardLearningRevision(revisionSnapshot("2026232", 1)), "created");
+  await store.settleResolvedForwardSnapshot(
+    "new_macau",
+    verifiedDraw("2026232"),
+    "2026-08-20T14:00:00.000Z",
+  );
+
+  await assert.rejects(
+    store.settleResolvedForwardSnapshot(
+      "new_macau",
+      differentVerifiedDraw("2026232"),
+      "2026-08-20T14:01:00.000Z",
+    ),
+    /评分.*冲突/,
+  );
+  assert.equal(db.count("forward_learning_revision_scores"), 357);
+});
+
+test("a partial settlement from draw A rejects repair with draw B", async () => {
+  assert.equal(await store.freezeForwardLearningRevision(revisionSnapshot("2026232", 1)), "created");
+  await store.settleResolvedForwardSnapshot(
+    "new_macau",
+    verifiedDraw("2026232"),
+    "2026-08-20T14:00:00.000Z",
+  );
+  db.database.exec(
+    `DELETE FROM forward_learning_revision_scores
+     WHERE rowid NOT IN (
+       SELECT rowid FROM forward_learning_revision_scores ORDER BY slot, result_key LIMIT 37
+     )`,
+  );
+
+  await assert.rejects(
+    store.settleResolvedForwardSnapshot(
+      "new_macau",
+      differentVerifiedDraw("2026232"),
+      "2026-08-20T14:01:00.000Z",
+    ),
+    /评分.*冲突/,
+  );
+  assert.equal(db.count("forward_learning_revision_scores"), 37);
+});
+
+test("an existing deterministic score field conflict fails closed", async () => {
+  assert.equal(await store.freezeForwardLearningRevision(revisionSnapshot("2026232", 1)), "created");
+  await store.settleResolvedForwardSnapshot(
+    "new_macau",
+    verifiedDraw("2026232"),
+    "2026-08-20T14:00:00.000Z",
+  );
+  const row = db.database.prepare(
+    `SELECT score_id, score_json FROM forward_learning_revision_scores
+     ORDER BY slot, result_key LIMIT 1`,
+  ).get() as { score_id: string; score_json: string };
+  const score = JSON.parse(row.score_json) as { probability: number };
+  score.probability += 0.01;
+  db.database.prepare(
+    `UPDATE forward_learning_revision_scores SET score_json = ? WHERE score_id = ?`,
+  ).run(JSON.stringify(score), row.score_id);
+
+  await assert.rejects(
+    store.settleResolvedForwardSnapshot(
+      "new_macau",
+      verifiedDraw("2026232"),
+      "2026-08-20T14:01:00.000Z",
+    ),
+    /评分.*冲突/,
+  );
+});
+
 test("a rollout cutoff is immutable per game", async () => {
   const rollout = newMacauRollout();
 
@@ -318,6 +389,7 @@ test("partial settlement is repaired without changing already frozen scores", as
 
   assert.equal(repaired.status, "repaired");
   assert.equal(db.count("forward_learning_revision_scores"), 357);
+  assert.equal(repaired.scores.filter((score) => score.official).length, 5);
   const preserved = db.database.prepare(
     `SELECT score_json FROM forward_learning_revision_scores WHERE candidate_id = ?`,
   ).get(firstCandidateId) as { score_json: string };
@@ -347,6 +419,25 @@ test("candidate history counts only the highest committed revision for each issu
   const history = await store.readUnifiedCandidateHistory("new_macau", "2026233");
 
   assert.equal(history.get("coverage_zodiac:猴")?.settledCount, 1);
+});
+
+test("candidate history fails closed on a corrupt highest committed manifest", async () => {
+  const snapshot = revisionSnapshot("2026232", 1);
+  assert.equal(await store.freezeForwardLearningRevision(snapshot), "created");
+  await store.settleResolvedForwardSnapshot(
+    "new_macau",
+    verifiedDraw("2026232"),
+    "2026-08-20T14:00:00.000Z",
+  );
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = '{broken'
+     WHERE revision_id = ?`,
+  ).run(snapshot.revisionId);
+
+  await assert.rejects(
+    store.readUnifiedCandidateHistory("new_macau", "2026233"),
+    /完整性/,
+  );
 });
 
 async function applyMigration(database: SqliteD1, relativePath: string) {
@@ -577,6 +668,14 @@ function verifiedDraw(issue: string): Draw {
     special: 7,
     source: "fixture",
     verified: true,
+  };
+}
+
+function differentVerifiedDraw(issue: string): Draw {
+  return {
+    ...verifiedDraw(issue),
+    numbers: [8, 9, 10, 11, 12, 13],
+    special: 14,
   };
 }
 

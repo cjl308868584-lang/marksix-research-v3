@@ -3,6 +3,7 @@ import { getZodiac } from "./zodiac.ts";
 import { brierLoss, binaryLogLoss } from "./forward-learning-math.ts";
 import type { ForwardResultHistory } from "./forward-learning-engine.ts";
 import {
+  readValidatedHighestCommittedScores,
   readResolvedProductRecommendations,
   readResolvedForwardSnapshot,
   settleResolvedForwardSnapshot,
@@ -238,6 +239,7 @@ export function projectResolvedLearningForecasts(
     targetIssue: forecast.targetIssue,
     label: forecast.label,
     frozenAt: forecast.frozenAt,
+    selectionPolicy: forecast.selectionPolicy,
     explanation: [...forecast.explanation],
   }));
 }
@@ -425,27 +427,7 @@ export async function readForwardLearningReviews(
 }
 
 async function readResolvedV2Scores(game: GameId, officialOnly: boolean) {
-  const db = runtime.__marksixD1;
-  if (!db) return [];
-  const rows = await db.prepare(
-    `SELECT scores.score_json
-     FROM forward_learning_revision_scores scores
-     INNER JOIN forward_learning_revisions revisions
-       ON revisions.revision_id = scores.revision_id
-      AND revisions.status = 'committed'
-     INNER JOIN (
-       SELECT game, target_issue, MAX(revision) AS revision
-       FROM forward_learning_revisions
-       WHERE status = 'committed' AND game = ?
-       GROUP BY game, target_issue
-     ) latest
-       ON latest.game = scores.game
-      AND latest.target_issue = scores.target_issue
-      AND latest.revision = scores.revision
-     WHERE scores.game = ? ${officialOnly ? "AND scores.official = 1" : ""}
-     ORDER BY CAST(scores.target_issue AS INTEGER) DESC, scores.slot, scores.result_key`,
-  ).bind(game, game).all<JsonRow>();
-  const scores = rowsAs<ForwardLearningScoreV2>(rows.results, "score_json");
+  const scores = await readValidatedHighestCommittedScores(game, { officialOnly });
   if (officialOnly) {
     const issues = new Set(scores.map((score) => score.targetIssue));
     for (const issue of issues) {

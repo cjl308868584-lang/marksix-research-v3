@@ -207,6 +207,23 @@ test("performance rejects a partially written resolved-v2 official denominator",
   assert.equal(response.status, 503);
 });
 
+test("reviews and performance fail closed on a corrupt highest committed manifest", async () => {
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = '{broken'
+     WHERE revision_id = 'new_macau:2026231:r2'`,
+  ).run();
+
+  const [reviews, performance] = await Promise.all([
+    getJson(reviewsRoute, "/api/learning/reviews?game=new_macau&limit=30"),
+    getJson(performanceRoute, "/api/learning/performance?game=new_macau"),
+  ]);
+
+  assert.equal(reviews.response.status, 503);
+  assert.equal(performance.response.status, 503);
+  assert.equal(reviews.response.headers.get("cache-control"), "private, no-store");
+  assert.equal(performance.response.headers.get("cache-control"), "private, no-store");
+});
+
 test("forecast reserves 404 for a genuinely missing committed revision", async () => {
   db.database.exec("DELETE FROM forward_learning_revisions");
 
@@ -349,7 +366,16 @@ function seedRevision(database: DatabaseSync, targetIssue: string, revision: num
   const revisionId = `new_macau:${targetIssue}:r${revision}`;
   const sourceRunId = marker === "resolved" ? `pattern:${targetIssue}` : `run-${marker}`;
   const dataVersion = marker === "resolved" ? "data-v2" : `data-${marker}`;
-  const manifest = { revisionId, game: "new_macau", targetIssue, revision, status: "committed", sourceRunId, dataVersion };
+  const manifest = {
+    revisionId,
+    game: "new_macau",
+    targetIssue,
+    revision,
+    status: "committed",
+    selectionPolicy: "rolling-product-ev-v2",
+    sourceRunId,
+    dataVersion,
+  };
   database.prepare(`INSERT INTO forward_learning_revisions VALUES (?, 'new_macau', ?, ?, 'committed', ?)`)
     .run(revisionId, targetIssue, revision, JSON.stringify(manifest));
   for (const [index, [slot, resultKey, values]] of OFFICIAL.entries()) {
