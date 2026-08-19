@@ -391,8 +391,9 @@ function finalizeProduct(
   const estimatedProbability = posteriorFromHistory(legacySeedProbability, learnedHistory);
   const netOdds = netOddsForProduct(input.kind, input.values);
   const expectedValue = expectedUnitValue(estimatedProbability, netOdds);
-  const sourceProductId = histories?.legacyProductIds.has(historyKey)
-    ? histories.legacyProductIds.get(historyKey) ?? null
+  const legacyProductId = histories?.legacyProductIds.get(historyKey);
+  const sourceProductId = isNonBlankProductId(legacyProductId)
+    ? legacyProductId
     : null;
   return {
     runId: run.runId,
@@ -498,8 +499,7 @@ function buildAuthoritativeRecommendation(
   revision: number,
 ): AuthoritativeRecommendation {
   const hasLedgerSource = product.sourceKind === "ledger" &&
-    product.sourceProductId !== null &&
-    product.sourceProductId !== undefined;
+    isNonBlankProductId(product.sourceProductId);
   const sourceKind = hasLedgerSource ? "ledger" : "derived_baseline";
   const patternProbability = product.patternProbability ?? product.estimatedProbability;
   const legacySeedProbability = product.legacySeedProbability ?? patternProbability;
@@ -532,6 +532,10 @@ function buildAuthoritativeRecommendation(
 
 function asciiCompare(left: string, right: string) {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function isNonBlankProductId(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }
 
 function definitionHash(kind: RollingPatternProductKind, values: readonly string[]) {

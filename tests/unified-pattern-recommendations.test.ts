@@ -287,6 +287,37 @@ test("authoritative recommendations never infer ledger provenance from v1 produc
   assert.ok(selected.every((item) => item.sourceProductId === null));
 });
 
+test("blank legacy product ids never establish ledger provenance", () => {
+  for (const sourceProductId of ["", " \t "]) {
+    const histories = {
+      legacy: new Map(),
+      learned: new Map(),
+      legacyProductIds: new Map([["coverage_zodiac:猴", sourceProductId]]),
+    };
+    const products = buildUnifiedRollingPatternProducts(runFixtureWithMonkey(), histories);
+    const monkey = findProduct(products, "coverage_zodiac", "猴");
+    const selectedMonkey = selectMandatoryProductRecommendations(products, 4)
+      .find((item) => item.kind === "coverage_zodiac");
+
+    assert.equal(monkey.sourceKind, "derived_baseline");
+    assert.equal(monkey.sourceProductId, null);
+    assert.equal(selectedMonkey?.sourceKind, "derived_baseline");
+    assert.equal(selectedMonkey?.sourceProductId, null);
+  }
+});
+
+test("authoritative recommendations reject blank v1 source ids", () => {
+  const v1Products = allNegativeProductFixture().map((product) => ({
+    ...product,
+    sourceKind: "ledger" as const,
+    sourceProductId: " \t ",
+  }));
+  const selected = selectMandatoryProductRecommendations(v1Products, 5);
+
+  assert.ok(selected.every((item) => item.sourceKind === "derived_baseline"));
+  assert.ok(selected.every((item) => item.sourceProductId === null));
+});
+
 test("legacy seed and new learning are applied once in separate stages", () => {
   const histories = historiesFixture({
     key: "coverage_zodiac:猴",
