@@ -58,7 +58,7 @@ export type ForwardLearningDependencies = {
   ) => Promise<{
     legacy: Map<string, ProductHistoryCounts>;
     legacyProductIds: Map<string, string>;
-  }>;
+  } | null>;
   readV2History: (
     game: GameId,
     beforeIssue: string,
@@ -151,7 +151,7 @@ export async function runForwardLearningCycle(
     input.game,
     input.rollingRun.targetIssue,
   );
-  const prior = await findPriorResolvedV2(input, dependencies);
+  const prior = await findPriorResolvedV2(input, rollout, dependencies);
   let learningRun: ForwardLearningRun | null = null;
   let priorForecasts: readonly ForwardLearningForecast[] = [];
   if (prior) {
@@ -182,6 +182,9 @@ export async function runForwardLearningCycle(
     input.game,
     rollout.firstUnifiedTargetIssue,
   );
+  if (!legacy) {
+    throw new ForwardLearningPrerequisiteError("旧产品种子历史不可用");
+  }
   const learned = await dependencies.readV2History(
     input.game,
     input.rollingRun.targetIssue,
@@ -281,12 +284,14 @@ async function findPriorResolvedV2(
     draws: Draw[];
     rollingRun: RollingPatternRun;
   },
+  rollout: ForwardLearningRollout,
   dependencies: ForwardLearningDependencies,
 ) {
   const verified = [...input.draws]
     .filter((draw) =>
       draw.game === input.game && draw.verified &&
-      compareIssues(draw.issue, input.rollingRun.targetIssue) < 0
+      compareIssues(draw.issue, input.rollingRun.targetIssue) < 0 &&
+      compareIssues(draw.issue, rollout.firstUnifiedTargetIssue) >= 0
     )
     .sort((left, right) => compareIssues(right.issue, left.issue));
   for (const draw of verified) {

@@ -27,6 +27,7 @@ class FakePatternD1 {
   productScores = new Map<string, { run_id: string; product_id: string; score_json: string }>();
   currentTargets = new Map<string, string>();
   batchSizes: number[] = [];
+  failLegacyHistoryQuery = false;
 
   prepare(sql: string) {
     let values: unknown[] = [];
@@ -123,6 +124,7 @@ class FakePatternD1 {
       },
       all: async <T>() => {
         if (sql.includes("CAST(l.target_issue AS INTEGER) < CAST(? AS INTEGER)")) {
+          if (this.failLegacyHistoryQuery) throw new Error("legacy history query failed");
           const game = String(values[0]);
           const cutoff = Number(values[1]);
           return {
@@ -205,7 +207,7 @@ type StoreModule = {
   ): Promise<{
     legacy: Map<string, { settledCount: number; hitCount: number }>;
     legacyProductIds: Map<string, string>;
-  }>;
+  } | null>;
 };
 
 let server: ViteDevServer;
@@ -314,11 +316,24 @@ test("legacy seed aggregation excludes the rollout target and later rows", async
 
   const history = await store.readBoundedLegacyProductHistory("new_macau", "2026231");
 
+  assert.ok(history);
   assert.deepEqual(history.legacy.get("coverage_zodiac:猴"), {
     settledCount: 1,
     hitCount: 1,
   });
   assert.equal(history.legacyProductIds.get("coverage_zodiac:猴"), before.productId);
+});
+
+test("legacy history distinguishes a successful zero result from query failure", async () => {
+  const empty = await store.readBoundedLegacyProductHistory("new_macau", "2026231");
+  assert.ok(empty);
+  assert.equal(empty.legacy.size, 0);
+
+  db.failLegacyHistoryQuery = true;
+  assert.equal(
+    await store.readBoundedLegacyProductHistory("new_macau", "2026231"),
+    null,
+  );
 });
 
 test("freezes result-level value products and repairs missing ledger children idempotently", async () => {

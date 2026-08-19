@@ -181,14 +181,14 @@ export async function readBoundedLegacyProductHistory(
 ): Promise<{
   legacy: Map<string, ProductHistoryCounts>;
   legacyProductIds: Map<string, string>;
-}> {
+} | null> {
   const empty = () => ({
     legacy: new Map<string, ProductHistoryCounts>(),
     legacyProductIds: new Map<string, string>(),
   });
-  if (!await ensureRollingPatternStore()) return empty();
+  if (!await ensureRollingPatternStore()) return null;
   const db = runtime.__marksixD1;
-  if (!db) return empty();
+  if (!db) return null;
   try {
     const rows = await db.prepare(
       `SELECT l.product_json, s.score_json
@@ -222,7 +222,7 @@ export async function readBoundedLegacyProductHistory(
     }
     return result;
   } catch {
-    return empty();
+    return null;
   }
 }
 

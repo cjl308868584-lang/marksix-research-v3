@@ -1,6 +1,7 @@
 import type { Draw, GameId } from "./lottery.ts";
 import { compareForwardLearningExpectedValue } from "./forward-learning-engine.ts";
 import type {
+  ForwardLearningCandidate,
   ForwardLearningCandidateV2,
   ForwardLearningForecast,
   ForwardLearningForecastV2,
@@ -78,14 +79,25 @@ export function canCorrectV1Bootstrap(
     )) {
     return reject("v1候选快照不完整");
   }
+  const candidatesById = new Map(existing.candidates.map((candidate) => [
+    candidate.candidateId,
+    candidate,
+  ]));
   const officialSlots = new Set(existing.forecasts.map((forecast) => forecast.slot));
+  const forecastIds = new Set(existing.forecasts.map((forecast) => forecast.forecastId));
   if (existing.forecasts.length !== FORWARD_LEARNING_SLOTS.length ||
     officialSlots.size !== FORWARD_LEARNING_SLOTS.length ||
+    forecastIds.size !== FORWARD_LEARNING_SLOTS.length ||
     !FORWARD_LEARNING_SLOTS.every((slot) => officialSlots.has(slot)) ||
-    existing.forecasts.some((forecast) =>
-      !forecast.official || forecast.game !== input.game ||
-      forecast.targetIssue !== input.targetIssue
-    )) {
+    existing.forecasts.some((forecast) => {
+      const candidate = candidatesById.get(forecast.candidateId);
+      return !candidate || !forecast.official || forecast.rank !== 1 ||
+        forecast.game !== input.game ||
+        forecast.targetIssue !== input.targetIssue ||
+        forecast.forecastId !== `forecast:${forecast.candidateId}` ||
+        canonicalJson(v1CandidateProjection(forecast)) !==
+          canonicalJson(v1CandidateProjection(candidate));
+    })) {
     return reject("v1正式五槽位不完整");
   }
   if (!Number.isInteger(input.scoreCount) || input.scoreCount !== 0) {
@@ -188,7 +200,7 @@ export function canonicalRecommendationPayload(
 export function canonicalRevisionPayload(
   snapshot: ForwardLearningRevisionSnapshot,
 ): string {
-  return JSON.stringify({
+  return canonicalJson({
     revision: {
       revisionId: snapshot.revisionId,
       game: snapshot.game,
@@ -434,6 +446,49 @@ function forecastProjection(forecast: ForwardLearningForecastV2) {
     topAlternative: forecast.topAlternative,
     explanation: forecast.explanation,
   };
+}
+
+function v1CandidateProjection(
+  candidate: ForwardLearningCandidate,
+) {
+  return {
+    candidateId: candidate.candidateId,
+    game: candidate.game,
+    targetIssue: candidate.targetIssue,
+    slot: candidate.slot,
+    resultKey: candidate.resultKey,
+    label: candidate.label,
+    values: candidate.values,
+    baselineProbability: candidate.baselineProbability,
+    expertProbabilities: candidate.expertProbabilities,
+    expertWeights: candidate.expertWeights,
+    finalProbability: candidate.finalProbability,
+    netOdds: candidate.netOdds,
+    rawRuleCount: candidate.rawRuleCount,
+    evidenceClusterCount: candidate.evidenceClusterCount,
+    ruleContributions: candidate.ruleContributions,
+    forwardSettledCount: candidate.forwardSettledCount,
+    forwardHitCount: candidate.forwardHitCount,
+    forwardBrierSkill: candidate.forwardBrierSkill,
+    frozenAt: candidate.frozenAt,
+    modelVersion: candidate.modelVersion,
+    dataVersion: candidate.dataVersion,
+  };
+}
+
+function canonicalJson(value: unknown) {
+  return JSON.stringify(canonicalize(value));
+}
+
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(Object.keys(value as Record<string, unknown>)
+    .sort(asciiCompare)
+    .map((key) => [
+      key,
+      canonicalize((value as Record<string, unknown>)[key]),
+    ]));
 }
 
 function slotIndex(slot: ForwardLearningSlot) {

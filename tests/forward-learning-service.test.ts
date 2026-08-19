@@ -12,7 +12,10 @@ import type {
   ForwardLearningRollout,
   ResolvedForwardSnapshot,
 } from "../lib/forward-learning-types.ts";
-import { runForwardLearningCycle } from "../lib/forward-learning-service.ts";
+import {
+  ForwardLearningPrerequisiteError,
+  runForwardLearningCycle,
+} from "../lib/forward-learning-service.ts";
 import {
   NEW_MACAU_2026231_AUTHORITATIVE_HASH,
   NEW_MACAU_2026231_ROLLOUT,
@@ -105,6 +108,44 @@ test("a v1-only target outside the checked bootstrap is never upgraded", async (
   assert.equal(result.revision, 1);
   assert.equal(legacyQueryCount, 0);
   assert.equal(freezeCount, 0);
+});
+
+test("unavailable legacy history fails closed before revision freeze", async () => {
+  let freezeCount = 0;
+  await assert.rejects(() => runForwardLearningCycle(correctionInput(), {
+    ...correctionDependencies(),
+    readLegacyHistory: async () => null,
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  }), (error) => {
+    assert.ok(error instanceof ForwardLearningPrerequisiteError);
+    assert.equal(error.message, "旧产品种子历史不可用");
+    return true;
+  });
+  assert.equal(freezeCount, 0);
+});
+
+test("prior v2 lookup never reads issues before the rollout boundary", async () => {
+  let resolvedReadCount = 0;
+  const dependencies = correctionDependencies();
+  const result = await runForwardLearningCycle({
+    ...correctionInput(),
+    draws: Array.from({ length: 40 }, (_, index) => ({
+      ...nextIssueInput().draws[0],
+      issue: String(2026190 + index),
+    })),
+  }, {
+    ...dependencies,
+    readResolved: async (game, issue) => {
+      resolvedReadCount += 1;
+      return dependencies.readResolved(game, issue);
+    },
+  });
+
+  assert.equal(result.status, "created");
+  assert.equal(resolvedReadCount, 1);
 });
 
 function correctionInput() {
@@ -230,6 +271,18 @@ function dependenciesWithoutRollout() {
 
 function correctionMismatchFixtures() {
   const base = correctionGateInput();
+  const firstForecast = base.existing.forecasts[0];
+  const mutateFirstForecast = (
+    changed: Partial<typeof firstForecast>,
+  ) => ({
+    ...base,
+    existing: {
+      ...base.existing,
+      forecasts: base.existing.forecasts.map((forecast, index) =>
+        index === 0 ? { ...forecast, ...changed } : forecast
+      ),
+    },
+  });
   const mutations = [
     { name: "game", value: { ...base, game: "hk" as const } },
     { name: "target issue", value: { ...base, targetIssue: "2026232" } },
@@ -242,6 +295,14 @@ function correctionMismatchFixtures() {
     { name: "duplicate v1 candidate", value: { ...base, existing: { ...base.existing, candidates: base.existing.candidates.map((item, index) => index === 1 ? base.existing.candidates[0] : item) } } },
     { name: "v1 source", value: { ...base, existing: { ...base.existing, source: "v2" as const } } },
     { name: "duplicate official slot", value: { ...base, existing: { ...base.existing, forecasts: base.existing.forecasts.map((item, index) => index === 1 ? { ...item, slot: "coverage_zodiac" as const } : item) } } },
+    { name: "forecast candidate does not exist", value: mutateFirstForecast({ candidateId: "candidate:v1:missing" }) },
+    { name: "forecast id is not derived from candidate", value: mutateFirstForecast({ forecastId: "forecast:v1:unrelated" }) },
+    { name: "forecast rank is not the frozen official rank", value: mutateFirstForecast({ rank: 2 as 1 }) },
+    { name: "forecast result is not the candidate result", value: mutateFirstForecast({ resultKey: "猪", values: ["猪"], label: "猪" }) },
+    { name: "forecast frozen time differs from candidate", value: mutateFirstForecast({ frozenAt: "2026-08-19T12:00:01.000Z" }) },
+    { name: "forecast data version differs from candidate", value: mutateFirstForecast({ dataVersion: "changed" }) },
+    { name: "forecast model identity differs from candidate", value: mutateFirstForecast({ modelVersion: "changed" }) },
+    { name: "forecast frozen probability differs from candidate", value: mutateFirstForecast({ finalProbability: firstForecast.finalProbability + 0.01 }) },
     { name: "score", value: { ...base, scoreCount: 1 } },
     { name: "verified draw", value: { ...base, verifiedMatchingDraw: { ...nextIssueInput().draws[0], issue: "2026231" } } },
     { name: "deadline passed", value: { ...base, now: new Date("2026-08-19T13:32:00.000Z") } },

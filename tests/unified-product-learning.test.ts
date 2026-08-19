@@ -167,6 +167,39 @@ test("the revision hash covers every frozen candidate compatibility field", () =
   );
 });
 
+test("canonical revision bytes ignore nested object insertion order", () => {
+  const fixture = authoritativeRunAndProductsFixture();
+  const snapshot = mapProductsToRevisionSnapshot({
+    ...fixture,
+    rollout: NEW_MACAU_2026231_ROLLOUT,
+    revision: 2,
+    reason: "correct-v1-bootstrap",
+  });
+  const reordered = {
+    ...snapshot,
+    candidates: snapshot.candidates.map((candidate, index) => index === 0
+      ? {
+          ...candidate,
+          expertProbabilities: {
+            forward: candidate.expertProbabilities.forward,
+            rules30: candidate.expertProbabilities.rules30,
+            baseline: candidate.expertProbabilities.baseline,
+          },
+          expertWeights: {
+            forward: candidate.expertWeights.forward,
+            rules30: candidate.expertWeights.rules30,
+            baseline: candidate.expertWeights.baseline,
+          },
+        }
+      : candidate),
+  };
+
+  assert.equal(
+    canonicalRevisionPayload(reordered),
+    canonicalRevisionPayload(snapshot),
+  );
+});
+
 function authoritativeRunAndProductsFixture(): {
   run: RollingPatternRun;
   products: RollingPatternProduct[];
