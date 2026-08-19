@@ -56,6 +56,7 @@ let patternsRoute: Route;
 let forecastRoute: Route;
 let reviewsRoute: Route;
 let performanceRoute: Route;
+let modelRoute: Route;
 let db: SqliteD1;
 const runtime = globalThis as typeof globalThis & {
   __marksixD1?: unknown;
@@ -72,11 +73,12 @@ before(async () => {
     appType: "custom",
     logLevel: "silent",
   });
-  [patternsRoute, forecastRoute, reviewsRoute, performanceRoute] = await Promise.all([
+  [patternsRoute, forecastRoute, reviewsRoute, performanceRoute, modelRoute] = await Promise.all([
     server.ssrLoadModule("/app/api/research/patterns/route.ts") as Promise<Route>,
     server.ssrLoadModule("/app/api/learning/forecast/route.ts") as Promise<Route>,
     server.ssrLoadModule("/app/api/learning/reviews/route.ts") as Promise<Route>,
     server.ssrLoadModule("/app/api/learning/performance/route.ts") as Promise<Route>,
+    server.ssrLoadModule("/app/api/learning/model/route.ts") as Promise<Route>,
   ]);
 });
 
@@ -203,6 +205,63 @@ test("performance rejects a partially written resolved-v2 official denominator",
   );
 
   assert.equal(response.status, 503);
+});
+
+test("forecast reserves 404 for a genuinely missing committed revision", async () => {
+  db.database.exec("DELETE FROM forward_learning_revisions");
+
+  const { response } = await getJson(
+    forecastRoute,
+    "/api/learning/forecast?game=new_macau&issue=2026231",
+  );
+
+  assert.equal(response.status, 404);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("forecast returns no-store 503 when a committed revision manifest is corrupt", async () => {
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = '{broken'
+     WHERE revision_id = 'new_macau:2026231:r2'`,
+  ).run();
+
+  const { response } = await getJson(
+    forecastRoute,
+    "/api/learning/forecast?game=new_macau&issue=2026231",
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("model returns no-store 503 for corrupt or incomplete resolved-v2 learning", async () => {
+  db.database.prepare(
+    `DELETE FROM forward_learning_revision_forecasts
+     WHERE revision_id = 'new_macau:2026231:r2' AND slot = 'special_number'`,
+  ).run();
+
+  const { response } = await getJson(
+    modelRoute,
+    "/api/learning/model?game=new_macau",
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
+});
+
+test("model does not turn a corrupt committed manifest into zero adjustments", async () => {
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = '{broken'
+     WHERE revision_id = 'new_macau:2026231:r2'`,
+  ).run();
+
+  const { response } = await getJson(
+    modelRoute,
+    "/api/learning/model?game=new_macau",
+  );
+
+  assert.equal(response.status, 503);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
 async function getJson(route: Route, path: string) {

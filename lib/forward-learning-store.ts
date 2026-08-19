@@ -412,7 +412,7 @@ export async function readForwardLearningReviews(
     const revision = issueScores[0].revision;
     return [{
       run: { ...run, revision, revisionSource: "resolved-v2" as const },
-      scores: issueScores,
+      scores: issueScores.map((score) => ({ ...score, official: true as const })),
       modelBefore: run.modelVersionBefore
         ? models.filter((state) => state.version === run.modelVersionBefore)
         : [],

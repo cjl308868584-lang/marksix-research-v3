@@ -52,6 +52,9 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.doesNotMatch(html, /三路候选策略/);
   assert.match(html, /历史开奖记录/);
   assert.match(html, /不构成投注建议/);
+  assert.match(html, /每期固定五项/);
+  assert.match(html, /产品学习/);
+  assert.doesNotMatch(html, /每期固定四项/);
   assert.doesNotMatch(html, /codex-preview|Building your site|Your site is taking shape/i);
 });
 

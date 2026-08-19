@@ -38,6 +38,13 @@ export type ResolvedProductRecommendations = {
   forecasts: ForwardLearningForecastV2[];
 };
 
+export class ForwardLearningDataIntegrityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForwardLearningDataIntegrityError";
+  }
+}
+
 export async function ensureForwardLearningV2Store(): Promise<void> {
   const db = runtime.__marksixD1;
   if (!db) return;
@@ -309,14 +316,20 @@ export async function readResolvedProductRecommendations(
   const targetIssue = issue ?? await latestV2TargetIssue(db, game);
   if (!targetIssue) return null;
   const row = await db.prepare(
-    `SELECT revision_id, revision_json FROM forward_learning_revisions
+    `SELECT revision_id, game, target_issue, revision, status, revision_json
+     FROM forward_learning_revisions
      WHERE game = ? AND target_issue = ? AND status = 'committed'
      ORDER BY revision DESC LIMIT 1`,
   ).bind(game, targetIssue).first<JsonRow>();
+  if (!row) return null;
   const revision = parseJson<ForwardLearningRevision>(row?.revision_json);
-  if (!revision || revision.status !== "committed" || revision.game !== game ||
-    revision.targetIssue !== targetIssue || revision.revisionId !== row?.revision_id) {
-    return null;
+  if (!revision || row.status !== "committed" || row.game !== game ||
+    row.target_issue !== targetIssue || Number(row.revision) !== revision.revision ||
+    revision.status !== "committed" || revision.game !== row.game ||
+    revision.targetIssue !== row.target_issue || revision.revisionId !== row.revision_id) {
+    throw new ForwardLearningDataIntegrityError(
+      "resolved-v2 committed revision manifest完整性校验失败",
+    );
   }
   const forecastRows = await db.prepare(
     `SELECT forecast_json FROM forward_learning_revision_forecasts

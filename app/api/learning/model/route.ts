@@ -11,7 +11,15 @@ export async function GET(request: NextRequest) {
   const requested = request.nextUrl.searchParams.get("game");
   const game = GAME_IDS.includes(requested as GameId) ? requested as GameId : null;
   if (!game) return NextResponse.json({ error: "彩种无效。" }, { status: 400, headers: noStore() });
-  const learning = await readForwardLearningModel(game);
+  let learning;
+  try {
+    learning = await readForwardLearningModel(game);
+  } catch {
+    return NextResponse.json(
+      { error: "resolved-v2产品学习状态不完整。" },
+      { status: 503, headers: noStore() },
+    );
+  }
   return NextResponse.json(
     { game, learning },
     { headers: noStore() },

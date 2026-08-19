@@ -37,3 +37,20 @@ Complete. Both public pages now consume the same canonical five authoritative re
 
 - None blocking. Build output retains pre-existing proxy and Node `punycode` deprecation warnings; no test or build failures.
 - The legacy internal `readForwardLearningForecast` compatibility reader remains for audit/service callers, while both public routes use `readResolvedProductRecommendations` directly.
+
+## Review fix round 1
+
+- `readResolvedProductRecommendations` now distinguishes a genuinely absent committed revision from corrupt committed state. It reads and validates the row game, target issue, revision, revision ID, and status against the manifest, and throws a dedicated data-integrity error for invalid JSON or identity mismatch.
+- The forecast route consequently returns 404 only when no committed row exists; corrupt committed data fails closed as HTTP 503 with `private, no-store`.
+- The model route catches incomplete, mixed, corrupt, or other reader failures and returns HTTP 503 with `private, no-store`; actual route-import tests cover both an incomplete five-slot projection and corrupt manifest JSON.
+- Public review types now require a resolved-v2 run carrying `revision` and `revisionSource`, plus v2 scores whose `official` field is statically `true`.
+- Open Graph/Twitter sharing metadata now says “每期固定五项” and “产品学习”, with the legacy four-item/model-weight wording removed.
+
+### Round 1 TDD and verification
+
+- RED: corrupt committed JSON produced forecast 404, model reader failures escaped the route, store corruption/mismatch returned `null`, and rendered metadata still advertised “每期固定四项…模型权重变化”.
+- GREEN: `npm run typecheck && node --test tests/forward-learning-v2-store.test.ts tests/forward-learning-api.test.ts tests/forward-learning-ui.test.ts` — typecheck passed; 26/26 tests passed.
+- GREEN: `npm run build && node --test tests/rendered-html.test.mjs` — production build passed; 24/24 rendered HTML/API tests passed.
+- GREEN: `npm test` — 184/184 Node tests, 33/33 Python research tests, production build, 8/8 deployment tests, and 24/24 rendered HTML/API tests passed.
+- GREEN: final focused `node --test tests/forward-learning-api.test.ts` — 11/11 tests passed, including the explicit no-row 404 versus corrupt-row 503 contract.
+- No new blocking concerns. Build output still contains only the pre-existing proxy and Node `punycode` deprecation warnings.

@@ -259,9 +259,18 @@ export type AuthoritativeLearningForecast = AuthoritativeRecommendation & {
   explanation: string[];
 };
 
+export type ResolvedV2ForwardLearningRun = ForwardLearningRun & {
+  revision: number;
+  revisionSource: "resolved-v2";
+};
+
+export type ResolvedV2OfficialScore = ForwardLearningScoreV2 & {
+  official: true;
+};
+
 export type ForwardLearningReview = {
-  run: ForwardLearningRun;
-  scores: ForwardLearningScore[];
+  run: ResolvedV2ForwardLearningRun;
+  scores: ResolvedV2OfficialScore[];
   modelBefore: ForwardLearningModelState[];
   modelAfter: ForwardLearningModelState[];
   ruleUpdates: ForwardRuleUpdate[];

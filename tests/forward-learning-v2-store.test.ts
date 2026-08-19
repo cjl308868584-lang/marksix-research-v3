@@ -130,6 +130,34 @@ test("an uncommitted revision never shadows the v1 snapshot", async () => {
   assert.equal(resolved?.source, "v1");
 });
 
+test("resolved recommendations distinguish a missing revision from corrupt committed JSON", async () => {
+  assert.equal(await store.readResolvedProductRecommendations("new_macau", "2026231"), null);
+  const snapshot = revisionSnapshot("2026231", 2);
+  assert.equal(await store.freezeForwardLearningRevision(snapshot), "created");
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = '{broken'
+     WHERE revision_id = ?`,
+  ).run(snapshot.revisionId);
+
+  await assert.rejects(
+    store.readResolvedProductRecommendations("new_macau", "2026231"),
+    /完整性/,
+  );
+});
+
+test("resolved recommendations reject row and manifest revision identity mismatches", async () => {
+  const snapshot = revisionSnapshot("2026231", 2);
+  assert.equal(await store.freezeForwardLearningRevision(snapshot), "created");
+  db.database.prepare(
+    `UPDATE forward_learning_revisions SET revision_json = ? WHERE revision_id = ?`,
+  ).run(JSON.stringify({ ...snapshot, revision: 1 }), snapshot.revisionId);
+
+  await assert.rejects(
+    store.readResolvedProductRecommendations("new_macau", "2026231"),
+    /完整性/,
+  );
+});
+
 test("the highest committed revision is the only settlement source", async () => {
   await seedV1Snapshot(db, v1FiveForecasts("2026231"));
   assert.equal(await store.freezeForwardLearningRevision(revisionSnapshot("2026231", 2)), "created");
