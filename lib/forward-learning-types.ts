@@ -1,4 +1,5 @@
 import type { GameId } from "./lottery.ts";
+import type { AuthoritativeRecommendation } from "./rolling-pattern-types.ts";
 
 export const FORWARD_LEARNING_ENGINE_VERSION = "forward-learning-v1";
 
@@ -68,6 +69,82 @@ export type ForwardLearningForecast = ForwardLearningCandidate & {
   explanation: string[];
 };
 
+export type ForwardLearningCandidateV2 = ForwardLearningCandidate & {
+  revisionId: string;
+  revision: number;
+  sourceRunId: string;
+  sourceProductId: string | null;
+  sourceKind: "ledger" | "derived_baseline";
+  derivedDefinitionHash: string;
+  selectionPolicy: "rolling-product-ev-v2";
+  patternProbability: number;
+  legacySeedProbability: number;
+  learnedProbability: number;
+  breakEvenProbability: number;
+  expectedValue: number;
+  support: number;
+  hits: number;
+  legacySettledCount: number;
+  legacyHitCount: number;
+  learningSettledCount: number;
+  learningHitCount: number;
+};
+
+export type ForwardLearningForecastV2 = ForwardLearningCandidateV2 & {
+  forecastId: string;
+  official: true;
+  rank: 1;
+  previousResultKey: string | null;
+  previousProbability: number | null;
+  probabilityDelta: number | null;
+  topAlternative: string | null;
+  explanation: string[];
+};
+
+export type ForwardLearningRollout = {
+  game: GameId;
+  firstUnifiedTargetIssue: string;
+  legacySeedThroughIssue: string;
+  seedQueryVersion: "legacy-target-cutoff-v1";
+  sourceRunId: string;
+  sourceDataHash: string;
+  authoritativeRecommendationHash: string;
+  createdAt: string;
+};
+
+export type ForwardLearningRevision = {
+  revisionId: string;
+  game: GameId;
+  targetIssue: string;
+  revision: number;
+  status: "processing" | "committed";
+  selectionPolicy: "rolling-product-ev-v2";
+  sourceRunId: string;
+  dataVersion: string;
+  contentHash: string;
+  reason: "initial" | "correct-v1-bootstrap";
+  createdAt: string;
+  committedAt: string | null;
+};
+
+export type ForwardLearningRevisionSnapshot = ForwardLearningRevision & {
+  recommendationHash: string;
+  rollout: ForwardLearningRollout;
+  recommendations: AuthoritativeRecommendation[];
+  candidates: ForwardLearningCandidateV2[];
+  forecasts: ForwardLearningForecastV2[];
+};
+
+export type ResolvedForwardSnapshot = {
+  source: "v1" | "v2";
+  revision: number;
+  revisionId: string | null;
+  game: GameId;
+  targetIssue: string;
+  candidates: Array<ForwardLearningCandidate | ForwardLearningCandidateV2>;
+  forecasts: Array<ForwardLearningForecast | ForwardLearningForecastV2>;
+};
+
 export type ForwardLearningScore = {
   scoreId: string;
   forecastId: string | null;
@@ -87,6 +164,19 @@ export type ForwardLearningScore = {
   actualNumbers: number[];
   actualSpecial: number;
   scoredAt: string;
+};
+
+export type ForwardLearningScoreV2 = ForwardLearningScore & {
+  revisionId: string;
+  revision: number;
+  learnedProbability: number;
+};
+
+export type ResolvedSettlement = {
+  status: "settled" | "repaired" | "existing" | "not_found";
+  source: "v1" | "v2" | null;
+  revision: number | null;
+  scores: Array<ForwardLearningScore | ForwardLearningScoreV2>;
 };
 
 export type ForwardLearningModelState = {
@@ -163,4 +253,3 @@ export type ForwardLearningCycleResult = {
   modelVersion: string;
   forecasts: ForwardLearningForecast[];
 };
-

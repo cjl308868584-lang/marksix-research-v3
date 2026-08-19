@@ -13,6 +13,9 @@ class FakeLearningD1 {
   candidates = new Map<string, string>();
   scores = new Map<string, string>();
   runs = new Map<string, { status: string; run_json: string }>();
+  v2Revision: { revision_id: string; revision_json: string } | null = null;
+  v2Candidates: string[] = [];
+  v2Forecasts: string[] = [];
 
   prepare(sql: string) {
     let values: unknown[] = [];
@@ -70,6 +73,12 @@ class FakeLearningD1 {
         return { meta: { changes: 0 } };
       },
       first: async <T>() => {
+        if (sql.includes("sqlite_master") && sql.includes("forward_learning_rollouts")) {
+          return { present: 10 } as T;
+        }
+        if (sql.includes("SELECT revision_id, revision_json FROM forward_learning_revisions")) {
+          return this.v2Revision as T;
+        }
         if (sql.includes("SELECT target_issue FROM forward_learning_forecasts")) {
           return { target_issue: "2026230" } as T;
         }
@@ -79,6 +88,16 @@ class FakeLearningD1 {
         return null;
       },
       all: async <T>() => {
+        if (sql.includes("FROM forward_learning_revision_forecasts")) {
+          return {
+            results: this.v2Forecasts.map((forecast_json) => ({ forecast_json })) as T[],
+          };
+        }
+        if (sql.includes("FROM forward_learning_revision_candidates")) {
+          return {
+            results: this.v2Candidates.map((candidate_json) => ({ candidate_json })) as T[],
+          };
+        }
         if (sql.includes("FROM forward_learning_forecasts")) {
           return {
             results: [...this.forecasts.values()].map((forecast_json) => ({ forecast_json })) as T[],
@@ -184,6 +203,42 @@ test("freeze writes five official rows once and preserves the first snapshot", a
   ), "existing");
   assert.equal(db.forecasts.size, 5);
   assert.deepEqual([...db.forecasts.values()], original);
+});
+
+test("legacy forecast reader prefers the highest committed v2 snapshot", async () => {
+  const v1 = fiveForecasts();
+  await store.freezeForwardLearningIssue(
+    v1.map((item) => item as ForwardLearningCandidate),
+    v1,
+  );
+  const revisionId = "new_macau:2026230:r2";
+  const v2 = v1.map((item) => ({
+    ...item,
+    candidateId: `candidate:unified-v2:${revisionId}:${item.slot}:v2-${item.resultKey}`,
+    forecastId: `forecast:candidate:unified-v2:${revisionId}:${item.slot}:v2-${item.resultKey}`,
+    revisionId,
+    revision: 2,
+    resultKey: `v2-${item.resultKey}`,
+  }));
+  db.v2Revision = {
+    revision_id: revisionId,
+    revision_json: JSON.stringify({
+      revisionId,
+      game: "new_macau",
+      targetIssue: "2026230",
+      revision: 2,
+      status: "committed",
+    }),
+  };
+  db.v2Forecasts = v2.map((item) => JSON.stringify(item));
+  db.v2Candidates = Array.from({ length: 357 }, (_, index) => JSON.stringify({
+    ...v2[index % v2.length],
+    candidateId: `${v2[index % v2.length].candidateId}:${index}`,
+  }));
+
+  const resolved = await store.readForwardLearningForecast("new_macau", "2026230");
+
+  assert.ok(resolved.every((item) => item.resultKey.startsWith("v2-")));
 });
 
 test("settlement rejects a forecast frozen after the draw", async () => {

@@ -172,3 +172,33 @@ test("the forward learning migration creates seven independent learning tables",
   ]);
   database.close();
 });
+
+test("the unified forward learning migration creates the committed revision ledger", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0011_unified_forward_learning.sql", import.meta.url),
+    "utf8",
+  );
+  const database = new DatabaseSync(":memory:");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) database.exec(statement);
+  }
+  const objects = database.prepare(
+    `SELECT name FROM sqlite_schema
+     WHERE type IN ('table', 'index')
+       AND (name LIKE 'forward_learning_revision%' OR name = 'forward_learning_rollouts')
+     ORDER BY name`,
+  ).all().map((row) => row.name);
+  assert.deepEqual(objects, [
+    "forward_learning_revision_candidate_result_idx",
+    "forward_learning_revision_candidates",
+    "forward_learning_revision_forecast_slot_idx",
+    "forward_learning_revision_forecasts",
+    "forward_learning_revision_identity_idx",
+    "forward_learning_revision_score_forecast_idx",
+    "forward_learning_revision_score_result_idx",
+    "forward_learning_revision_scores",
+    "forward_learning_revisions",
+    "forward_learning_rollouts",
+  ]);
+  database.close();
+});

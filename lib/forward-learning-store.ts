@@ -3,6 +3,10 @@ import { getZodiac } from "./zodiac.ts";
 import { brierLoss, binaryLogLoss } from "./forward-learning-math.ts";
 import type { ForwardResultHistory } from "./forward-learning-engine.ts";
 import {
+  readResolvedForwardSnapshot,
+  settleResolvedForwardSnapshot,
+} from "./forward-learning-v2-store.ts";
+import {
   FORWARD_LEARNING_ENGINE_VERSION,
   FORWARD_LEARNING_SLOTS,
   type ForwardLearningCandidate,
@@ -121,6 +125,14 @@ export async function settleForwardLearningIssue(
   if (!await ensureForwardLearningStore()) return { status: "not_found", scores: [] };
   const db = runtime.__marksixD1;
   if (!db) return { status: "not_found", scores: [] };
+  const resolved = await readResolvedForwardSnapshot(game, draw.issue);
+  if (resolved?.source === "v2") {
+    const settlement = await settleResolvedForwardSnapshot(game, draw, scoredAt);
+    return {
+      status: settlement.status === "repaired" ? "settled" : settlement.status,
+      scores: settlement.scores as ForwardLearningScore[],
+    };
+  }
   const [candidateRows, forecastRows, existingRows] = await Promise.all([
     db.prepare(
       `SELECT candidate_json FROM forward_learning_candidates
@@ -202,22 +214,9 @@ export async function readForwardLearningForecast(
   targetIssue?: string | null,
 ) {
   if (!await ensureForwardLearningStore()) return [];
-  const db = runtime.__marksixD1;
-  if (!db) return [];
-  let issue = targetIssue ?? null;
-  if (!issue) {
-    const row = await db.prepare(
-      `SELECT target_issue FROM forward_learning_forecasts
-       WHERE game = ? ORDER BY target_issue DESC, frozen_at ASC LIMIT 1`,
-    ).bind(game).first<{ target_issue: string }>();
-    issue = row?.target_issue ?? null;
-  }
-  if (!issue) return [];
-  const rows = await db.prepare(
-    `SELECT forecast_json FROM forward_learning_forecasts
-     WHERE game = ? AND target_issue = ? ORDER BY slot`,
-  ).bind(game, issue).all<JsonRow>();
-  const forecasts = rowsAs<ForwardLearningForecast>(rows.results, "forecast_json");
+  const resolved = await readResolvedForwardSnapshot(game, targetIssue);
+  if (!resolved) return [];
+  const forecasts = resolved.forecasts as ForwardLearningForecast[];
   return FORWARD_LEARNING_SLOTS.flatMap((slot) =>
     forecasts.filter((forecast) => forecast.slot === slot).slice(0, 1)
   );
@@ -250,13 +249,8 @@ export async function readForwardLearningCandidates(
   targetIssue: string,
 ) {
   if (!await ensureForwardLearningStore()) return [];
-  const db = runtime.__marksixD1;
-  if (!db) return [];
-  const rows = await db.prepare(
-    `SELECT candidate_json FROM forward_learning_candidates
-     WHERE game = ? AND target_issue = ? ORDER BY slot, result_key`,
-  ).bind(game, targetIssue).all<JsonRow>();
-  return rowsAs<ForwardLearningCandidate>(rows.results, "candidate_json");
+  const resolved = await readResolvedForwardSnapshot(game, targetIssue);
+  return (resolved?.candidates ?? []) as ForwardLearningCandidate[];
 }
 
 export async function readForwardRuleWeights(game: GameId) {
