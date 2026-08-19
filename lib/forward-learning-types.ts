@@ -122,7 +122,7 @@ export type ForwardLearningRevision = {
   sourceRunId: string;
   dataVersion: string;
   contentHash: string;
-  reason: "initial" | "correct-v1-bootstrap";
+  reason: "initial" | "correct-v1-bootstrap" | "migrate-unscored-v1";
   createdAt: string;
   committedAt: string | null;
 };

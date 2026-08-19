@@ -41,6 +41,52 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(result["revision"], 1)
         self.assertEqual(result["forecastCount"], 5)
 
+    def test_unscored_v1_transition_route_returns_a_resolved_v2_contract(self):
+        root = Path(__file__).resolve().parents[2]
+        rendered = subprocess.run(
+            [
+                "node",
+                "tests/support/render-internal-forward-learning-response.ts",
+                "transition",
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(rendered.stdout)
+
+        with patch.object(cli, "urlopen", return_value=_FakeResponse(payload)):
+            result = cli.capture_forward_learning(
+                "https://example.test",
+                "secret",
+                "new_macau",
+                "2099001",
+            )
+
+        self.assertEqual(result["status"], "created")
+        self.assertEqual(result["revision"], 2)
+        self.assertEqual(result["forecastCount"], 5)
+
+    def test_backdated_as_of_cannot_reopen_a_closed_v1_transition_window(self):
+        root = Path(__file__).resolve().parents[2]
+        rendered = subprocess.run(
+            [
+                "node",
+                "tests/support/render-internal-forward-learning-response.ts",
+                "transition-blocked",
+            ],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        payload = json.loads(rendered.stdout)
+
+        self.assertEqual(payload["_httpStatus"], 425)
+        self.assertEqual(payload["status"], "awaiting_unified_target")
+        self.assertEqual(payload["forecastCount"], 0)
+
     def test_update_gate_only_runs_when_verified_result_reaches_frozen_target(self):
         cases = (
             ("2026216", True, "2026217", False, "forecast_ahead"),

@@ -52,6 +52,12 @@ const runtime = globalThis as typeof globalThis & {
 };
 const database = new SqliteD1();
 const originalFetch = globalThis.fetch;
+const scenario = process.argv[2] === "transition"
+  ? "transition"
+  : process.argv[2] === "transition-blocked"
+    ? "transition-blocked"
+    : "fresh";
+const game = scenario === "fresh" ? "hk" : "new_macau";
 runtime.__marksixBindings = { RESEARCH_INGEST_SECRET: "contract-secret" };
 runtime.__marksixD1 = database;
 globalThis.fetch = async () => {
@@ -73,14 +79,30 @@ try {
   await researchStore.ensureResearchV3Store();
   await applyMigration("../../drizzle/0010_forward_learning.sql");
   await applyMigration("../../drizzle/0011_unified_forward_learning.sql");
-  seedImmutablePatternRun();
+  const run = seedImmutablePatternRun(game, scenario === "transition-blocked");
+  if (scenario !== "fresh") {
+    const engine = await server.ssrLoadModule("/lib/forward-learning-engine.ts") as {
+      buildForwardLearningCandidates(run: unknown): unknown[];
+      selectOfficialForecasts(candidates: readonly unknown[]): unknown[];
+    };
+    const store = await server.ssrLoadModule("/lib/forward-learning-store.ts") as {
+      freezeForwardLearningIssue(
+        candidates: readonly unknown[],
+        forecasts: readonly unknown[],
+      ): Promise<string>;
+    };
+    const candidates = engine.buildForwardLearningCandidates(run);
+    const forecasts = engine.selectOfficialForecasts(candidates);
+    const status = await store.freezeForwardLearningIssue(candidates, forecasts);
+    if (status !== "created") throw new Error(`failed to seed v1 transition: ${status}`);
+  }
 
   const route = await server.ssrLoadModule(
     "/app/api/internal/learning/settle-and-freeze/route.ts",
   ) as { POST(request: NextRequest): Promise<Response> };
   const body = JSON.stringify({
-    taskId: "contract:hk:2099001",
-    game: "hk",
+    taskId: `contract:${game}:2099001`,
+    game,
     asOf: "2026-08-19T12:30:00.000Z",
   });
   const timestamp = String(Date.now());
@@ -100,10 +122,11 @@ try {
     },
   ));
   const payload = await response.json();
-  if (response.status !== 200) {
+  const expectedStatus = scenario === "transition-blocked" ? 425 : 200;
+  if (response.status !== expectedStatus) {
     throw new Error(`internal route returned ${response.status}: ${JSON.stringify(payload)}`);
   }
-  process.stdout.write(JSON.stringify(payload));
+  process.stdout.write(JSON.stringify({ ...payload, _httpStatus: response.status }));
 } finally {
   await server.close();
   database.database.close();
@@ -122,22 +145,27 @@ async function applyMigration(relativePath: string) {
   }
 }
 
-function seedImmutablePatternRun() {
+function seedImmutablePatternRun(
+  game: "hk" | "new_macau",
+  blockedTransition = false,
+) {
   const targetIssue = "2099001";
   const frozenAt = "2026-08-19T12:00:00.000Z";
   const run = {
     schemaVersion: "rolling-patterns-2",
     engineVersion: "conditional-patterns-v3",
-    runId: "pattern:hk:2099001:contract",
-    game: "hk",
+    runId: `pattern:${game}:2099001:contract`,
+    game,
     sourceIssue: "2099000",
     targetIssue,
-    expectedDrawAt: "2026-08-20T13:30:00.000Z",
+    expectedDrawAt: blockedTransition
+      ? "2026-08-19T13:32:00.000Z"
+      : "2099-08-20T13:30:00.000Z",
     generatedAt: frozenAt,
     frozenAt,
     status: "completed",
     window: {
-      game: "hk",
+      game,
       drawCount: 30,
       oldestIssue: "2098971",
       newestIssue: "2099000",
@@ -194,8 +222,8 @@ function seedImmutablePatternRun() {
        snapshot_json, frozen_at
      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    "research:hk:2099001:contract",
-    "hk",
+    `research:${game}:2099001:contract`,
+    game,
     targetIssue,
     run.expectedDrawAt,
     frozenAt,
@@ -206,4 +234,5 @@ function seedImmutablePatternRun() {
     "{}",
     frozenAt,
   );
+  return run;
 }

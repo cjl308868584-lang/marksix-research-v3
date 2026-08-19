@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../../lib/lottery.ts";
 import {
   ForwardLearningPrerequisiteError,
+  ForwardLearningTransitionError,
   runStoredForwardLearningCycle,
 } from "../../../../../lib/forward-learning-service.ts";
 import { projectResolvedLearningForecasts } from "../../../../../lib/forward-learning-store.ts";
@@ -71,6 +72,18 @@ export async function POST(request: NextRequest) {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {
+    if (error instanceof ForwardLearningTransitionError) {
+      return NextResponse.json({
+        taskId: body.taskId,
+        game: body.game,
+        status: "awaiting_unified_target",
+        forecastCount: 0,
+        immutable: true,
+      }, {
+        status: 425,
+        headers: { "Cache-Control": "private, no-store" },
+      });
+    }
     if (error instanceof ForwardLearningPrerequisiteError) {
       return NextResponse.json({
         taskId: body.taskId,

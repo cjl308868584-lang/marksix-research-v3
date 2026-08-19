@@ -152,6 +152,9 @@ test("signed learning treats a missing 30-draw prerequisite as an explicit abste
   assert.match(route, /instanceof ForwardLearningPrerequisiteError/);
   assert.match(route, /awaiting_pattern_window/);
   assert.match(route, /status:\s*425/);
+  assert.match(service, /ForwardLearningTransitionError/);
+  assert.match(route, /instanceof ForwardLearningTransitionError/);
+  assert.match(route, /awaiting_unified_target/);
 });
 
 test("patterns and learning expose the same authoritative recommendation fields", async () => {

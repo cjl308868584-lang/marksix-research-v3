@@ -20,8 +20,10 @@ import type {
   RollingPatternProduct,
   RollingPatternRun,
 } from "./rolling-pattern-types.ts";
+import { ZODIAC_NAMES } from "./zodiac.ts";
 
 const V2_MODEL_VERSION = "rolling-product-ev-v2";
+const CANONICAL_V1_CANDIDATE_UNIVERSE = buildCanonicalV1CandidateUniverse();
 
 export type V1BootstrapCorrectionInput = {
   name?: string;
@@ -44,21 +46,42 @@ export function canCorrectV1Bootstrap(
   input: V1BootstrapCorrectionInput,
 ): CorrectionGateResult {
   const reject = (reason: string): CorrectionGateResult => ({ allowed: false, reason });
-  if (input.game !== "new_macau" || input.targetIssue !== "2026231") {
-    return reject("纠正例外仅限新澳门2026231");
-  }
   if (input.run.game !== input.game || input.run.targetIssue !== input.targetIssue ||
     input.run.status !== "completed" ||
-    input.run.runId !== NEW_MACAU_2026231_ROLLOUT.sourceRunId ||
-    input.run.window.dataHash !== NEW_MACAU_2026231_ROLLOUT.sourceDataHash ||
-    input.run.expectedDrawAt !== "2026-08-19T13:32:00.000Z") {
+    input.run.window.game !== input.game ||
+    input.run.window.drawCount !== 30 ||
+    input.run.window.newestIssue !== input.run.sourceIssue ||
+    !input.run.runId.trim() || !input.run.window.dataHash.trim() ||
+    !Number.isFinite(Date.parse(input.run.frozenAt)) ||
+    !Number.isFinite(Date.parse(input.run.expectedDrawAt)) ||
+    Date.parse(input.run.frozenAt) >= Date.parse(input.run.expectedDrawAt)) {
     return reject("冻结规律运行来源不匹配");
   }
-  if (canonicalRolloutIdentity(input.rollout) !==
-    canonicalRolloutIdentity(NEW_MACAU_2026231_ROLLOUT)) {
+  const pinnedCorrection = input.game === "new_macau" && input.targetIssue === "2026231";
+  const expectedRollout = pinnedCorrection
+    ? NEW_MACAU_2026231_ROLLOUT
+    : {
+      game: input.game,
+      firstUnifiedTargetIssue: input.targetIssue,
+      legacySeedThroughIssue: input.run.sourceIssue,
+      seedQueryVersion: "legacy-target-cutoff-v1" as const,
+      sourceRunId: input.run.runId,
+      sourceDataHash: input.run.window.dataHash,
+      authoritativeRecommendationHash: input.recommendationHash,
+      createdAt: input.run.frozenAt,
+    };
+  if (pinnedCorrection && (
+    input.run.runId !== NEW_MACAU_2026231_ROLLOUT.sourceRunId ||
+    input.run.window.dataHash !== NEW_MACAU_2026231_ROLLOUT.sourceDataHash ||
+    input.run.expectedDrawAt !== "2026-08-19T13:32:00.000Z"
+  )) {
+    return reject("冻结规律运行来源不匹配");
+  }
+  if (canonicalRolloutIdentity(input.rollout) !== canonicalRolloutIdentity(expectedRollout)) {
     return reject("不可变启动记录不匹配");
   }
-  if (input.recommendationHash !== NEW_MACAU_2026231_AUTHORITATIVE_HASH ||
+  if ((pinnedCorrection &&
+      input.recommendationHash !== NEW_MACAU_2026231_AUTHORITATIVE_HASH) ||
     input.recommendationHash !== input.rollout.authoritativeRecommendationHash) {
     return reject("权威五项哈希不匹配");
   }
@@ -69,13 +92,31 @@ export function canCorrectV1Bootstrap(
   const candidateResults = new Set(existing?.candidates.map((candidate) =>
     `${candidate.slot}:${candidate.resultKey}`
   ));
+  const slotCounts = new Map<ForwardLearningSlot, number>();
+  for (const candidate of existing?.candidates ?? []) {
+    slotCounts.set(candidate.slot, (slotCounts.get(candidate.slot) ?? 0) + 1);
+  }
+  const expectedSlotCounts = new Map<ForwardLearningSlot, number>([
+    ["coverage_zodiac", 12],
+    ["coverage_tail", 10],
+    ["coverage_zodiac_pair", 66],
+    ["coverage_zodiac_triple", 220],
+    ["special_number", 49],
+  ]);
   if (!existing || existing.source !== "v1" || existing.revision !== 1 ||
+    existing.revisionId !== null ||
     existing.game !== input.game || existing.targetIssue !== input.targetIssue ||
     existing.candidates.length !== 357 ||
     candidateIds.size !== 357 || candidateResults.size !== 357 ||
+    [...expectedSlotCounts].some(([slot, count]) => slotCounts.get(slot) !== count) ||
     existing.candidates.some((candidate) =>
       candidate.game !== input.game || candidate.targetIssue !== input.targetIssue ||
-      candidate.candidateId.startsWith("candidate:unified-v2:")
+      candidate.candidateId !==
+        `${input.run.runId}:${candidate.slot}:${candidate.resultKey}` ||
+      candidate.dataVersion !== input.run.window.dataHash ||
+      candidate.frozenAt !== input.run.frozenAt ||
+      !candidate.modelVersion.startsWith("forward-learning-v1") ||
+      !matchesCanonicalV1Candidate(candidate)
     )) {
     return reject("v1候选快照不完整");
   }
@@ -116,13 +157,97 @@ export function canCorrectV1Bootstrap(
   return { allowed: true };
 }
 
+function buildCanonicalV1CandidateUniverse() {
+  const specs: Array<{
+    slot: ForwardLearningSlot;
+    resultKey: string;
+    label: string;
+    values: string[];
+  }> = [];
+  for (const zodiac of ZODIAC_NAMES) {
+    specs.push({
+      slot: "coverage_zodiac",
+      resultKey: zodiac,
+      label: zodiac,
+      values: [zodiac],
+    });
+  }
+  for (let tail = 0; tail <= 9; tail += 1) {
+    const label = `${tail}尾`;
+    specs.push({
+      slot: "coverage_tail",
+      resultKey: label,
+      label,
+      values: [label],
+    });
+  }
+  for (const values of combinations(ZODIAC_NAMES, 2)) {
+    specs.push({
+      slot: "coverage_zodiac_pair",
+      resultKey: values.join("+"),
+      label: values.join("＋"),
+      values: [...values],
+    });
+  }
+  for (const values of combinations(ZODIAC_NAMES, 3)) {
+    specs.push({
+      slot: "coverage_zodiac_triple",
+      resultKey: values.join("+"),
+      label: values.join("＋"),
+      values: [...values],
+    });
+  }
+  for (let number = 1; number <= 49; number += 1) {
+    const label = String(number).padStart(2, "0");
+    specs.push({
+      slot: "special_number",
+      resultKey: label,
+      label,
+      values: [label],
+    });
+  }
+  const universe = new Map(specs.map((spec) => [
+    `${spec.slot}:${spec.resultKey}`,
+    spec,
+  ]));
+  if (universe.size !== 357) {
+    throw new Error(`v1规范候选宇宙无效：${universe.size}/357`);
+  }
+  return universe;
+}
+
+function matchesCanonicalV1Candidate(candidate: ForwardLearningCandidate) {
+  const expected = CANONICAL_V1_CANDIDATE_UNIVERSE.get(
+    `${candidate.slot}:${candidate.resultKey}`,
+  );
+  return Boolean(expected) && candidate.label === expected?.label &&
+    canonicalJson(candidate.values) === canonicalJson(expected?.values);
+}
+
+function combinations<T>(items: readonly T[], size: number): T[][] {
+  const result: T[][] = [];
+  const visit = (start: number, current: T[]) => {
+    if (current.length === size) {
+      result.push([...current]);
+      return;
+    }
+    for (let index = start; index < items.length; index += 1) {
+      current.push(items[index]);
+      visit(index + 1, current);
+      current.pop();
+    }
+  };
+  visit(0, []);
+  return result;
+}
+
 export function mapProductsToRevisionSnapshot(input: {
   run: RollingPatternRun;
   products: readonly RollingPatternProduct[];
   recommendations: readonly AuthoritativeRecommendation[];
   rollout: ForwardLearningRollout;
   revision: number;
-  reason: "initial" | "correct-v1-bootstrap";
+  reason: "initial" | "correct-v1-bootstrap" | "migrate-unscored-v1";
   previousForecasts?: readonly ForwardLearningForecast[];
 }): ForwardLearningRevisionSnapshot {
   assertMapperInput(input);

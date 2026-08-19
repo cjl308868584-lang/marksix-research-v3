@@ -40,6 +40,7 @@ import {
 const UNIFIED_MODEL_VERSION = "rolling-product-ev-v2";
 
 export type ForwardLearningDependencies = {
+  wallClock?: () => Date;
   readResolved: (
     game: GameId,
     issue?: string | null,
@@ -75,6 +76,7 @@ export type ForwardLearningDependencies = {
 };
 
 const DEFAULT_DEPENDENCIES: ForwardLearningDependencies = {
+  wallClock: () => new Date(),
   readResolved: readResolvedForwardSnapshot,
   settleResolved: settleResolvedForwardSnapshot,
   readRollout: readForwardLearningRollout,
@@ -109,6 +111,13 @@ export class ForwardLearningPrerequisiteError extends Error {
   }
 }
 
+export class ForwardLearningTransitionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForwardLearningTransitionError";
+  }
+}
+
 export async function runStoredForwardLearningCycle({
   game,
   asOf = new Date(),
@@ -131,7 +140,9 @@ export async function runStoredForwardLearningCycle({
     game,
     draws: history.draws,
     rollingRun: envelope.run,
-    now: asOf,
+    // `asOf` controls which draws are visible, but it must never extend a
+    // migration deadline. Transition gates always use the worker wall clock.
+    now: new Date(),
   });
 }
 
@@ -177,9 +188,13 @@ export async function runForwardLearningCycle(
     if (learningRun) await completeLearningRun(learningRun, input.now, dependencies);
     return resolvedResult("existing", existing, learningRun?.runId ?? null, prior?.draw.issue ?? null);
   }
-  if (existing?.source === "v1" && !isNewMacauBootstrap(input.rollingRun)) {
+  if (existing?.source === "v1" && rollout &&
+    !isNewMacauBootstrap(input.rollingRun) &&
+    !rolloutClaimsCurrentRun(rollout, input.rollingRun)) {
     if (learningRun) await completeLearningRun(learningRun, input.now, dependencies);
-    return resolvedResult("existing", existing, learningRun?.runId ?? null, prior?.draw.issue ?? null);
+    throw new ForwardLearningTransitionError(
+      "现有v1冻结不是当前彩种的首个统一过渡目标",
+    );
   }
 
   const revision = existing?.source === "v1" ? 2 : 1;
@@ -190,10 +205,33 @@ export async function runForwardLearningCycle(
     dependencies,
   );
   if (!rollout) {
+    if (state.learnedHistorySize > 0) {
+      throw new Error("未建立启动记录时不得存在新版学习历史");
+    }
     const proposed = initialRollout(
       input.rollingRun,
       hashAuthoritativeRecommendations(state.recommendations),
     );
+    if (existing?.source === "v1") {
+      const provisional = mapProductsToRevisionSnapshot({
+        run: input.rollingRun,
+        products: state.products,
+        recommendations: state.recommendations,
+        rollout: proposed,
+        revision,
+        reason: isNewMacauBootstrap(input.rollingRun)
+          ? "correct-v1-bootstrap"
+          : "migrate-unscored-v1",
+        previousForecasts: priorForecasts,
+      });
+      await assertV1TransitionAllowed(
+        input,
+        existing,
+        proposed,
+        provisional.recommendationHash,
+        dependencies,
+      );
+    }
     const persisted = await dependencies.persistRollout(proposed);
     if (persisted === "unavailable") return awaitingRollout(input.rollingRun.targetIssue);
     if (persisted === "conflict") {
@@ -218,7 +256,11 @@ export async function runForwardLearningCycle(
     recommendations: state.recommendations,
     rollout,
     revision,
-    reason: revision === 2 ? "correct-v1-bootstrap" : "initial",
+    reason: revision === 2
+      ? (isNewMacauBootstrap(input.rollingRun)
+        ? "correct-v1-bootstrap"
+        : "migrate-unscored-v1")
+      : "initial",
     previousForecasts: priorForecasts,
   });
   if (input.rollingRun.targetIssue === rollout.firstUnifiedTargetIssue &&
@@ -227,28 +269,13 @@ export async function runForwardLearningCycle(
   }
 
   if (existing?.source === "v1") {
-    const verifiedMatchingDraw = input.draws.find((draw) =>
-      draw.game === input.game && draw.issue === input.rollingRun.targetIssue && draw.verified
-    ) ?? null;
-    const scoreCount = await dependencies.readScoreCount(
-      input.game,
-      input.rollingRun.targetIssue,
-    );
-    const gate = canCorrectV1Bootstrap({
-      game: input.game,
-      targetIssue: input.rollingRun.targetIssue,
-      run: input.rollingRun,
-      rollout,
-      recommendationHash: snapshot.recommendationHash,
+    await assertV1TransitionAllowed(
+      input,
       existing,
-      scoreCount,
-      verifiedMatchingDraw,
-      now: input.now,
-    });
-    if (!gate.allowed) {
-      if (learningRun) await completeLearningRun(learningRun, input.now, dependencies);
-      return resolvedResult("existing", existing, learningRun?.runId ?? null, prior?.draw.issue ?? null);
-    }
+      rollout,
+      snapshot.recommendationHash,
+      dependencies,
+    );
   }
 
   const freeze = await dependencies.freezeRevision(snapshot);
@@ -265,6 +292,51 @@ export async function runForwardLearningCycle(
     modelVersion: UNIFIED_MODEL_VERSION,
     forecasts: snapshot.forecasts,
   };
+}
+
+async function assertV1TransitionAllowed(
+  input: {
+    game: GameId;
+    draws: Draw[];
+    rollingRun: RollingPatternRun;
+    now: Date;
+  },
+  existing: ResolvedForwardSnapshot,
+  rollout: ForwardLearningRollout,
+  recommendationHash: string,
+  dependencies: ForwardLearningDependencies,
+) {
+  const verifiedMatchingDraw = input.draws.find((draw) =>
+    draw.game === input.game && draw.issue === input.rollingRun.targetIssue && draw.verified
+  ) ?? null;
+  const scoreCount = await dependencies.readScoreCount(
+    input.game,
+    input.rollingRun.targetIssue,
+  );
+  // Sample the server clock only after the final asynchronous prerequisite
+  // read, so a request that crosses the draw deadline cannot still commit.
+  const wallNow = dependencies.wallClock?.() ?? input.now;
+  if (!Number.isFinite(wallNow.getTime())) {
+    throw new Error("服务器当前时间无效");
+  }
+  const gate = canCorrectV1Bootstrap({
+    game: input.game,
+    targetIssue: input.rollingRun.targetIssue,
+    run: input.rollingRun,
+    rollout,
+    recommendationHash,
+    existing,
+    scoreCount,
+    verifiedMatchingDraw,
+    now: wallNow,
+  });
+  if (!gate.allowed) {
+    const message = `现有v1冻结不能安全过渡为统一五项：${gate.reason}`;
+    if (["已存在候选或修订评分", "已存在核验开奖结果", "开奖时间已到"].includes(gate.reason)) {
+      throw new ForwardLearningTransitionError(message);
+    }
+    throw new Error(message);
+  }
 }
 
 async function resolveStoredOrFixedRollout(
@@ -326,6 +398,7 @@ async function buildUnifiedState(
   return {
     products,
     recommendations: selectMandatoryProductRecommendations(products, revision),
+    learnedHistorySize: learned.size,
   };
 }
 
@@ -347,6 +420,19 @@ function rolloutAppliesToRun(
     rollout.sourceRunId === run.runId &&
     rollout.sourceDataHash === run.window.dataHash
   );
+}
+
+function rolloutClaimsCurrentRun(
+  rollout: ForwardLearningRollout,
+  run: RollingPatternRun,
+) {
+  return rollout.game === run.game &&
+    rollout.firstUnifiedTargetIssue === run.targetIssue &&
+    rollout.legacySeedThroughIssue === run.sourceIssue &&
+    rollout.seedQueryVersion === "legacy-target-cutoff-v1" &&
+    rollout.sourceRunId === run.runId &&
+    rollout.sourceDataHash === run.window.dataHash &&
+    rollout.createdAt === run.frozenAt;
 }
 
 async function findPriorResolvedV2(

@@ -206,21 +206,73 @@ test("a conflicting bootstrap rollout is rejected before legacy history", async 
   assert.equal(legacyQueryCount, 0);
 });
 
-test("a v1-only target outside the checked bootstrap is never upgraded", async () => {
-  const existing = v1SnapshotForIssue("2026232");
-  let legacyQueryCount = 0;
-  let freezeCount = 0;
+test("an unscored matching v1 first target is corrected append-only before draw", async () => {
+  const run = authoritativeRollingRun("2026232");
+  const existing = v1SnapshotForRun(run);
+  const persisted: ForwardLearningRollout[] = [];
+  const frozen: ForwardLearningRevisionSnapshot[] = [];
   const result = await runForwardLearningCycle({
     ...nextIssueInput(),
     draws: [],
   }, {
     ...correctionDependencies(),
     readResolved: async (_game, issue) => issue === "2026232" ? existing : null,
-    readRollout: async () => NEW_MACAU_2026231_ROLLOUT,
-    persistRollout: async () => "existing" as const,
-    readLegacyHistory: async () => {
-      legacyQueryCount += 1;
-      return authoritativeLegacyHistories("2026232");
+    readRollout: async () => null,
+    persistRollout: async (rollout) => {
+      persisted.push(rollout);
+      return "created" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+    freezeRevision: async (snapshot) => {
+      frozen.push(snapshot);
+      return "created" as const;
+    },
+  });
+
+  assert.equal(result.status, "created");
+  assert.equal(result.revision, 2);
+  assert.equal(result.modelVersion, "rolling-product-ev-v2");
+  assert.equal(persisted.length, 1);
+  assert.equal(persisted[0].firstUnifiedTargetIssue, "2026232");
+  assert.equal(persisted[0].authoritativeRecommendationHash, frozen[0].recommendationHash);
+  assert.equal(frozen.length, 1);
+});
+
+test("a retry completes the same dynamic first transition after rollout persistence", async () => {
+  const run = authoritativeRollingRun("2026232");
+  const existing = v1SnapshotForRun(run);
+  let stored: ForwardLearningRollout | null = null;
+  const base = {
+    ...correctionDependencies(),
+    readResolved: async (_game: GameId, issue?: string | null) =>
+      issue === "2026232" ? existing : null,
+    readRollout: async () => stored,
+    persistRollout: async (rollout: ForwardLearningRollout) => {
+      stored = rollout;
+      return "created" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+  };
+
+  await assert.rejects(() => runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...base,
+    freezeRevision: async () => {
+      throw new Error("simulated revision write interruption");
+    },
+  }), /simulated revision write interruption/);
+  assert.ok(stored);
+
+  let freezeCount = 0;
+  const result = await runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...base,
+    persistRollout: async () => {
+      throw new Error("retry must reuse the stored rollout");
     },
     freezeRevision: async () => {
       freezeCount += 1;
@@ -228,9 +280,163 @@ test("a v1-only target outside the checked bootstrap is never upgraded", async (
     },
   });
 
-  assert.equal(result.status, "existing");
-  assert.equal(result.revision, 1);
-  assert.equal(legacyQueryCount, 0);
+  assert.equal(result.status, "created");
+  assert.equal(result.revision, 2);
+  assert.equal(freezeCount, 1);
+});
+
+test("a dynamic v1 transition resamples wall time before the final freeze", async () => {
+  const run = authoritativeRollingRun("2026232");
+  const existing = v1SnapshotForRun(run);
+  const wallTimes = [
+    new Date("2026-08-20T13:31:59.000Z"),
+    new Date(run.expectedDrawAt),
+  ];
+  const gateEvents: string[] = [];
+  let wallClockReads = 0;
+  let persistCount = 0;
+  let freezeCount = 0;
+
+  await assert.rejects(() => runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...correctionDependencies(),
+    wallClock: () => {
+      gateEvents.push("clock");
+      return wallTimes[Math.min(wallClockReads++, wallTimes.length - 1)];
+    },
+    readResolved: async (_game, issue) => issue === "2026232" ? existing : null,
+    readRollout: async () => null,
+    persistRollout: async () => {
+      persistCount += 1;
+      return "created" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+    readScoreCount: async () => {
+      gateEvents.push("score");
+      return 0;
+    },
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  }), /开奖时间已到/);
+
+  assert.equal(wallClockReads, 2);
+  assert.deepEqual(gateEvents, ["score", "clock", "score", "clock"]);
+  assert.equal(persistCount, 1);
+  assert.equal(freezeCount, 0);
+});
+
+test("a v1 first-target transition fails closed after draw or on provenance mismatch", async () => {
+  const run = authoritativeRollingRun("2026232");
+  const valid = v1SnapshotForRun(run);
+  const cases = [
+    {
+      name: "verified draw",
+      input: { ...nextIssueInput(), draws: [{ ...nextIssueInput().draws[0], issue: "2026232" }] },
+      existing: valid,
+    },
+    {
+      name: "deadline passed",
+      input: { ...nextIssueInput(), draws: [], now: new Date(run.expectedDrawAt) },
+      existing: valid,
+    },
+    {
+      name: "data version mismatch",
+      input: { ...nextIssueInput(), draws: [] },
+      existing: {
+        ...valid,
+        candidates: valid.candidates.map((candidate, index) =>
+          index === 0 ? { ...candidate, dataVersion: "wrong-data" } : candidate
+        ),
+      },
+    },
+    {
+      name: "candidate identity mismatch",
+      input: { ...nextIssueInput(), draws: [] },
+      existing: {
+        ...valid,
+        candidates: valid.candidates.map((candidate, index) =>
+          index === 0 ? { ...candidate, candidateId: `wrong:${candidate.candidateId}` } : candidate
+        ),
+      },
+    },
+  ];
+
+  for (const fixture of cases) {
+    let persistCount = 0;
+    let freezeCount = 0;
+    await assert.rejects(() => runForwardLearningCycle(fixture.input, {
+      ...correctionDependencies(),
+      readResolved: async (_game, issue) => issue === "2026232" ? fixture.existing : null,
+      readRollout: async () => null,
+      persistRollout: async () => {
+        persistCount += 1;
+        return "created" as const;
+      },
+      readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+      freezeRevision: async () => {
+        freezeCount += 1;
+        return "created" as const;
+      },
+    }), /v1|V1|过渡/iu, fixture.name);
+    assert.equal(persistCount, 0, fixture.name);
+    assert.equal(freezeCount, 0, fixture.name);
+  }
+});
+
+test("a later v1 target is never upgraded after a rollout boundary already exists", async () => {
+  const existing = v1SnapshotForRun(authoritativeRollingRun("2026232"));
+  let persistCount = 0;
+  let freezeCount = 0;
+  await assert.rejects(() => runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...correctionDependencies(),
+    readResolved: async (_game, issue) => issue === "2026232" ? existing : null,
+    readRollout: async () => NEW_MACAU_2026231_ROLLOUT,
+    persistRollout: async () => {
+      persistCount += 1;
+      return "existing" as const;
+    },
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  }), /首个统一过渡目标/);
+  assert.equal(persistCount, 0);
+  assert.equal(freezeCount, 0);
+});
+
+test("a missing rollout with existing v2 learning history fails closed", async () => {
+  const existing = v1SnapshotForRun(authoritativeRollingRun("2026232"));
+  let persistCount = 0;
+  let freezeCount = 0;
+  await assert.rejects(() => runForwardLearningCycle({
+    ...nextIssueInput(),
+    draws: [],
+  }, {
+    ...correctionDependencies(),
+    readResolved: async (_game, issue) => issue === "2026232" ? existing : null,
+    readRollout: async () => null,
+    readV2History: async () => new Map([[
+      "coverage_zodiac:猴",
+      { settledCount: 1, hitCount: 1 },
+    ]]),
+    persistRollout: async () => {
+      persistCount += 1;
+      return "created" as const;
+    },
+    readLegacyHistory: async () => authoritativeLegacyHistories("2026232"),
+    freezeRevision: async () => {
+      freezeCount += 1;
+      return "created" as const;
+    },
+  }), /新版学习历史/);
+  assert.equal(persistCount, 0);
   assert.equal(freezeCount, 0);
 });
 
@@ -417,6 +623,7 @@ function correctionMismatchFixtures() {
     { name: "rollout", value: { ...base, rollout: { ...base.rollout, legacySeedThroughIssue: "2026229" } } },
     { name: "v1 candidate count", value: { ...base, existing: { ...base.existing, candidates: base.existing.candidates.slice(1) } } },
     { name: "duplicate v1 candidate", value: { ...base, existing: { ...base.existing, candidates: base.existing.candidates.map((item, index) => index === 1 ? base.existing.candidates[0] : item) } } },
+    { name: "noncanonical candidate universe", value: { ...base, existing: { ...base.existing, candidates: base.existing.candidates.map((item, index) => index === 0 ? { ...item, candidateId: `${base.run.runId}:coverage_zodiac:猫`, resultKey: "猫", label: "猫", values: ["猫"] } : item) } } },
     { name: "v1 source", value: { ...base, existing: { ...base.existing, source: "v2" as const } } },
     { name: "duplicate official slot", value: { ...base, existing: { ...base.existing, forecasts: base.existing.forecasts.map((item, index) => index === 1 ? { ...item, slot: "coverage_zodiac" as const } : item) } } },
     { name: "forecast candidate does not exist", value: mutateFirstForecast({ candidateId: "candidate:v1:missing" }) },
@@ -573,8 +780,10 @@ function signalFixture(
   };
 }
 
-function v1BootstrapSnapshot(): ResolvedForwardSnapshot {
-  const candidates = v1Universe();
+function v1BootstrapSnapshot(
+  run: RollingPatternRun = authoritativeRollingRun("2026231"),
+): ResolvedForwardSnapshot {
+  const candidates = v1Universe(run);
   const officialKeys = new Map([
     ["coverage_zodiac", "龙"],
     ["coverage_tail", "1尾"],
@@ -600,8 +809,8 @@ function v1BootstrapSnapshot(): ResolvedForwardSnapshot {
     source: "v1",
     revision: 1,
     revisionId: null,
-    game: "new_macau",
-    targetIssue: "2026231",
+    game: run.game,
+    targetIssue: run.targetIssue,
     candidates,
     forecasts,
   };
@@ -618,33 +827,13 @@ function v2ResolvedSnapshot(targetIssue: string): ResolvedForwardSnapshot {
   };
 }
 
-function v1SnapshotForIssue(targetIssue: string): ResolvedForwardSnapshot {
-  const legacy = v1BootstrapSnapshot();
-  const candidates = legacy.candidates.map((candidate) => ({
-    ...candidate,
-    candidateId: candidate.candidateId.replace("2026231", targetIssue),
-    targetIssue,
-  }));
-  const byIdentity = new Map(candidates.map((candidate) => [
-    `${candidate.slot}:${candidate.resultKey}`,
-    candidate,
-  ]));
-  return {
-    ...legacy,
-    targetIssue,
-    candidates,
-    forecasts: legacy.forecasts.map((forecast) => {
-      const candidate = byIdentity.get(`${forecast.slot}:${forecast.resultKey}`)!;
-      return {
-        ...forecast,
-        ...candidate,
-        forecastId: `forecast:${candidate.candidateId}`,
-      };
-    }),
-  };
+function v1SnapshotForRun(run: RollingPatternRun): ResolvedForwardSnapshot {
+  return v1BootstrapSnapshot(run);
 }
 
-function v1Universe(): ForwardLearningCandidate[] {
+function v1Universe(
+  run: RollingPatternRun = authoritativeRollingRun("2026231"),
+): ForwardLearningCandidate[] {
   const zodiacs = ["鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪"];
   const definitions = [
     ...zodiacs.map((resultKey) => ({ slot: "coverage_zodiac" as const, resultKey, values: [resultKey] })),
@@ -655,12 +844,14 @@ function v1Universe(): ForwardLearningCandidate[] {
   ];
   assert.equal(definitions.length, 357);
   return definitions.map(({ slot, resultKey, values }) => ({
-    candidateId: `candidate:v1:2026231:${slot}:${resultKey}`,
-    game: "new_macau",
-    targetIssue: "2026231",
+    candidateId: `${run.runId}:${slot}:${resultKey}`,
+    game: run.game,
+    targetIssue: run.targetIssue,
     slot,
     resultKey,
-    label: resultKey,
+    label: slot === "coverage_zodiac_pair" || slot === "coverage_zodiac_triple"
+      ? resultKey.replaceAll("+", "＋")
+      : resultKey,
     values,
     baselineProbability: 0.1,
     expertProbabilities: { baseline: 0.1, rules30: 0.1, forward: 0.1 },
@@ -673,9 +864,9 @@ function v1Universe(): ForwardLearningCandidate[] {
     forwardSettledCount: 0,
     forwardHitCount: 0,
     forwardBrierSkill: 0,
-    frozenAt: "2026-08-19T12:00:00.000Z",
-    modelVersion: "forward-learning-v1",
-    dataVersion: "legacy-v1",
+    frozenAt: run.frozenAt,
+    modelVersion: `forward-learning-v1:${run.sourceIssue}`,
+    dataVersion: run.window.dataHash,
   }));
 }
 

@@ -159,6 +159,8 @@ revision 2从该冻结run的signals、expectedDrawAt、window.dataHash及旧种�
 
 2026231纠正使用本设计第12节的版本化权威五项快照作为迁移输入和hard gate：重建结果必须与快照的结果键、概率、赔率、盈亏线、期望值及哈希完全一致，否则拒绝提交revision 2。不能从当前页面文本或重新排序后的可变列表“尽量重建”。以后新目标期的权威五项直接随revision冻结，不再需要迁移fixture。
 
+部署切换存在一个受控例外：如果旧调度在v2上线前已冻结“当前下一期”v1，而该彩种还没有rollout，可把这一期视为真正的首个v2目标，追加revision 2。只有在真实服务器时间早于开奖、无核验开奖、v1/v2评分均为0、v1恰好357个候选和5个正式槽位，且每个candidate ID、dataVersion、frozenAt、game和targetIssue都与同期不可变RollingPatternRun完全一致时允许。签名请求的`asOf`只能控制可见数据，不能回拨迁移截止时间。一旦已有更早rollout、已评分、已开奖或来源不一致，必须fail closed，不能把v1冒充为v2成功响应。
+
 `/patterns` 与 `/learning` 都读取 `readResolvedProductRecommendations` 返回的有效revision五项。若2026231已有revision 2，`/patterns` 的购买参考也显示revision 2，而不是继续从旧分页产品列表重新选择。
 
 ## 8. 类型与页面

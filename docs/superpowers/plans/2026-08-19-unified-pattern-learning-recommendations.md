@@ -587,7 +587,9 @@ In `runStoredForwardLearningCycle`, load the immutable completed `RollingPattern
 
 Retire v1 expert weight and rule-weight updates from v2 execution; retain the old functions only for decoding/auditing v1 rows.
 
-The correction gate is limited to `game=new_macau` and `targetIssue=rollout.firstUnifiedTargetIssue=2026231`. It requires: the exact rollout/source run/data hash/expected draw/recommendation hash from the checked-in fixture; exactly 357 v1 candidates and five unique v1 official slots; no score for any v1 or v2 candidate; no verified matching draw; `now < expectedDrawAt`; and an unchanged immutable rollout. Any mismatch fails closed without creating a revision. Other v1-only targets are never silently upgraded by this exception.
+The checked-in correction gate remains pinned to `game=new_macau` and `targetIssue=rollout.firstUnifiedTargetIssue=2026231`. It requires: the exact rollout/source run/data hash/expected draw/recommendation hash from the checked-in fixture; exactly 357 v1 candidates and five unique v1 official slots; no score for any v1 or v2 candidate; no verified matching draw; server wall clock `< expectedDrawAt`; and an unchanged immutable rollout. Any mismatch fails closed without creating a revision.
+
+A deployment-transition race has one additional append-only path: when a cycle enters with no rollout at all but the current target was already frozen by v1 before the v2 deployment, that current target may become the dynamic first unified target and receive revision 2. The gate requires the exact 12/10/66/220/49 v1 universe, canonical `${runId}:${slot}:${resultKey}` IDs, five official slots, matching game/target/dataVersion/frozenAt, zero v1/v2 scores, no verified target draw, no existing v2 history, and server wall clock before the immutable run deadline. Persist the dynamic rollout only after this gate passes. A backdated signed `asOf` cannot reopen the window. Once any earlier rollout exists, later v1-only targets are never upgraded by this path; they return an explicit `awaiting_unified_target` instead of a false v2 success.
 
 - [ ] **Step 8: Bound legacy history and freeze the full shared revision snapshot**
 
