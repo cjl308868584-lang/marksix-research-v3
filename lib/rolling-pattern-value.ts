@@ -63,11 +63,13 @@ export function selectRollingPatternRecommendations(
     ? (["special_number"] satisfies RollingPatternProductKind[])
     : COVERAGE_RECOMMENDATION_KINDS;
   return kinds.map((kind) => {
-    const selected = selectProductRecommendation(products, kind, 0);
+    const product = selectTopProduct(products, kind);
     return {
       kind,
-      product: selected?.product ?? null,
-      reason: selected?.reason ?? "当前冻结结果中缺少该类别产品。",
+      product,
+      reason: product
+        ? recommendationReason(product)
+        : "当前冻结结果中缺少该类别产品。",
     };
   });
 }
@@ -77,9 +79,9 @@ export function selectMandatoryProductRecommendations(
   revision: number,
 ): AuthoritativeRecommendation[] {
   return MANDATORY_PRODUCT_KINDS.map((kind) => {
-    const selected = selectProductRecommendation(products, kind, revision);
-    if (!selected) throw new Error(`统一产品类别缺失：${kind}`);
-    return selected;
+    const product = selectTopProduct(products, kind);
+    if (!product) throw new Error(`统一产品类别缺失：${kind}`);
+    return buildAuthoritativeRecommendation(product, revision);
   });
 }
 
@@ -203,12 +205,7 @@ export function buildUnifiedRollingPatternProducts(
       : buildBaselineProduct(run, "special_number", [value], histories);
   });
   const products = [...singles, ...pairs, ...triples, ...specialNumbers]
-    .sort((left, right) =>
-      right.expectedValue - left.expectedValue ||
-      right.support - left.support ||
-      right.strategyCount - left.strategyCount ||
-      left.label.localeCompare(right.label, "zh-CN")
-    )
+    .sort(compareProductsForRecommendation)
     .map((product, index) => ({ ...product, rank: index + 1 }));
   if (products.length !== 357) {
     throw new Error(`统一产品候选不完整：${products.length}/357`);
@@ -487,29 +484,34 @@ function compareProductsForRecommendation(
     asciiCompare(left.values.join("+"), right.values.join("+"));
 }
 
-function selectProductRecommendation(
+function selectTopProduct(
   products: readonly RollingPatternProduct[],
   kind: RollingPatternProductKind,
-  revision: number,
-): AuthoritativeRecommendation | null {
-  const product = products
+): RollingPatternProduct | null {
+  return products
     .filter((candidate) => candidate.kind === kind)
-    .sort(compareProductsForRecommendation)[0];
-  if (!product) return null;
-  const sourceKind = product.sourceKind ?? "ledger";
+    .sort(compareProductsForRecommendation)[0] ?? null;
+}
+
+function buildAuthoritativeRecommendation(
+  product: RollingPatternProduct,
+  revision: number,
+): AuthoritativeRecommendation {
+  const hasLedgerSource = product.sourceKind === "ledger" &&
+    product.sourceProductId !== null &&
+    product.sourceProductId !== undefined;
+  const sourceKind = hasLedgerSource ? "ledger" : "derived_baseline";
   const patternProbability = product.patternProbability ?? product.estimatedProbability;
   const legacySeedProbability = product.legacySeedProbability ?? patternProbability;
   const learningSettledCount = product.learningSettledCount ??
     product.forwardSettledCount ?? 0;
   const learningHitCount = product.learningHitCount ?? product.forwardHitCount ?? 0;
   return {
-    kind,
+    kind: product.kind,
     resultKey: product.values.join("+"),
     values: [...product.values],
     sourceRunId: product.runId,
-    sourceProductId: sourceKind === "ledger"
-      ? product.sourceProductId ?? product.productId
-      : null,
+    sourceProductId: hasLedgerSource ? product.sourceProductId : null,
     sourceKind,
     dataVersion: product.dataVersion ?? product.runId,
     revision,

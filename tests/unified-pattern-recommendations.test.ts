@@ -233,6 +233,32 @@ test("a complete window always builds the full five-category universe", () => {
   assert.ok(products.every((item) => item.support === 0));
 });
 
+test("public ranks use learned sample count and ASCII result keys", () => {
+  const histories = {
+    legacy: new Map(),
+    learned: new Map([
+      ["special_number:01", { settledCount: 49, hitCount: 1 }],
+      ["special_number:02", { settledCount: 98, hitCount: 2 }],
+    ]),
+    legacyProductIds: new Map(),
+  };
+  const products = buildUnifiedRollingPatternProducts(runFixture([]), histories);
+  const special01 = findProduct(products, "special_number", "01");
+  const special02 = findProduct(products, "special_number", "02");
+  const ox = findProduct(products, "coverage_zodiac", "牛");
+  const dragon = findProduct(products, "coverage_zodiac", "龙");
+  const selected = selectMandatoryProductRecommendations(products, 1);
+
+  assert.equal(special01.expectedValue, special02.expectedValue);
+  assert.ok(special02.learningSettledCount > special01.learningSettledCount);
+  assert.ok(special02.rank < special01.rank);
+  assert.equal(selected.find((item) => item.kind === "special_number")?.resultKey, "02");
+  assert.equal(ox.expectedValue, dragon.expectedValue);
+  assert.ok(ox.rank < dragon.rank);
+  assert.equal(products[special02.rank - 1], special02);
+  assert.equal(products[ox.rank - 1], ox);
+});
+
 test("every category selects one item even when every EV is negative", () => {
   const products = allNegativeProductFixture();
   const selected = selectMandatoryProductRecommendations(products, 1);
@@ -248,20 +274,37 @@ test("every category selects one item even when every EV is negative", () => {
   assert.ok(selected.every((item) => !item.reason.includes("本期不推荐")));
 });
 
+test("authoritative recommendations never infer ledger provenance from v1 products", () => {
+  const v1Products = allNegativeProductFixture().map((product) => {
+    const copy: Partial<RollingPatternProduct> = { ...product };
+    delete copy.sourceKind;
+    delete copy.sourceProductId;
+    return copy as RollingPatternProduct;
+  });
+  const selected = selectMandatoryProductRecommendations(v1Products, 2);
+
+  assert.ok(selected.every((item) => item.sourceKind === "derived_baseline"));
+  assert.ok(selected.every((item) => item.sourceProductId === null));
+});
+
 test("legacy seed and new learning are applied once in separate stages", () => {
   const histories = historiesFixture({
     key: "coverage_zodiac:猴",
     legacy: { settledCount: 9, hitCount: 7 },
     learned: { settledCount: 1, hitCount: 0 },
   });
-  const monkey = findProduct(
-    buildUnifiedRollingPatternProducts(runFixtureWithMonkey(), histories),
-    "coverage_zodiac",
-    "猴",
-  );
+  const products = buildUnifiedRollingPatternProducts(runFixtureWithMonkey(), histories);
+  const monkey = findProduct(products, "coverage_zodiac", "猴");
+  const selectedMonkey = selectMandatoryProductRecommendations(products, 3)
+    .find((item) => item.kind === "coverage_zodiac");
   assert.equal(monkey.patternProbability, 0.6995139714843693);
   assert.equal(monkey.legacySeedProbability, 0.7536966066105752);
   assert.equal(monkey.estimatedProbability, 0.6029572852884601);
   assert.equal(monkey.learningSettledCount, 1);
   assert.equal(monkey.learningHitCount, 0);
+  assert.equal(monkey.sourceKind, "ledger");
+  assert.equal(monkey.sourceProductId, "legacy-product-monkey");
+  assert.notEqual(monkey.productId, monkey.sourceProductId);
+  assert.equal(selectedMonkey?.sourceKind, "ledger");
+  assert.equal(selectedMonkey?.sourceProductId, "legacy-product-monkey");
 });
