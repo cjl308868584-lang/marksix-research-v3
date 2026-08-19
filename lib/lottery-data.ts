@@ -1,4 +1,4 @@
-import { FALLBACK_DRAWS, isValidDraw, type Draw, type GameId } from "./lottery";
+import { FALLBACK_DRAWS, isValidDraw, type Draw, type GameId } from "./lottery.ts";
 
 const API_CODES: Record<GameId, number> = {
   hk: 10091,

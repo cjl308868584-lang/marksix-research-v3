@@ -232,6 +232,36 @@ export async function readForwardCandidateHistory(game: GameId) {
   ]));
 }
 
+export async function readForwardLearningCandidates(
+  game: GameId,
+  targetIssue: string,
+) {
+  if (!await ensureForwardLearningStore()) return [];
+  const db = runtime.__marksixD1;
+  if (!db) return [];
+  const rows = await db.prepare(
+    `SELECT candidate_json FROM forward_learning_candidates
+     WHERE game = ? AND target_issue = ? ORDER BY slot, result_key`,
+  ).bind(game, targetIssue).all<JsonRow>();
+  return rowsAs<ForwardLearningCandidate>(rows.results, "candidate_json");
+}
+
+export async function readForwardRuleWeights(game: GameId) {
+  if (!await ensureForwardLearningStore()) return new Map<string, number>();
+  const db = runtime.__marksixD1;
+  if (!db) return new Map<string, number>();
+  const rows = await db.prepare(
+    `SELECT update_json FROM forward_learning_rule_updates
+     WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
+  ).bind(game).all<JsonRow>();
+  const updates = rowsAs<ForwardRuleUpdate>(rows.results, "update_json");
+  const weights = new Map<string, number>();
+  for (const update of updates) {
+    if (!weights.has(update.ruleId)) weights.set(update.ruleId, update.afterWeight);
+  }
+  return weights;
+}
+
 export async function persistForwardLearningModelStates(
   states: readonly ForwardLearningModelState[],
 ) {
@@ -529,4 +559,3 @@ CREATE UNIQUE INDEX IF NOT EXISTS forward_learning_model_version_idx ON forward_
 CREATE TABLE IF NOT EXISTS forward_learning_runs (run_id text PRIMARY KEY, task_id text NOT NULL, game text NOT NULL, settled_issue text, target_issue text NOT NULL, engine_version text NOT NULL, status text NOT NULL, run_json text NOT NULL, started_at text NOT NULL, completed_at text);
 CREATE UNIQUE INDEX IF NOT EXISTS forward_learning_run_issue_idx ON forward_learning_runs (game, settled_issue, engine_version) WHERE settled_issue IS NOT NULL;
 `;
-

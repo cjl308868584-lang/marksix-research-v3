@@ -34,6 +34,7 @@ export type ForwardResultHistory = {
 export type ForwardLearningEngineContext = {
   modelStates?: readonly ForwardLearningModelState[];
   resultHistory?: ReadonlyMap<string, ForwardResultHistory>;
+  ruleWeights?: ReadonlyMap<string, number>;
 };
 
 export function buildForwardLearningCandidates(
@@ -48,7 +49,11 @@ export function buildForwardLearningCandidates(
       run.expectedDrawAt,
     );
     const signals = matchingSignals(run, spec.slot, spec.values);
-    const ruleContributions = clusterRuleEvidence(signals);
+    const ruleContributions = clusterRuleEvidence(signals).map((contribution) => ({
+      ...contribution,
+      effectiveContribution: contribution.effectiveContribution *
+        (context.ruleWeights?.get(contribution.ruleId) ?? 1),
+    }));
     const rules30Probability = rulesProbability(
       baselineProbability,
       ruleContributions,
@@ -179,11 +184,7 @@ function candidateSpecs(run: RollingPatternRun) {
     const label = `${tail}尾`;
     specs.push({ slot: "coverage_tail", resultKey: label, label, values: [label] });
   }
-  const activeZodiacs = ZODIAC_NAMES.filter((zodiac) => run.signals.some((signal) =>
-    signal.rule.event.scope === "coverage_6_plus_1" &&
-    signal.rule.event.family === "zodiac" &&
-    signal.rule.event.value === zodiac
-  ));
+  const activeZodiacs = ZODIAC_NAMES;
   for (const values of combinations(activeZodiacs, 2)) {
     const label = values.join("＋");
     specs.push({ slot: "coverage_zodiac_pair", resultKey: values.join("+"), label, values: [...values] });
@@ -328,4 +329,3 @@ function signedPoints(value: number) {
   const points = value * 100;
   return `${points >= 0 ? "+" : ""}${points.toFixed(1)}个百分点`;
 }
-

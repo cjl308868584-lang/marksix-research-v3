@@ -10,6 +10,7 @@ import { getRuntimeEnv } from "../../../../../lib/runtime-env";
 import { isResearchPythonArtifact } from "../../../../../lib/research-python-artifact";
 import type { ResearchPythonArtifact } from "../../../../../lib/research-v3-types";
 import { requireRollingPatternTaskSuccess } from "../../../../../lib/rolling-pattern-service";
+import { runStoredForwardLearningCycle } from "../../../../../lib/forward-learning-service";
 
 export const dynamic = "force-dynamic";
 
@@ -115,6 +116,7 @@ export async function POST(request: NextRequest) {
         runId: envelope.snapshot.runId,
         targetIssue: envelope.snapshot.targetIssue,
         rollingPatterns: envelope.rollingPatterns,
+        forwardLearning: { status: "awaiting_verification" },
         immutable: true,
       };
       const completed = await completeResearchTask(
@@ -127,6 +129,10 @@ export async function POST(request: NextRequest) {
         headers: { "Cache-Control": "private, no-store" },
       });
     }
+    const forwardLearning = await runStoredForwardLearningCycle({
+      game: body.game,
+      asOf: body.asOf ? new Date(body.asOf) : new Date(),
+    });
     const response = {
       status: envelope.cycleStatus ??
         (envelope.source === "stored" ? "existing" : "completed"),
@@ -134,6 +140,13 @@ export async function POST(request: NextRequest) {
       runId: envelope.snapshot.runId,
       targetIssue: envelope.snapshot.targetIssue,
       rollingPatterns: envelope.rollingPatterns,
+      forwardLearning: {
+        status: forwardLearning.status,
+        settledIssue: forwardLearning.settledIssue,
+        targetIssue: forwardLearning.targetIssue,
+        modelVersion: forwardLearning.modelVersion,
+        forecastCount: forwardLearning.forecasts.length,
+      },
       immutable: true,
     };
     const completed = await completeResearchTask(
