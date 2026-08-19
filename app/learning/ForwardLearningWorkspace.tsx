@@ -4,11 +4,11 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { GAME_META, type GameId } from "../../lib/lottery";
 import type {
-  ForwardLearningForecast,
-  ForwardLearningModelState,
+  AuthoritativeLearningForecast,
   ForwardLearningReview,
   ForwardLearningSlot,
-  ForwardLearningSlotPerformance,
+  ProductLearningSlotStatus,
+  ResolvedV2SlotPerformance,
 } from "../../lib/forward-learning-types";
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
@@ -21,10 +21,10 @@ const SLOT_LABELS: Record<ForwardLearningSlot, string> = {
 };
 
 type LearningData = {
-  forecasts: ForwardLearningForecast[];
+  forecasts: AuthoritativeLearningForecast[];
   reviews: ForwardLearningReview[];
-  performance: ForwardLearningSlotPerformance[];
-  models: ForwardLearningModelState[];
+  performance: ResolvedV2SlotPerformance[];
+  learning: ProductLearningSlotStatus[];
 };
 
 export function ForwardLearningWorkspace() {
@@ -38,16 +38,16 @@ export function ForwardLearningWorkspace() {
     setLoading(true);
     setError("");
     void Promise.all([
-      readJson<{ forecasts?: ForwardLearningForecast[] }>(`/api/learning/forecast?game=${game}`, controller.signal),
+      readJson<{ forecasts?: AuthoritativeLearningForecast[] }>(`/api/learning/forecast?game=${game}`, controller.signal),
       readJson<{ reviews?: ForwardLearningReview[] }>(`/api/learning/reviews?game=${game}&limit=30`, controller.signal),
-      readJson<{ performance?: ForwardLearningSlotPerformance[] }>(`/api/learning/performance?game=${game}`, controller.signal),
-      readJson<{ models?: ForwardLearningModelState[] }>(`/api/learning/model?game=${game}`, controller.signal),
+      readJson<{ slots?: ResolvedV2SlotPerformance[] }>(`/api/learning/performance?game=${game}`, controller.signal),
+      readJson<{ learning?: ProductLearningSlotStatus[] }>(`/api/learning/model?game=${game}`, controller.signal),
     ]).then(([forecast, reviews, performance, model]) => {
       setData({
         forecasts: forecast.forecasts ?? [],
         reviews: reviews.reviews ?? [],
-        performance: performance.performance ?? [],
-        models: model.models ?? [],
+        performance: performance.slots ?? [],
+        learning: model.learning ?? [],
       });
     }).catch((reason) => {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) {
@@ -73,7 +73,7 @@ export function ForwardLearningWorkspace() {
         <section className="v3-hero forward-learning-hero">
           <span>PRE-DRAW FREEZE · FORWARD SCORE · ONLINE LEARNING</span>
           <h1>每期固定五项，<br />开奖以后全部交卷</h1>
-          <p>这里是独立的前瞻学习账本。每期只保存一个单生肖、单尾数、二连肖、三连肖和特码数字；先冻结，后核验，再更新下一期。</p>
+          <p>这里展示与近30期购买参考同源的五项。每类始终给出一个具体结果；赔率参与排序，负EV也会保留并标明风险。</p>
           <div className="v3-game-switch" role="group" aria-label="选择彩种">
             {GAMES.map((item) => <button type="button" className={game === item ? "active" : ""} onClick={() => setGame(item)} key={item}>{GAME_META[item].name}</button>)}
           </div>
@@ -87,7 +87,7 @@ export function ForwardLearningWorkspace() {
               <div><span>研究彩种</span><strong>{GAME_META[game].name}</strong></div>
               <div><span>下一目标期</span><strong>{data.forecasts[0]?.targetIssue ?? "待冻结"}</strong></div>
               <div><span>正式样本</span><strong>{data.reviews.length}期</strong></div>
-              <div><span>模型版本</span><strong>{data.models[0]?.version ?? "基线启动"}</strong></div>
+              <div><span>学习口径</span><strong>同源产品五项</strong></div>
             </section>
 
             <section className={`forward-learning-verdict ${conclusion.tone}`}>
@@ -98,7 +98,7 @@ export function ForwardLearningWorkspace() {
 
             <section className="v3-section-head">
               <div><span>NEXT ISSUE · FIVE OFFICIAL SLOTS</span><h2>下一期冻结方向</h2></div>
-              <p>每个槽位只选概率最高的一项；赔率不参与模型排序。页面刷新不会改动冻结结果。</p>
+              <p>与近30期购买参考同源；赔率参与排序。即使低于盈亏平衡线，也显示具体结果、负EV与风险说明。</p>
             </section>
             {data.forecasts.length === 5 ? (
               <section className="forward-learning-grid" aria-label="每期固定五项">
@@ -121,15 +121,10 @@ export function ForwardLearningWorkspace() {
             <PerformanceBoard performance={data.performance} />
 
             <section className="forward-learning-model-board">
-              <header><div><span>THREE EXPERTS</span><h2>模型权重</h2></div><p>随机基线专家永不低于25%；单一专家不会超过60%。</p></header>
+              <header><div><span>PRODUCT LEARNING</span><h2>同源产品学习状态</h2></div><p>只统计最高 committed v2 修订；候选诊断与五项正式样本分开计数。</p></header>
               <div className="forward-learning-model-grid">
-                {data.models.map((model) => <ModelCard model={model} key={model.stateId} />)}
+                {data.learning.map((status) => <LearningStatusCard status={status} key={status.slot} />)}
               </div>
-            </section>
-
-            <section className="forward-learning-model-board">
-              <header><div><span>RULE AUDIT</span><h2>规则奖励与降权</h2></div><p>只根据开奖前冻结的正式方向更新；高置信错误处罚更重，命中但不高于基线不奖励。</p></header>
-              <RuleUpdates review={latest} />
             </section>
           </>
         )}
@@ -138,18 +133,22 @@ export function ForwardLearningWorkspace() {
   );
 }
 
-function ForecastCard({ forecast, index }: { forecast: ForwardLearningForecast; index: number }) {
+function ForecastCard({ forecast, index }: { forecast: AuthoritativeLearningForecast; index: number }) {
   return <article className={`forward-learning-card slot-${forecast.slot}`}>
-    <header><span>{String(index + 1).padStart(2, "0")} · {SLOT_LABELS[forecast.slot]}</span><strong>{percent(forecast.finalProbability)}</strong></header>
+    <header><span>{String(index + 1).padStart(2, "0")} · {SLOT_LABELS[forecast.slot]}</span><strong>{percent(forecast.learnedProbability)}</strong></header>
     <h2>{forecast.label}</h2>
-    <p>{forecast.explanation[0] ?? "基于精确随机基线与已结算前瞻样本。"}</p>
+    <p>{forecast.reason}</p>
     <div className="forward-learning-card-kpis">
-      <div><span>精确基线</span><strong>{percent(forecast.baselineProbability)}</strong></div>
-      <div><span>相对变化</span><strong>{signedPoints(forecast.finalProbability - forecast.baselineProbability)}</strong></div>
-      <div><span>独立证据簇</span><strong>{forecast.evidenceClusterCount}</strong></div>
-      <div><span>已结算样本</span><strong>{forecast.forwardSettledCount}</strong></div>
+      <div><span>精确基线</span><strong>{percent(forecast.product.baselineProbability)}</strong></div>
+      <div><span>30期概率</span><strong>{percent(forecast.p30)}</strong></div>
+      <div><span>净赔率</span><strong>1:{odds(forecast.netOdds)}</strong></div>
+      <div><span>盈亏平衡</span><strong>{percent(forecast.breakEvenProbability)}</strong></div>
+      <div><span>每1单位EV</span><strong className={forecast.expectedValue >= 0 ? "positive" : "negative"}>{signedValue(forecast.expectedValue)}</strong></div>
+      <div><span>当前30期支持/命中</span><strong>{forecast.product.support}/{forecast.product.hits}</strong></div>
+      <div><span>旧种子结算/命中</span><strong>{forecast.legacySettledCount}/{forecast.legacyHitCount}</strong></div>
+      <div><span>新学习结算/命中</span><strong>{forecast.learningSettledCount}/{forecast.learningHitCount}</strong></div>
     </div>
-    <footer><span>备选：{forecast.topAlternative ?? "无"}</span><span>冻结 {formatTime(forecast.frozenAt)}</span></footer>
+    <footer><span>官方修订 r{forecast.revision}</span><span>冻结 {formatTime(forecast.frozenAt)}</span></footer>
   </article>;
 }
 
@@ -170,7 +169,7 @@ function LatestReview({ review }: { review: ForwardLearningReview }) {
   </section>;
 }
 
-function PerformanceBoard({ performance }: { performance: ForwardLearningSlotPerformance[] }) {
+function PerformanceBoard({ performance }: { performance: ResolvedV2SlotPerformance[] }) {
   return <section className="forward-learning-performance">
     {performance.map((item) => {
       const recent = item.windows.find((window) => window.window === "recent30") ?? item.windows[0];
@@ -185,15 +184,12 @@ function PerformanceBoard({ performance }: { performance: ForwardLearningSlotPer
   </section>;
 }
 
-function ModelCard({ model }: { model: ForwardLearningModelState }) {
-  return <article><header><span>{SLOT_LABELS[model.slot]}</span><small>学至 {model.learnedThroughIssue ?? "尚未结算"}</small></header>
-    {(["baseline", "rules30", "forward"] as const).map((expert) => <div className="forward-learning-weight" key={expert}><span>{expertLabel(expert)}</span><i><b style={{ width: `${model.weights[expert] * 100}%` }} /></i><strong>{percent(model.weights[expert])}</strong></div>)}
+function LearningStatusCard({ status }: { status: ProductLearningSlotStatus }) {
+  return <article><header><span>{SLOT_LABELS[status.slot]}</span><small>学至 {status.learnedThroughIssue ?? "尚未结算"}</small></header>
+    <div className="forward-learning-status-line"><span>已结算候选</span><strong>{status.settledCandidates}</strong></div>
+    <div className="forward-learning-status-line"><span>五项正式样本</span><strong>{status.officialSamples}</strong></div>
+    <div className="forward-learning-status-line"><span>最新学习调整</span><strong>{signedPoints(status.latestAdjustmentPoints)}</strong></div>
   </article>;
-}
-
-function RuleUpdates({ review }: { review: ForwardLearningReview | null }) {
-  if (!review?.ruleUpdates.length) return <EmptyLearning text="本次正式方向没有可更新的独立规则，或尚无结算样本。" />;
-  return <div className="forward-learning-rule-list">{review.ruleUpdates.slice(0, 20).map((update) => <article key={`${update.slot}:${update.ruleId}`}><span className={update.action}>{update.action === "rewarded" ? "奖励" : update.action === "reduced" ? "降权" : "不变"}</span><div><strong>{SLOT_LABELS[update.slot]}</strong><p>{update.reason}</p></div><small>{percent(update.beforeWeight)} → {percent(update.afterWeight)}</small></article>)}</div>;
 }
 
 function EmptyLearning({ text }: { text: string }) { return <section className="forward-learning-empty">{text}</section>; }
@@ -205,18 +201,19 @@ async function readJson<T>(url: string, signal: AbortSignal): Promise<T> {
   return payload;
 }
 
-function learningConclusion(performance: ForwardLearningSlotPerformance[]) {
+function learningConclusion(performance: ResolvedV2SlotPerformance[]) {
   const all = performance.flatMap((item) => item.windows.filter((window) => window.window === "all"));
   const settled = all.reduce((sum, item) => sum + item.settledCount, 0);
   const weightedSkill = settled ? all.reduce((sum, item) => sum + item.brierSkill * item.settledCount, 0) / settled : 0;
   if (!settled) return { tone: "neutral", title: "尚无证据", detail: "首期只负责冻结。必须等待真实开奖形成前瞻样本后，才判断模型是否优于随机基线。" };
   if (weightedSkill > 0.02) return { tone: "positive", title: "目前优于基线", detail: `累计 ${settled} 个正式槽位样本，加权 Brier skill 为 ${signedPercent(weightedSkill)}。仍需继续观察各槽位是否稳定。` };
-  if (weightedSkill < 0) return { tone: "negative", title: "目前没有进步", detail: `累计 ${settled} 个正式槽位样本仍落后随机基线。系统应降低规则与历史专家权重，主动回归基线。` };
+  if (weightedSkill < 0) return { tone: "negative", title: "目前没有进步", detail: `累计 ${settled} 个正式槽位样本仍落后随机基线。同源产品学习会据此收缩下一期概率，不追随单期开奖结果。` };
   return { tone: "neutral", title: "与基线基本相当", detail: `累计 ${settled} 个正式槽位样本尚未证明稳定优势，系统不会把短期高命中包装成进步。` };
 }
 
-function expertLabel(value: "baseline" | "rules30" | "forward") { return value === "baseline" ? "随机基线" : value === "rules30" ? "30期规律" : "前瞻历史"; }
 function percent(value: number) { return `${(value * 100).toFixed(1)}%`; }
 function signedPercent(value: number) { return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`; }
 function signedPoints(value: number) { return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}个百分点`; }
+function signedValue(value: number) { return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`; }
+function odds(value: number) { return Number.isInteger(value) ? String(value) : value.toFixed(2); }
 function formatTime(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? "—" : new Intl.DateTimeFormat("zh-CN", { timeZone: "Asia/Shanghai", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(date); }

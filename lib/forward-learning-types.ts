@@ -237,6 +237,28 @@ export type ForwardLearningSlotPerformance = {
   windows: ForwardLearningPerformanceWindow[];
 };
 
+export type ResolvedV2SlotPerformance = ForwardLearningSlotPerformance & {
+  revisionSource: "resolved-v2";
+};
+
+export type ProductLearningSlotStatus = {
+  slot: ForwardLearningSlot;
+  settledCandidates: number;
+  officialSamples: number;
+  latestAdjustmentPoints: number;
+  learnedThroughIssue: string | null;
+};
+
+export type AuthoritativeLearningForecast = AuthoritativeRecommendation & {
+  slot: ForwardLearningSlot;
+  forecastId: string;
+  official: true;
+  targetIssue: string;
+  label: string;
+  frozenAt: string;
+  explanation: string[];
+};
+
 export type ForwardLearningReview = {
   run: ForwardLearningRun;
   scores: ForwardLearningScore[];

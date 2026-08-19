@@ -11,6 +11,7 @@ import {
   readRollingPatternValueLedger,
 } from "../../../../lib/rolling-pattern-store";
 import { buildRollingPatternProducts } from "../../../../lib/rolling-pattern-value";
+import { readResolvedProductRecommendations } from "../../../../lib/forward-learning-v2-store";
 import type {
   RollingPatternFamily,
   RollingPatternScope,
@@ -42,11 +43,31 @@ export async function GET(request: NextRequest) {
         scores: [],
         summary: null,
         specialNumberConsensus: [],
+        recommendations: [],
         valueAnalysis: [],
         settlementHistory: [],
         pagination: { page, pageSize: PAGE_SIZE, total: 0, pages: 0 },
       },
       { status: 404, headers: noStore() },
+    );
+  }
+  let resolved;
+  try {
+    resolved = await readResolvedProductRecommendations(game, envelope.run.targetIssue);
+  } catch {
+    return NextResponse.json(
+      { error: "权威五项来源不完整或混合，暂不展示部分结果。" },
+      { status: 503, headers: noStore() },
+    );
+  }
+  if (!resolved || resolved.targetIssue !== envelope.run.targetIssue ||
+    resolved.recommendations.length !== 5 ||
+    resolved.recommendations.some((item) =>
+      item.sourceRunId !== envelope.run.runId || item.revision !== resolved.revision
+    )) {
+    return NextResponse.json(
+      { error: "权威五项与冻结规律运行不一致。" },
+      { status: 503, headers: noStore() },
     );
   }
   const view = selectRollingPatternView(envelope.signals, {
@@ -87,6 +108,7 @@ export async function GET(request: NextRequest) {
       run: { ...envelope.run, signals: [] },
       summary: view.summary,
       specialNumberConsensus,
+      recommendations: resolved.recommendations,
       valueAnalysis,
       settlementHistory,
       signals: filteredSignals.slice(start, start + PAGE_SIZE),

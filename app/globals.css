@@ -8307,6 +8307,7 @@ footer p {
   background: #0b0e0f;
 }
 .rolling-purchase-grid article.recommended { border-color: rgba(208, 177, 96, .55); }
+.rolling-purchase-grid article.risk { border-color: rgba(217, 112, 98, .48); }
 .rolling-purchase-grid article > header {
   padding: 11px;
   display: grid;
@@ -9025,6 +9026,8 @@ footer p {
 .forward-learning-model-grid article > header { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 11px; }
 .forward-learning-model-grid article > header span { color: #c9cec9; font-size: 10px; }
 .forward-learning-model-grid article > header small { color: #5f6763; font-size: 8px; }
+.forward-learning-status-line { display: flex; justify-content: space-between; gap: 12px; margin-top: 8px; color: #737b77; font-size: 9px; }
+.forward-learning-status-line strong { color: #cbd0cd; font-family: var(--font-mono); font-size: 9px; }
 .forward-learning-weight { display: grid; grid-template-columns: 58px 1fr 38px; align-items: center; gap: 8px; margin-top: 7px; }
 .forward-learning-weight span { color: #737b77; font-size: 8px; }
 .forward-learning-weight i { height: 4px; border-radius: 99px; background: #252b2c; overflow: hidden; }

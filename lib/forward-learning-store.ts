@@ -3,6 +3,7 @@ import { getZodiac } from "./zodiac.ts";
 import { brierLoss, binaryLogLoss } from "./forward-learning-math.ts";
 import type { ForwardResultHistory } from "./forward-learning-engine.ts";
 import {
+  readResolvedProductRecommendations,
   readResolvedForwardSnapshot,
   settleResolvedForwardSnapshot,
 } from "./forward-learning-v2-store.ts";
@@ -16,7 +17,10 @@ import {
   type ForwardLearningReview,
   type ForwardLearningRun,
   type ForwardLearningScore,
+  type ForwardLearningScoreV2,
   type ForwardLearningSlotPerformance,
+  type ProductLearningSlotStatus,
+  type ResolvedV2SlotPerformance,
   type ForwardRuleUpdate,
 } from "./forward-learning-types.ts";
 
@@ -222,6 +226,22 @@ export async function readForwardLearningForecast(
   );
 }
 
+export function projectResolvedLearningForecasts(
+  resolved: NonNullable<Awaited<ReturnType<typeof readResolvedProductRecommendations>>>,
+) {
+  const recommendations = new Map(resolved.recommendations.map((item) => [item.kind, item]));
+  return resolved.forecasts.map((forecast) => ({
+    ...recommendations.get(forecast.slot)!,
+    slot: forecast.slot,
+    forecastId: forecast.forecastId,
+    official: true as const,
+    targetIssue: forecast.targetIssue,
+    label: forecast.label,
+    frozenAt: forecast.frozenAt,
+    explanation: [...forecast.explanation],
+  }));
+}
+
 export async function readForwardCandidateHistory(game: GameId) {
   if (!await ensureForwardLearningStore()) return new Map<string, ForwardResultHistory>();
   const db = runtime.__marksixD1;
@@ -296,16 +316,30 @@ export async function persistForwardLearningModelStates(
 
 export async function readForwardLearningModel(game: GameId) {
   if (!await ensureForwardLearningStore()) return [];
-  const db = runtime.__marksixD1;
-  if (!db) return [];
-  const rows = await db.prepare(
-    `SELECT state_json FROM forward_learning_model_states
-     WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
-  ).bind(game).all<JsonRow>();
-  const parsed = rowsAs<ForwardLearningModelState>(rows.results, "state_json");
-  return FORWARD_LEARNING_SLOTS.flatMap((slot) =>
-    parsed.filter((state) => state.slot === slot).slice(0, 1)
+  const scores = await readResolvedV2Scores(game, false);
+  const resolved = await readResolvedProductRecommendations(game);
+  const recommendations = new Map(
+    (resolved?.recommendations ?? []).map((item) => [item.kind, item]),
   );
+  return FORWARD_LEARNING_SLOTS.map((slot): ProductLearningSlotStatus => {
+    const slotScores = scores.filter((score) => score.slot === slot);
+    const official = slotScores.filter((score) => score.official);
+    const recommendation = recommendations.get(slot);
+    return {
+      slot,
+      settledCandidates: slotScores.length,
+      officialSamples: official.length,
+      latestAdjustmentPoints: recommendation
+        ? recommendation.learnedProbability - recommendation.legacySeedProbability
+        : 0,
+      learnedThroughIssue: official.reduce<string | null>(
+        (latest, score) => !latest || compareIssues(score.targetIssue, latest) > 0
+          ? score.targetIssue
+          : latest,
+        null,
+      ),
+    };
+  });
 }
 
 export async function persistForwardRuleUpdates(updates: readonly ForwardRuleUpdate[]) {
@@ -329,25 +363,21 @@ export async function persistForwardRuleUpdates(updates: readonly ForwardRuleUpd
 }
 
 export async function readForwardLearningPerformance(game: GameId) {
-  if (!await ensureForwardLearningStore()) return [];
-  const db = runtime.__marksixD1;
-  if (!db) return [];
-  const rows = await db.prepare(
-    `SELECT score_json FROM forward_learning_scores
-     WHERE game = ? AND official = 1 ORDER BY target_issue DESC, slot`,
-  ).bind(game).all<JsonRow>();
-  const scores = rowsAs<ForwardLearningScore>(rows.results, "score_json");
-  return FORWARD_LEARNING_SLOTS.map((slot) => {
+  if (!await ensureForwardLearningStore()) return { officialSettledCount: 0, slots: [] };
+  const scores = await readResolvedV2Scores(game, true);
+  const slots = FORWARD_LEARNING_SLOTS.map((slot) => {
     const slotScores = scores.filter((score) => score.slot === slot);
     return {
       slot,
+      revisionSource: "resolved-v2" as const,
       windows: [
         performanceWindow("recent10", slotScores.slice(0, 10)),
         performanceWindow("recent30", slotScores.slice(0, 30)),
         performanceWindow("all", slotScores),
       ],
-    } satisfies ForwardLearningSlotPerformance;
+    } satisfies ResolvedV2SlotPerformance;
   });
+  return { officialSettledCount: scores.length, slots };
 }
 
 export async function readForwardLearningReviews(
@@ -364,11 +394,7 @@ export async function readForwardLearningReviews(
      ORDER BY completed_at DESC LIMIT ?`,
   ).bind(game, bounded).all<JsonRow>();
   const runs = rowsAs<ForwardLearningRun>(runRows.results, "run_json");
-  const scoreRows = await db.prepare(
-    `SELECT score_json FROM forward_learning_scores
-     WHERE game = ? AND official = 1 ORDER BY target_issue DESC, slot`,
-  ).bind(game).all<JsonRow>();
-  const scores = rowsAs<ForwardLearningScore>(scoreRows.results, "score_json");
+  const scores = await readResolvedV2Scores(game, true);
   const modelRows = await db.prepare(
     `SELECT state_json FROM forward_learning_model_states
      WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
@@ -379,17 +405,75 @@ export async function readForwardLearningReviews(
      WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
   ).bind(game).all<JsonRow>();
   const updates = rowsAs<ForwardRuleUpdate>(updateRows.results, "update_json");
-  return runs.map((run) => ({
-    run,
-    scores: scores.filter((score) => score.targetIssue === run.settledIssue),
-    modelBefore: run.modelVersionBefore
-      ? models.filter((state) => state.version === run.modelVersionBefore)
-      : [],
-    modelAfter: run.modelVersionAfter
-      ? models.filter((state) => state.version === run.modelVersionAfter)
-      : [],
-    ruleUpdates: updates.filter((update) => update.runId === run.runId),
-  }));
+  return runs.flatMap((run) => {
+    const issueScores = scores.filter((score) => score.targetIssue === run.settledIssue);
+    if (!issueScores.length) return [];
+    assertCompleteOfficialIssue(issueScores, run.settledIssue);
+    const revision = issueScores[0].revision;
+    return [{
+      run: { ...run, revision, revisionSource: "resolved-v2" as const },
+      scores: issueScores,
+      modelBefore: run.modelVersionBefore
+        ? models.filter((state) => state.version === run.modelVersionBefore)
+        : [],
+      modelAfter: run.modelVersionAfter
+        ? models.filter((state) => state.version === run.modelVersionAfter)
+        : [],
+      ruleUpdates: updates.filter((update) => update.runId === run.runId),
+    }];
+  });
+}
+
+async function readResolvedV2Scores(game: GameId, officialOnly: boolean) {
+  const db = runtime.__marksixD1;
+  if (!db) return [];
+  const rows = await db.prepare(
+    `SELECT scores.score_json
+     FROM forward_learning_revision_scores scores
+     INNER JOIN forward_learning_revisions revisions
+       ON revisions.revision_id = scores.revision_id
+      AND revisions.status = 'committed'
+     INNER JOIN (
+       SELECT game, target_issue, MAX(revision) AS revision
+       FROM forward_learning_revisions
+       WHERE status = 'committed' AND game = ?
+       GROUP BY game, target_issue
+     ) latest
+       ON latest.game = scores.game
+      AND latest.target_issue = scores.target_issue
+      AND latest.revision = scores.revision
+     WHERE scores.game = ? ${officialOnly ? "AND scores.official = 1" : ""}
+     ORDER BY CAST(scores.target_issue AS INTEGER) DESC, scores.slot, scores.result_key`,
+  ).bind(game, game).all<JsonRow>();
+  const scores = rowsAs<ForwardLearningScoreV2>(rows.results, "score_json");
+  if (officialOnly) {
+    const issues = new Set(scores.map((score) => score.targetIssue));
+    for (const issue of issues) {
+      assertCompleteOfficialIssue(
+        scores.filter((score) => score.targetIssue === issue),
+        issue,
+      );
+    }
+  }
+  return scores;
+}
+
+function assertCompleteOfficialIssue(
+  scores: readonly ForwardLearningScoreV2[],
+  issue: string | null,
+) {
+  const slots = new Set(scores.map((score) => score.slot));
+  const revisions = new Set(scores.map((score) => score.revision));
+  if (scores.length !== FORWARD_LEARNING_SLOTS.length ||
+    slots.size !== FORWARD_LEARNING_SLOTS.length || revisions.size !== 1 ||
+    scores.some((score) => !score.official || score.targetIssue !== issue) ||
+    !FORWARD_LEARNING_SLOTS.every((slot) => slots.has(slot))) {
+    throw new Error(`resolved-v2正式五项不完整：${issue ?? "unknown"}`);
+  }
+}
+
+function compareIssues(left: string, right: string) {
+  return left.localeCompare(right, "en", { numeric: true });
 }
 
 export async function claimForwardLearningRun(run: ForwardLearningRun) {

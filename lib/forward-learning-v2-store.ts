@@ -2,6 +2,10 @@ import type { Draw, GameId } from "./lottery.ts";
 import { getZodiac } from "./zodiac.ts";
 import { binaryLogLoss, brierLoss } from "./forward-learning-math.ts";
 import type { ForwardResultHistory } from "./forward-learning-engine.ts";
+import type {
+  AuthoritativeRecommendation,
+  RollingPatternProduct,
+} from "./rolling-pattern-types.ts";
 import {
   FORWARD_LEARNING_SLOTS,
   type ForwardLearningCandidate,
@@ -13,6 +17,7 @@ import {
   type ForwardLearningRollout,
   type ForwardLearningScore,
   type ForwardLearningScoreV2,
+  type ForwardLearningSlot,
   type ResolvedForwardSnapshot,
   type ResolvedSettlement,
 } from "./forward-learning-types.ts";
@@ -23,6 +28,15 @@ const runtime = globalThis as typeof globalThis & {
 };
 
 type JsonRow = Record<string, string | number | null>;
+
+export type ResolvedProductRecommendations = {
+  game: GameId;
+  targetIssue: string;
+  revision: number;
+  revisionId: string;
+  recommendations: AuthoritativeRecommendation[];
+  forecasts: ForwardLearningForecastV2[];
+};
 
 export async function ensureForwardLearningV2Store(): Promise<void> {
   const db = runtime.__marksixD1;
@@ -282,6 +296,42 @@ export async function readResolvedForwardSnapshot(
     targetIssue,
     candidates,
     forecasts,
+  };
+}
+
+export async function readResolvedProductRecommendations(
+  game: GameId,
+  issue?: string | null,
+): Promise<ResolvedProductRecommendations | null> {
+  await ensureForwardLearningV2Store();
+  const db = runtime.__marksixD1;
+  if (!db) return null;
+  const targetIssue = issue ?? await latestV2TargetIssue(db, game);
+  if (!targetIssue) return null;
+  const row = await db.prepare(
+    `SELECT revision_id, revision_json FROM forward_learning_revisions
+     WHERE game = ? AND target_issue = ? AND status = 'committed'
+     ORDER BY revision DESC LIMIT 1`,
+  ).bind(game, targetIssue).first<JsonRow>();
+  const revision = parseJson<ForwardLearningRevision>(row?.revision_json);
+  if (!revision || revision.status !== "committed" || revision.game !== game ||
+    revision.targetIssue !== targetIssue || revision.revisionId !== row?.revision_id) {
+    return null;
+  }
+  const forecastRows = await db.prepare(
+    `SELECT forecast_json FROM forward_learning_revision_forecasts
+     WHERE revision_id = ? ORDER BY slot`,
+  ).bind(revision.revisionId).all<JsonRow>();
+  const forecasts = rowsAs<ForwardLearningForecastV2>(forecastRows.results, "forecast_json")
+    .sort((left, right) => slotOrder(left.slot) - slotOrder(right.slot));
+  assertResolvedForecasts(forecasts, revision);
+  return {
+    game,
+    targetIssue,
+    revision: revision.revision,
+    revisionId: revision.revisionId,
+    forecasts,
+    recommendations: forecasts.map(forecastToRecommendation),
   };
 }
 
@@ -692,6 +742,124 @@ function candidateMatched(
   }
   const zodiacs = new Set(numbers.map((number) => getZodiac(number, draw.drawAt)));
   return candidate.values.every((value) => zodiacs.has(value as never));
+}
+
+function assertResolvedForecasts(
+  forecasts: readonly ForwardLearningForecastV2[],
+  revision: ForwardLearningRevision,
+) {
+  const slots = new Set(forecasts.map((forecast) => forecast.slot));
+  if (forecasts.length !== FORWARD_LEARNING_SLOTS.length ||
+    slots.size !== FORWARD_LEARNING_SLOTS.length ||
+    !FORWARD_LEARNING_SLOTS.every((slot) => slots.has(slot)) ||
+    forecasts.some((forecast) =>
+      !forecast.official || forecast.rank !== 1 ||
+      forecast.game !== revision.game ||
+      forecast.targetIssue !== revision.targetIssue ||
+      forecast.revisionId !== revision.revisionId ||
+      forecast.revision !== revision.revision ||
+      forecast.sourceRunId !== revision.sourceRunId ||
+      forecast.dataVersion !== revision.dataVersion
+    )) {
+    throw new Error("resolved-v2权威五项来源不完整或混合");
+  }
+}
+
+function forecastToRecommendation(
+  forecast: ForwardLearningForecastV2,
+): AuthoritativeRecommendation {
+  const product = forecastToProduct(forecast);
+  return {
+    kind: forecast.slot,
+    resultKey: forecast.resultKey,
+    values: [...forecast.values],
+    sourceRunId: forecast.sourceRunId,
+    sourceProductId: forecast.sourceProductId,
+    sourceKind: forecast.sourceKind,
+    dataVersion: forecast.dataVersion,
+    revision: forecast.revision,
+    p30: forecast.patternProbability,
+    legacySeedProbability: forecast.legacySeedProbability,
+    learnedProbability: forecast.learnedProbability,
+    netOdds: forecast.netOdds,
+    breakEvenProbability: forecast.breakEvenProbability,
+    expectedValue: forecast.expectedValue,
+    legacySettledCount: forecast.legacySettledCount,
+    legacyHitCount: forecast.legacyHitCount,
+    learningSettledCount: forecast.learningSettledCount,
+    learningHitCount: forecast.learningHitCount,
+    product,
+    reason: productReason(product),
+  };
+}
+
+function forecastToProduct(forecast: ForwardLearningForecastV2): RollingPatternProduct {
+  const learningMissCount = Math.max(
+    0,
+    forecast.learningSettledCount - forecast.learningHitCount,
+  );
+  return {
+    runId: forecast.sourceRunId,
+    productId: forecast.sourceProductId ?? forecast.candidateId,
+    dataVersion: forecast.dataVersion,
+    game: forecast.game,
+    targetIssue: forecast.targetIssue,
+    scope: forecast.slot === "special_number" ? "special" : "coverage_6_plus_1",
+    kind: forecast.slot,
+    label: forecast.label,
+    values: [...forecast.values],
+    evidenceEventIds: [],
+    strategyCount: forecast.rawRuleCount,
+    support: forecast.support,
+    hits: forecast.hits,
+    misses: Math.max(0, forecast.support - forecast.hits),
+    baselineProbability: forecast.baselineProbability,
+    patternProbability: forecast.patternProbability,
+    legacySeedProbability: forecast.legacySeedProbability,
+    estimatedProbability: forecast.learnedProbability,
+    netOdds: forecast.netOdds,
+    breakEvenProbability: forecast.breakEvenProbability,
+    expectedValue: forecast.expectedValue,
+    valueStatus: forecast.expectedValue >= 0 ? "positive" : "negative",
+    legacySettledCount: forecast.legacySettledCount,
+    legacyHitCount: forecast.legacyHitCount,
+    learningSettledCount: forecast.learningSettledCount,
+    learningHitCount: forecast.learningHitCount,
+    learningMissCount,
+    sourceKind: forecast.sourceKind,
+    sourceProductId: forecast.sourceProductId,
+    derivedDefinitionHash: forecast.derivedDefinitionHash,
+    forwardSettledCount: forecast.learningSettledCount,
+    forwardHitCount: forecast.learningHitCount,
+    forwardMissCount: learningMissCount,
+    rank: 1,
+    frozenAt: forecast.frozenAt,
+  };
+}
+
+function productReason(product: RollingPatternProduct) {
+  const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+  const expected = `${product.expectedValue >= 0 ? "+" : ""}${product.expectedValue.toFixed(2)}`;
+  const learning = product.learningSettledCount
+    ? `同源产品学习已结算${product.learningSettledCount}期，命中${product.learningHitCount}期`
+    : "同源产品学习尚无结算";
+  const risk = product.expectedValue >= 0
+    ? `高于盈亏平衡线${percent(product.breakEvenProbability)}`
+    : `低于盈亏平衡线${percent(product.breakEvenProbability)}，属于负期望风险项`;
+  return `当前30期共同审计${product.support}次、命中${product.hits}次；${learning}。参考概率${percent(product.estimatedProbability)}，${risk}，每1单位期望${expected}。`;
+}
+
+function slotOrder(slot: ForwardLearningSlot) {
+  return FORWARD_LEARNING_SLOTS.indexOf(slot);
+}
+
+async function latestV2TargetIssue(db: D1Database, game: GameId) {
+  const row = await db.prepare(
+    `SELECT target_issue FROM forward_learning_revisions
+     WHERE game = ? AND status = 'committed'
+     ORDER BY CAST(target_issue AS INTEGER) DESC, revision DESC LIMIT 1`,
+  ).bind(game).first<{ target_issue: string }>();
+  return row?.target_issue ?? null;
 }
 
 async function initializeSchema(db: D1Database) {

@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { GAME_META, type GameId } from "../../lib/lottery";
-import { selectRollingPatternRecommendations } from "../../lib/rolling-pattern-value";
 import type {
+  AuthoritativeRecommendation,
   RollingPatternEnvelope,
   RollingPatternFamily,
   RollingPatternProduct,
@@ -41,6 +41,7 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
   scores: RollingPatternScore[];
   summary: RollingPatternSummary | null;
   specialNumberConsensus: SpecialNumberConsensus[];
+  recommendations: AuthoritativeRecommendation[];
   valueAnalysis: RollingPatternProduct[];
   settlementHistory: RollingPatternValueLedgerEntry[];
   pagination: {
@@ -223,7 +224,7 @@ export function RollingPatternWorkspace() {
         {!loading && !error && data?.run && (
           <>
             <PatternRunContext run={data.run} />
-            <PurchaseRecommendationPanel items={data.valueAnalysis ?? []} scope={scope} />
+            <PurchaseRecommendationPanel items={data.recommendations ?? []} />
             {data.summary && (
               <PatternSummaryPanel
                 summary={data.summary}
@@ -318,14 +319,11 @@ export function RollingPatternWorkspace() {
   );
 }
 
-function PurchaseRecommendationPanel({
+export function PurchaseRecommendationPanel({
   items,
-  scope,
 }: {
-  items: RollingPatternProduct[];
-  scope: RollingPatternScope;
+  items: AuthoritativeRecommendation[];
 }) {
-  const recommendations = selectRollingPatternRecommendations(items, scope);
   return (
     <section className="rolling-purchase-recommendation" aria-labelledby="rolling-purchase-title">
       <header>
@@ -334,24 +332,22 @@ function PurchaseRecommendationPanel({
           <h2 id="rolling-purchase-title">本期购买参考</h2>
         </div>
         <p>
-          每种玩法只给一个参考结果；达不到赔率盈亏平衡线时明确不推荐。
+          每种玩法始终显示一项；赔率参与排序，负EV项目仍会显示并明确风险。
         </p>
       </header>
       <div className="rolling-purchase-grid">
-        {recommendations.map(({ kind, product, reason }) => (
-          <article className={product ? "recommended" : "not-recommended"} key={kind}>
+        {items.map(({ kind, product, reason, expectedValue }) => (
+          <article className={expectedValue >= 0 ? "recommended" : "risk"} key={kind}>
             <header>
               <span>{productKindLabel(kind)}</span>
-              <strong>{product?.label ?? "本期不推荐"}</strong>
+              <strong>{product.label}</strong>
             </header>
-            {product && (
-              <div className="rolling-purchase-metrics">
-                <p><span>净赔率</span><strong>1:{odds(product.netOdds)}</strong></p>
-                <p><span>参考概率</span><strong>{percent(product.estimatedProbability)}</strong></p>
-                <p><span>盈亏平衡</span><strong>{percent(product.breakEvenProbability)}</strong></p>
-                <p><span>每1单位期望</span><strong>{signedReturn(product.expectedValue)}</strong></p>
-              </div>
-            )}
+            <div className="rolling-purchase-metrics">
+              <p><span>净赔率</span><strong>1:{odds(product.netOdds)}</strong></p>
+              <p><span>参考概率</span><strong>{percent(product.estimatedProbability)}</strong></p>
+              <p><span>盈亏平衡</span><strong>{percent(product.breakEvenProbability)}</strong></p>
+              <p><span>每1单位期望</span><strong>{signedReturn(product.expectedValue)}</strong></p>
+            </div>
             <p className="rolling-purchase-reason">
               <b>推荐理由</b>
               <span>{reason}</span>
@@ -360,7 +356,7 @@ function PurchaseRecommendationPanel({
         ))}
       </div>
       <small>
-        推荐依据来自开奖前冻结的近30期规律及既有逐期结算记录；仅作购买参考，不会自动下注。
+        五项与逐期学习中心同源；推荐依据来自开奖前冻结的近30期规律及既有逐期结算记录，仅作购买参考。
       </small>
     </section>
   );
@@ -749,7 +745,7 @@ function odds(value: number) {
 }
 
 function signedReturn(value: number) {
-  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(1)}%`;
+  return `${value >= 0 ? "+" : ""}${value.toFixed(2)}`;
 }
 
 function beijingTime(value: string) {

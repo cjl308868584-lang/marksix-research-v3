@@ -100,6 +100,10 @@ test("server-renders the independent forward learning center", async () => {
   assert.match(html, /每期固定五项/);
   assert.match(html, /开奖以后全部交卷/);
   assert.match(html, /正在读取不可变学习账本/);
+  assert.match(html, /与近30期购买参考同源/);
+  assert.match(html, /赔率参与排序/);
+  assert.doesNotMatch(html, /赔率不参与模型排序/);
+  assert.doesNotMatch(html, /THREE EXPERTS/);
   assert.doesNotMatch(html, /赔率价值分析/);
 });
 
@@ -138,7 +142,7 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(workspace, /三连肖/);
   assert.match(workspace, /盈亏平衡/);
   assert.match(workspace, /逐期汇总结算/);
-  assert.match(workspace, /本期不推荐/);
+  assert.doesNotMatch(workspace, /本期不推荐/);
 });
 
 test("legacy rolling pattern route redirects to the independent page", async () => {
@@ -206,6 +210,7 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
     scores: [],
     summary: null,
     specialNumberConsensus: [],
+    recommendations: [],
     valueAnalysis: [],
     settlementHistory: [],
     pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
