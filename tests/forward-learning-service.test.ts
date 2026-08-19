@@ -115,6 +115,34 @@ test("completed cycle retry returns the frozen result without learning twice", a
   assert.equal(completions, 0);
 });
 
+test("cycle never settles a draw at or after the next target issue", async () => {
+  const candidates = candidateSet();
+  const forecasts = forecastSet(candidates);
+  let settledIssue = "";
+  const future = { ...verifiedDraw(), issue: "2026232" };
+  const result = await runForwardLearningCycle(
+    { game: "new_macau", draws: [future, verifiedDraw()], rollingRun: rollingRun(), now: new Date("2026-08-19T14:00:00Z") },
+    {
+      readForecast: async (_game, issue) => issue === "2026230" || issue === "2026232" ? forecasts.map((item) => ({ ...item, targetIssue: issue! })) : [],
+      settle: async (_game, draw) => {
+        settledIssue = draw.issue;
+        return { status: "settled" as const, scores: scoreSet(candidates) };
+      },
+      readCandidates: async () => candidates,
+      readModel: async () => initialStates(),
+      readHistory: async () => new Map(),
+      readRuleWeights: async () => new Map(),
+      persistStates: async () => "ok" as const,
+      persistRuleUpdates: async () => "ok" as const,
+      freeze: async () => "created" as const,
+      claimRun: async () => "claimed" as const,
+      completeRun: async () => true,
+    },
+  );
+  assert.equal(settledIssue, "2026230");
+  assert.equal(result.settledIssue, "2026230");
+});
+
 function rollingRun(): RollingPatternRun {
   return {
     schemaVersion: "rolling-patterns-2",

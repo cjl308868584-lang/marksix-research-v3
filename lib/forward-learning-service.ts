@@ -100,7 +100,11 @@ export async function runForwardLearningCycle(
 ): Promise<ForwardLearningCycleResult> {
   if (input.rollingRun.game !== input.game) throw new Error("学习运行彩种不一致");
   const verified = [...input.draws]
-    .filter((draw) => draw.game === input.game && draw.verified)
+    .filter((draw) =>
+      draw.game === input.game &&
+      draw.verified &&
+      draw.issue.localeCompare(input.rollingRun.targetIssue, "en", { numeric: true }) < 0
+    )
     .sort((left, right) => right.issue.localeCompare(left.issue, "en", { numeric: true }));
   let previousDraw: Draw | null = null;
   let previousForecasts: ForwardLearningForecast[] = [];
@@ -287,7 +291,7 @@ function buildRuleUpdates(
     const score = scoreByCandidate.get(forecast.candidateId);
     if (!score) continue;
     for (const contribution of forecast.ruleContributions) {
-      const before = previousWeights.get(contribution.ruleId) ?? 1;
+      const before = previousWeights.get(`${forecast.slot}:${contribution.ruleId}`) ?? 1;
       const eligibleReward = score.actualMatched &&
         forecast.finalProbability > forecast.baselineProbability;
       const after = eligibleReward

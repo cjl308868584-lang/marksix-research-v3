@@ -141,7 +141,12 @@ export async function settleForwardLearningIssue(
   if (!candidates.length || forecasts.length !== FORWARD_LEARNING_SLOTS.length) {
     return { status: "not_found", scores: [] };
   }
-  if (existing.length) return { status: "existing", scores: existing };
+  if (existing.length === candidates.length) {
+    return { status: "existing", scores: existing };
+  }
+  if (existing.length > candidates.length) {
+    throw new Error("逐期学习评分账本数量异常");
+  }
   if ([...candidates, ...forecasts].some((item) =>
     Date.parse(item.frozenAt) >= Date.parse(draw.drawAt)
   )) {
@@ -181,7 +186,15 @@ export async function settleForwardLearningIssue(
     JSON.stringify(score),
   ));
   await runBatches(db, statements);
-  return { status: "settled", scores };
+  const completedRows = await db.prepare(
+    `SELECT score_json FROM forward_learning_scores
+     WHERE game = ? AND target_issue = ? ORDER BY slot, result_key`,
+  ).bind(game, draw.issue).all<JsonRow>();
+  const completedScores = rowsAs<ForwardLearningScore>(completedRows.results, "score_json");
+  if (completedScores.length !== candidates.length) {
+    throw new Error("逐期学习评分未完整持久化");
+  }
+  return { status: "settled", scores: completedScores };
 }
 
 export async function readForwardLearningForecast(
@@ -257,7 +270,8 @@ export async function readForwardRuleWeights(game: GameId) {
   const updates = rowsAs<ForwardRuleUpdate>(rows.results, "update_json");
   const weights = new Map<string, number>();
   for (const update of updates) {
-    if (!weights.has(update.ruleId)) weights.set(update.ruleId, update.afterWeight);
+    const key = `${update.slot}:${update.ruleId}`;
+    if (!weights.has(key)) weights.set(key, update.afterWeight);
   }
   return weights;
 }
@@ -361,12 +375,26 @@ export async function readForwardLearningReviews(
      WHERE game = ? AND official = 1 ORDER BY target_issue DESC, slot`,
   ).bind(game).all<JsonRow>();
   const scores = rowsAs<ForwardLearningScore>(scoreRows.results, "score_json");
+  const modelRows = await db.prepare(
+    `SELECT state_json FROM forward_learning_model_states
+     WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
+  ).bind(game).all<JsonRow>();
+  const models = rowsAs<ForwardLearningModelState>(modelRows.results, "state_json");
+  const updateRows = await db.prepare(
+    `SELECT update_json FROM forward_learning_rule_updates
+     WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
+  ).bind(game).all<JsonRow>();
+  const updates = rowsAs<ForwardRuleUpdate>(updateRows.results, "update_json");
   return runs.map((run) => ({
     run,
     scores: scores.filter((score) => score.targetIssue === run.settledIssue),
-    modelBefore: [],
-    modelAfter: [],
-    ruleUpdates: [],
+    modelBefore: run.modelVersionBefore
+      ? models.filter((state) => state.version === run.modelVersionBefore)
+      : [],
+    modelAfter: run.modelVersionAfter
+      ? models.filter((state) => state.version === run.modelVersionAfter)
+      : [],
+    ruleUpdates: updates.filter((update) => update.runId === run.runId),
   }));
 }
 

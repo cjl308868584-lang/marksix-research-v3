@@ -52,7 +52,7 @@ export function buildForwardLearningCandidates(
     const ruleContributions = clusterRuleEvidence(signals).map((contribution) => ({
       ...contribution,
       effectiveContribution: contribution.effectiveContribution *
-        (context.ruleWeights?.get(contribution.ruleId) ?? 1),
+        (context.ruleWeights?.get(`${spec.slot}:${contribution.ruleId}`) ?? 1),
     }));
     const rules30Probability = rulesProbability(
       baselineProbability,
@@ -154,6 +154,7 @@ export function clusterRuleEvidence(
     return ranked.map(({ signal, lift }, index) => {
       const exactDuplicate = index > 0 &&
         signal.rule.canonicalJson === ranked[0].signal.rule.canonicalJson;
+      const reliability = signal.evidenceTier === "strong" ? 1 : 0.2;
       return {
         ruleId: signal.rule.ruleId,
         clusterId: cluster.id,
@@ -163,7 +164,9 @@ export function clusterRuleEvidence(
         baselineProbability: signal.baseline,
         posteriorProbability: posterior(signal.hits, signal.support, signal.baseline),
         logOddsLift: lift,
-        effectiveContribution: index === 0 ? lift : exactDuplicate ? 0 : lift * 0.2,
+        effectiveContribution: exactDuplicate
+          ? 0
+          : lift * reliability * (index === 0 ? 1 : 0.2),
         primary: index === 0,
       } satisfies ForwardRuleContribution;
     });
@@ -212,6 +215,13 @@ function matchingSignals(
       signalSupportsSpecialNumber(signal, number, run.expectedDrawAt)
     );
   }
+  if (slot === "coverage_zodiac_pair" || slot === "coverage_zodiac_triple") {
+    // The rolling scanner currently validates single-result events only. A rule
+    // for "猴 appears" is not evidence that "猴 and 鸡 both appear". Until a
+    // joint event is frozen and audited directly, pair/triple candidates learn
+    // only from their exact combinatorial baseline and independent forward score.
+    return [];
+  }
   const family = slot === "coverage_tail" ? "tail" : "zodiac";
   return run.signals.filter((signal) =>
     signal.rule.event.scope === "coverage_6_plus_1" &&
@@ -232,7 +242,10 @@ function rulesProbability(
   );
   const clusters = Math.max(1, new Set(contributions.map((item) => item.clusterId)).size);
   const probability = logistic(logit(baseline) + effective / Math.sqrt(clusters));
-  return boundCandidateProbability(slot, probability);
+  const evidenceCap = slot === "special_number"
+    ? baseline * 2
+    : baseline + 0.15;
+  return boundCandidateProbability(slot, Math.min(probability, evidenceCap));
 }
 
 function signalLogOddsLift(signal: RollingPatternSignal) {

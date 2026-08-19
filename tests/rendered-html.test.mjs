@@ -92,6 +92,17 @@ test("server-renders the immutable period review workspace", async () => {
   assert.match(html, /href="\/research"/);
 });
 
+test("server-renders the independent forward learning center", async () => {
+  const response = await render("/learning");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>逐期学习中心｜六合智研<\/title>/i);
+  assert.match(html, /每期固定五项/);
+  assert.match(html, /开奖以后全部交卷/);
+  assert.match(html, /正在读取不可变学习账本/);
+  assert.doesNotMatch(html, /赔率价值分析/);
+});
+
 test("server-renders the mobile-first rolling 30 pattern workspace", async () => {
   const response = await render("/patterns");
   assert.equal(response.status, 200);
@@ -153,6 +164,22 @@ test("review API accepts the fifty-period history requested by the review page",
   assert.equal(response.status, 200);
   const payload = await response.json();
   assert.deepEqual(payload, { game: "new_macau", reviews: [] });
+});
+
+test("learning APIs remain read-only and return an explicit empty ledger", async () => {
+  const forecast = await fetchWorker("/api/learning/forecast?game=new_macau");
+  assert.equal(forecast.status, 404);
+  assert.equal(forecast.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await forecast.json(), {
+    game: "new_macau",
+    status: "unavailable",
+    forecasts: [],
+  });
+  for (const path of ["reviews", "performance", "model"]) {
+    const response = await fetchWorker(`/api/learning/${path}?game=new_macau&write=true`);
+    assert.equal(response.status, 400);
+    assert.deepEqual(await response.json(), { error: "请求包含不受支持的参数。" });
+  }
 });
 
 test("rolling pattern API rejects unsupported parameters before reading storage", async () => {

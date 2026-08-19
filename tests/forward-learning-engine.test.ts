@@ -44,6 +44,45 @@ test("duplicated rules form one evidence cluster and do not raise probability", 
   assert.ok(second.rawRuleCount > first.rawRuleCount);
 });
 
+test("single-zodiac rules cannot masquerade as pair or triple evidence", () => {
+  const candidates = buildForwardLearningCandidates(run(false));
+  const pair = candidates.find((item) => item.slot === "coverage_zodiac_pair" && item.values.includes("猴"));
+  const triple = candidates.find((item) => item.slot === "coverage_zodiac_triple" && item.values.includes("猴"));
+  assert.ok(pair && triple);
+  assert.equal(pair.rawRuleCount, 0);
+  assert.equal(triple.rawRuleCount, 0);
+  assert.equal(pair.expertProbabilities.rules30, pair.baselineProbability);
+  assert.equal(triple.expertProbabilities.rules30, triple.baselineProbability);
+});
+
+test("learned rule weights are isolated by prediction slot", () => {
+  const base = buildForwardLearningCandidates(run(false));
+  const unscoped = buildForwardLearningCandidates(run(false), {
+    ruleWeights: new Map([["monkey-1", 0.2]]),
+  });
+  const scoped = buildForwardLearningCandidates(run(false), {
+    ruleWeights: new Map([["coverage_zodiac:monkey-1", 0.2]]),
+  });
+  const probability = (items: ForwardLearningCandidate[]) =>
+    items.find((item) => item.slot === "coverage_zodiac" && item.label === "猴")!.finalProbability;
+  assert.equal(probability(unscoped), probability(base));
+  assert.ok(probability(scoped) < probability(base));
+});
+
+test("unvalidated mined rules are shrunk more than FDR-qualified rules", () => {
+  const experimental = buildForwardLearningCandidates(run(false));
+  const qualifiedRun = run(false);
+  qualifiedRun.signals = qualifiedRun.signals.map((item) => ({
+    ...item,
+    evidenceTier: "strong" as const,
+    qValue: 0.05,
+  }));
+  const qualified = buildForwardLearningCandidates(qualifiedRun);
+  const probability = (items: ForwardLearningCandidate[]) =>
+    items.find((item) => item.slot === "coverage_zodiac" && item.label === "猴")!.expertProbabilities.rules30;
+  assert.ok(probability(experimental) < probability(qualified));
+});
+
 test("selection is probability-first and deterministic", () => {
   const forecasts = selectOfficialForecasts([
     candidate("coverage_zodiac", "马", 0.6, 0.75),

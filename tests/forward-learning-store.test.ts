@@ -156,6 +156,30 @@ test("settlement is idempotent and official totals contain one score per slot", 
   assert.equal(db.scores.size, 5);
 });
 
+test("settlement retry repairs a partially written candidate score batch", async () => {
+  const forecasts = fiveForecasts();
+  await store.freezeForwardLearningIssue(
+    forecasts.map((item) => item as ForwardLearningCandidate),
+    forecasts,
+  );
+  await store.settleForwardLearningIssue(
+    "new_macau",
+    draw(),
+    "2026-08-18T22:10:00+08:00",
+  );
+  const first = [...db.scores.entries()][0];
+  db.scores.clear();
+  db.scores.set(first[0], first[1]);
+  const repaired = await store.settleForwardLearningIssue(
+    "new_macau",
+    draw(),
+    "2026-08-18T22:11:00+08:00",
+  );
+  assert.equal(repaired.status, "settled");
+  assert.equal(repaired.scores.length, 5);
+  assert.equal(db.scores.size, 5);
+});
+
 function fiveForecasts(): ForwardLearningForecast[] {
   const slots = [
     ["coverage_zodiac", "猴", ["猴"]],
