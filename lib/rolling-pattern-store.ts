@@ -24,9 +24,14 @@ const runtime = globalThis as typeof globalThis & {
 };
 
 type RunRow = { run_id: string; run_json: string };
+type PendingRunRow = RunRow & {
+  target_issue: string;
+  needs_product_backfill: number;
+};
 type SignalRow = { signal_json: string };
 type ScoreRow = { score_json: string };
 type ProductRow = { product_json: string };
+type ProductIdRow = { product_id: string };
 type ProductScoreRow = { score_json: string };
 type ProductHistoryRow = { product_json: string; score_json: string | null };
 type ProductAggregateRow = {
@@ -286,82 +291,158 @@ export async function settleRollingPatternRuns(
   if (!await ensureRollingPatternStore()) return "unavailable";
   const db = runtime.__marksixD1;
   if (!db) return "unavailable";
-  const verified = draws.filter((draw) => draw.game === game && draw.verified);
+  const verifiedByIssue = new Map(
+    draws
+      .filter((draw) => draw.game === game && draw.verified)
+      .map((draw) => [draw.issue, draw]),
+  );
   try {
-    for (const draw of verified) {
-      const rows = await db.prepare(
-        `SELECT run_id, run_json FROM rolling_pattern_runs
-         WHERE game = ? AND target_issue = ? AND status = 'completed'`,
-      ).bind(game, draw.issue).all<RunRow>();
-      for (const row of rows.results ?? []) {
-        const run = parseJson(row.run_json);
-        if (!isRollingPatternRun(run)) continue;
-        const signalRows = await db.prepare(
-          `SELECT signal_json FROM rolling_pattern_signals
-           WHERE run_id = ? ORDER BY rowid ASC`,
-        ).bind(run.runId).all<SignalRow>();
-        const signals = (signalRows.results ?? [])
+    const rows = await db.prepare(
+      `SELECT r.run_id, r.target_issue, r.run_json,
+              CASE WHEN
+                EXISTS (
+                  SELECT 1 FROM rolling_pattern_signals bs
+                  WHERE bs.run_id = r.run_id
+                )
+                AND (
+                  NOT EXISTS (
+                    SELECT 1 FROM rolling_pattern_consensus_ledger bl
+                    WHERE bl.run_id = r.run_id
+                  )
+                  OR EXISTS (
+                    SELECT 1 FROM rolling_pattern_consensus_ledger pl
+                    WHERE pl.run_id = r.run_id
+                      AND NOT EXISTS (
+                        SELECT 1 FROM rolling_pattern_consensus_scores ps
+                        WHERE ps.run_id = pl.run_id AND ps.product_id = pl.product_id
+                      )
+                  )
+                )
+              THEN 1 ELSE 0 END AS needs_product_backfill
+       FROM rolling_pattern_runs r
+       WHERE r.game = ? AND r.status = 'completed'
+         AND (
+           EXISTS (
+             SELECT 1 FROM rolling_pattern_signals s
+             WHERE s.run_id = r.run_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM rolling_pattern_scores ss
+                 WHERE ss.run_id = s.run_id AND ss.rule_id = s.rule_id
+               )
+           )
+           OR EXISTS (
+             SELECT 1 FROM rolling_pattern_consensus_ledger l
+             WHERE l.run_id = r.run_id
+               AND NOT EXISTS (
+                 SELECT 1 FROM rolling_pattern_consensus_scores cs
+                 WHERE cs.run_id = l.run_id AND cs.product_id = l.product_id
+               )
+           )
+           OR (
+             EXISTS (
+               SELECT 1 FROM rolling_pattern_signals bs
+               WHERE bs.run_id = r.run_id
+             )
+             AND NOT EXISTS (
+               SELECT 1 FROM rolling_pattern_consensus_ledger bl
+               WHERE bl.run_id = r.run_id
+             )
+           )
+         )
+       ORDER BY CAST(r.target_issue AS INTEGER) ASC, r.frozen_at ASC, r.run_id ASC`,
+    ).bind(game).all<PendingRunRow>();
+    for (const row of rows.results ?? []) {
+      const draw = verifiedByIssue.get(row.target_issue);
+      if (!draw) continue;
+      const run = parseJson(row.run_json);
+      if (!isRollingPatternRun(run) ||
+        run.runId !== row.run_id || run.targetIssue !== row.target_issue) {
+        continue;
+      }
+      const needsProductBackfill = Number(row.needs_product_backfill) === 1;
+      const [signalRows, frozenSignalRows] = await Promise.all([
+        db.prepare(
+          `SELECT s.signal_json FROM rolling_pattern_signals s
+           LEFT JOIN rolling_pattern_scores ss
+             ON ss.run_id = s.run_id AND ss.rule_id = s.rule_id
+           WHERE s.run_id = ? AND ss.rule_id IS NULL
+           ORDER BY s.rowid ASC`,
+        ).bind(run.runId).all<SignalRow>(),
+        needsProductBackfill
+          ? db.prepare(
+            `SELECT signal_json FROM rolling_pattern_signals
+             WHERE run_id = ? ORDER BY rowid ASC`,
+          ).bind(run.runId).all<SignalRow>()
+          : Promise.resolve(null),
+      ]);
+      if (frozenSignalRows) {
+        const frozenSignals = (frozenSignalRows.results ?? [])
           .map((item) => parseJson(item.signal_json))
           .filter(isRollingPatternSignal);
-        const hydratedRun = { ...run, signals };
-        await persistRollingPatternProducts(db, hydratedRun);
-        const statements = signals.map((signal) => {
-          const actual = evaluateRollingResultEvent(draw, signal.rule.event);
-          const score: RollingPatternScore = {
-            runId: run.runId,
-            ruleId: signal.rule.ruleId,
-            game,
-            targetIssue: draw.issue,
-            actualMatched: actual.matched,
-            actual,
-            scoredAt: settledAt,
-          };
+        await persistRollingPatternProducts(db, { ...run, signals: frozenSignals });
+      }
+      const signals = (signalRows.results ?? [])
+        .map((item) => parseJson(item.signal_json))
+        .filter(isRollingPatternSignal);
+      const statements = signals.map((signal) => {
+        const actual = evaluateRollingResultEvent(draw, signal.rule.event);
+        const score: RollingPatternScore = {
+          runId: run.runId,
+          ruleId: signal.rule.ruleId,
+          game,
+          targetIssue: draw.issue,
+          actualMatched: actual.matched,
+          actual,
+          scoredAt: settledAt,
+        };
+        return db.prepare(
+          `INSERT OR IGNORE INTO rolling_pattern_scores (
+             run_id, rule_id, game, target_issue, actual_matched,
+             score_json, scored_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          run.runId,
+          signal.rule.ruleId,
+          game,
+          draw.issue,
+          actual.matched ? 1 : 0,
+          JSON.stringify(score),
+          settledAt,
+        );
+      });
+      await runBatches(db, statements);
+      const productRows = await db.prepare(
+        `SELECT l.product_json FROM rolling_pattern_consensus_ledger l
+         LEFT JOIN rolling_pattern_consensus_scores cs
+           ON cs.run_id = l.run_id AND cs.product_id = l.product_id
+         WHERE l.run_id = ? AND cs.product_id IS NULL
+         ORDER BY l.rank ASC, l.rowid ASC`,
+      ).bind(run.runId).all<ProductRow>();
+      const productStatements = (productRows.results ?? [])
+        .map((item) => parseJson(item.product_json))
+        .filter(isRollingPatternProduct)
+        .map((product) => {
+          const score = settleRollingPatternProduct(product, draw, settledAt);
           return db.prepare(
-            `INSERT OR IGNORE INTO rolling_pattern_scores (
-               run_id, rule_id, game, target_issue, actual_matched,
-               score_json, scored_at
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT OR IGNORE INTO rolling_pattern_consensus_scores (
+               run_id, product_id, game, target_issue, scope, product_kind,
+               actual_matched, unit_profit, actual_json, score_json, scored_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           ).bind(
             run.runId,
-            signal.rule.ruleId,
+            product.productId,
             game,
             draw.issue,
-            actual.matched ? 1 : 0,
+            product.scope,
+            product.kind,
+            score.actualMatched ? 1 : 0,
+            score.unitProfit,
+            JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
             JSON.stringify(score),
             settledAt,
           );
         });
-        await runBatches(db, statements);
-        const productRows = await db.prepare(
-          `SELECT product_json FROM rolling_pattern_consensus_ledger
-           WHERE run_id = ? ORDER BY rank ASC, rowid ASC`,
-        ).bind(run.runId).all<ProductRow>();
-        const productStatements = (productRows.results ?? [])
-          .map((item) => parseJson(item.product_json))
-          .filter(isRollingPatternProduct)
-          .map((product) => {
-            const score = settleRollingPatternProduct(product, draw, settledAt);
-            return db.prepare(
-              `INSERT OR IGNORE INTO rolling_pattern_consensus_scores (
-                 run_id, product_id, game, target_issue, scope, product_kind,
-                 actual_matched, unit_profit, actual_json, score_json, scored_at
-               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            ).bind(
-              run.runId,
-              product.productId,
-              game,
-              draw.issue,
-              product.scope,
-              product.kind,
-              score.actualMatched ? 1 : 0,
-              score.unitProfit,
-              JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
-              JSON.stringify(score),
-              settledAt,
-            );
-          });
-        await runBatches(db, productStatements);
-      }
+      await runBatches(db, productStatements);
     }
     return "ok";
   } catch {
@@ -373,16 +454,25 @@ async function persistRollingPatternProducts(
   db: D1Database,
   run: RollingPatternRun,
 ) {
-  const aggregateRows = await db.prepare(
-    `SELECT l.product_kind, l.result_key,
-            COUNT(*) AS settled_count,
-            SUM(s.actual_matched) AS hit_count
-     FROM rolling_pattern_consensus_ledger l
-     INNER JOIN rolling_pattern_consensus_scores s
-       ON s.run_id = l.run_id AND s.product_id = l.product_id
-     WHERE l.game = ?
-     GROUP BY l.product_kind, l.result_key`,
-  ).bind(run.game).all<ProductAggregateRow>();
+  const [aggregateRows, existingRows] = await Promise.all([
+    db.prepare(
+      `SELECT l.product_kind, l.result_key,
+              COUNT(*) AS settled_count,
+              SUM(s.actual_matched) AS hit_count
+       FROM rolling_pattern_consensus_ledger l
+       INNER JOIN rolling_pattern_consensus_scores s
+         ON s.run_id = l.run_id AND s.product_id = l.product_id
+       WHERE l.game = ?
+       GROUP BY l.product_kind, l.result_key`,
+    ).bind(run.game).all<ProductAggregateRow>(),
+    db.prepare(
+      `SELECT product_id FROM rolling_pattern_consensus_ledger
+       WHERE run_id = ?`,
+    ).bind(run.runId).all<ProductIdRow>(),
+  ]);
+  const existingProductIds = new Set(
+    (existingRows.results ?? []).map((row) => row.product_id),
+  );
   const history = new Map(
     (aggregateRows.results ?? [])
       .filter((row) =>
@@ -409,25 +499,27 @@ async function persistRollingPatternProducts(
       left.label.localeCompare(right.label, "zh-CN")
     )
     .map((product, index) => ({ ...product, rank: index + 1 }));
-  const statements = products.map((product) =>
-    db.prepare(
-      `INSERT OR IGNORE INTO rolling_pattern_consensus_ledger (
-         run_id, product_id, game, target_issue, scope, product_kind,
-         result_key, rank, product_json, frozen_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    ).bind(
-      run.runId,
-      product.productId,
-      run.game,
-      run.targetIssue,
-      product.scope,
-      product.kind,
-      product.values.join("+"),
-      product.rank,
-      JSON.stringify(product),
-      run.frozenAt,
-    )
-  );
+  const statements = products
+    .filter((product) => !existingProductIds.has(product.productId))
+    .map((product) =>
+      db.prepare(
+        `INSERT OR IGNORE INTO rolling_pattern_consensus_ledger (
+           run_id, product_id, game, target_issue, scope, product_kind,
+           result_key, rank, product_json, frozen_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        run.runId,
+        product.productId,
+        run.game,
+        run.targetIssue,
+        product.scope,
+        product.kind,
+        product.values.join("+"),
+        product.rank,
+        JSON.stringify(product),
+        run.frozenAt,
+      )
+    );
   await runBatches(db, statements);
 }
 

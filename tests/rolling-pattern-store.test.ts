@@ -27,6 +27,10 @@ class FakePatternD1 {
   productScores = new Map<string, { run_id: string; product_id: string; score_json: string }>();
   currentTargets = new Map<string, string>();
   batchSizes: number[] = [];
+  settlementRunQueries = 0;
+  productLedgerInsertAttempts = 0;
+  signalScoreInsertAttempts = 0;
+  productScoreInsertAttempts = 0;
   failLegacyHistoryQuery = false;
 
   prepare(sql: string) {
@@ -70,6 +74,7 @@ class FakePatternD1 {
           return { meta: { changes: 1 } };
         }
         if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_scores")) {
+          this.signalScoreInsertAttempts += 1;
           const key = `${values[0]}:${values[1]}`;
           if (this.scores.has(key)) return { meta: { changes: 0 } };
           this.scores.set(key, {
@@ -80,6 +85,7 @@ class FakePatternD1 {
           return { meta: { changes: 1 } };
         }
         if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_consensus_ledger")) {
+          this.productLedgerInsertAttempts += 1;
           const key = `${values[0]}:${values[1]}`;
           if (this.products.has(key)) return { meta: { changes: 0 } };
           this.products.set(key, {
@@ -90,6 +96,7 @@ class FakePatternD1 {
           return { meta: { changes: 1 } };
         }
         if (sql.includes("INSERT OR IGNORE INTO rolling_pattern_consensus_scores")) {
+          this.productScoreInsertAttempts += 1;
           const key = `${values[0]}:${values[1]}`;
           if (this.productScores.has(key)) return { meta: { changes: 0 } };
           this.productScores.set(key, {
@@ -137,10 +144,53 @@ class FakePatternD1 {
             }),
           };
         }
+        if (sql.includes("FROM rolling_pattern_runs r")) {
+          this.settlementRunQueries += 1;
+          const game = String(values[0]);
+          return {
+            results: [...this.runs.values()].filter((row) => {
+              if (row.game !== game || row.status !== "completed") return false;
+              const hasSignals = [...this.signals.values()].some(
+                (signal) => signal.run_id === row.run_id,
+              );
+              const missingSignalScore = [...this.signals.values()].some(
+                (signal) => signal.run_id === row.run_id &&
+                  !this.scores.has(`${signal.run_id}:${signal.rule_id}`),
+              );
+              const products = [...this.products.values()].filter(
+                (product) => product.run_id === row.run_id,
+              );
+              const missingProductScore = products.some(
+                (product) => product.run_id === row.run_id &&
+                  !this.productScores.has(`${product.run_id}:${product.product_id}`),
+              );
+              return missingSignalScore || missingProductScore ||
+                (hasSignals && products.length === 0);
+            }).map((row) => ({
+              run_id: row.run_id,
+              target_issue: row.target_issue,
+              run_json: row.run_json,
+              needs_product_backfill: Number(
+                [...this.signals.values()].some((signal) => signal.run_id === row.run_id) &&
+                  (
+                    ![...this.products.values()].some(
+                      (product) => product.run_id === row.run_id,
+                    ) ||
+                    [...this.products.values()].some(
+                      (product) => product.run_id === row.run_id &&
+                        !this.productScores.has(`${product.run_id}:${product.product_id}`),
+                    )
+                  ),
+              ),
+            })) as T[],
+          };
+        }
         if (sql.includes("FROM rolling_pattern_signals")) {
           return {
             results: [...this.signals.values()].filter(
-              (row) => row.run_id === String(values[0]),
+              (row) => row.run_id === String(values[0]) &&
+                (!sql.includes("rolling_pattern_scores") ||
+                  !this.scores.has(`${row.run_id}:${row.rule_id}`)),
             ) as T[],
           };
         }
@@ -154,7 +204,9 @@ class FakePatternD1 {
         if (sql.includes("FROM rolling_pattern_consensus_ledger")) {
           return {
             results: [...this.products.values()].filter(
-              (row) => row.run_id === String(values[0]),
+              (row) => row.run_id === String(values[0]) &&
+                (!sql.includes("rolling_pattern_consensus_scores") ||
+                  !this.productScores.has(`${row.run_id}:${row.product_id}`)),
             ) as T[],
           };
         }
@@ -166,6 +218,7 @@ class FakePatternD1 {
           };
         }
         if (sql.includes("FROM rolling_pattern_runs")) {
+          this.settlementRunQueries += 1;
           return {
             results: [...this.runs.values()].filter(
               (row) => row.game === String(values[0]) &&
@@ -428,6 +481,171 @@ test("settlement scores only the previously frozen verified target and is idempo
   assert.equal(db.productScores.size, db.products.size);
 });
 
+test("settlement locates pending runs once across a long verified history", async () => {
+  await store.persistRollingPatternRun(runFixture);
+  db.settlementRunQueries = 0;
+
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      longVerifiedHistory(actualDraw()),
+      "2026-01-31T13:40:00Z",
+    ),
+    "ok",
+  );
+
+  assert.equal(db.settlementRunQueries, 1);
+  assert.equal(db.scores.size, runFixture.signals.length);
+  assert.equal(db.productScores.size, db.products.size);
+});
+
+test("settlement retry does not replay completed score writes", async () => {
+  await store.persistRollingPatternRun(runFixture);
+  const actual = actualDraw();
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:40:00Z",
+    ),
+    "ok",
+  );
+  db.signalScoreInsertAttempts = 0;
+  db.productScoreInsertAttempts = 0;
+  db.batchSizes = [];
+
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:41:00Z",
+    ),
+    "ok",
+  );
+
+  assert.equal(db.signalScoreInsertAttempts, 0);
+  assert.equal(db.productScoreInsertAttempts, 0);
+  assert.deepEqual(db.batchSizes, []);
+});
+
+test("settlement retry writes only missing signal and product scores", async () => {
+  await store.persistRollingPatternRun(runFixture);
+  const actual = actualDraw();
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:40:00Z",
+    ),
+    "ok",
+  );
+  const missingSignal = [...db.scores.keys()][0];
+  const missingProduct = [...db.productScores.keys()][0];
+  assert.ok(missingSignal);
+  assert.ok(missingProduct);
+  db.scores.delete(missingSignal);
+  db.productScores.delete(missingProduct);
+  db.signalScoreInsertAttempts = 0;
+  db.productScoreInsertAttempts = 0;
+  db.batchSizes = [];
+
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:41:00Z",
+    ),
+    "ok",
+  );
+
+  assert.equal(db.signalScoreInsertAttempts, 1);
+  assert.equal(db.productScoreInsertAttempts, 1);
+  assert.deepEqual(db.batchSizes, [1, 1]);
+  assert.ok(db.scores.has(missingSignal));
+  assert.ok(db.productScores.has(missingProduct));
+});
+
+test("settlement rebuilds a missing legacy product ledger once from frozen signals", async () => {
+  await store.persistRollingPatternRun(runFixture);
+  const actual = actualDraw();
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:40:00Z",
+    ),
+    "ok",
+  );
+  const expectedProducts = db.products.size;
+  assert.ok(expectedProducts > 0);
+
+  db.products.clear();
+  db.productScores.clear();
+  db.productLedgerInsertAttempts = 0;
+  db.productScoreInsertAttempts = 0;
+
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:41:00Z",
+    ),
+    "ok",
+  );
+  assert.equal(db.products.size, expectedProducts);
+  assert.equal(db.productScores.size, expectedProducts);
+  assert.equal(db.productLedgerInsertAttempts, expectedProducts);
+
+  db.productLedgerInsertAttempts = 0;
+  db.productScoreInsertAttempts = 0;
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actual],
+      "2026-01-31T13:42:00Z",
+    ),
+    "ok",
+  );
+  assert.equal(db.productLedgerInsertAttempts, 0);
+  assert.equal(db.productScoreInsertAttempts, 0);
+});
+
+test("settlement resumes a legacy product backfill interrupted between D1 batches", async () => {
+  await store.persistRollingPatternRun(runFixture);
+  const expectedProducts = db.products.size;
+  assert.ok(expectedProducts > 80);
+
+  for (const key of [...db.products.keys()].slice(80)) {
+    db.products.delete(key);
+  }
+  db.productLedgerInsertAttempts = 0;
+
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actualDraw()],
+      "2026-01-31T13:41:00Z",
+    ),
+    "ok",
+  );
+  assert.equal(db.products.size, expectedProducts);
+  assert.equal(db.productScores.size, expectedProducts);
+  assert.equal(db.productLedgerInsertAttempts, expectedProducts - 80);
+
+  db.productLedgerInsertAttempts = 0;
+  db.productScoreInsertAttempts = 0;
+  assert.equal(
+    await store.settleRollingPatternRuns(
+      "new_macau",
+      [actualDraw()],
+      "2026-01-31T13:42:00Z",
+    ),
+    "ok",
+  );
+  assert.equal(db.productLedgerInsertAttempts, 0);
+  assert.equal(db.productScoreInsertAttempts, 0);
+});
+
 test("rolling lifecycle settles the old target before building and freezing the next window", async () => {
   const calls: string[] = [];
   const result = await runRollingPatternCycle(
@@ -492,6 +710,29 @@ function patternDraws() {
     source: "双源一致测试",
     verified: true,
   })).reverse();
+}
+
+function actualDraw(): Draw {
+  return {
+    game: "new_macau",
+    issue: runFixture.targetIssue,
+    drawAt: runFixture.expectedDrawAt,
+    numbers: [10, 1, 2, 3, 4, 5],
+    special: 6,
+    source: "双源一致测试",
+    verified: true,
+  };
+}
+
+function longVerifiedHistory(actual: Draw): Draw[] {
+  return [
+    actual,
+    ...Array.from({ length: 119 }, (_, index) => ({
+      ...actual,
+      issue: String(2025700 + index),
+      drawAt: `2025-12-${String((index % 28) + 1).padStart(2, "0")}T21:32:00+08:00`,
+    })),
+  ];
 }
 
 function legacyProductFixture(
