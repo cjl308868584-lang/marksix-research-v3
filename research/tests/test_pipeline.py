@@ -522,29 +522,26 @@ class ResearchPipelineTest(unittest.TestCase):
                     "new_macau",
                 )
 
-    def test_health_rejects_patterns_learning_recommendation_drift(self):
+    def test_health_accepts_independent_raw_patterns_and_learned_recommendations(self):
         responses = self._v2_health_responses()
-        responses.patterns["recommendations"][0]["resultKey"] = "猴"
-        responses.learning["forecasts"][0]["resultKey"] = "马"
+        raw_zodiac = responses.patterns["recommendations"][0]
+        raw_zodiac["resultKey"] = "马"
+        raw_zodiac["values"] = ["马"]
+        raw_zodiac["product"]["values"] = ["马"]
         with patch.object(cli, "fetch_json", side_effect=responses.sequence):
-            with self.assertRaisesRegex(RuntimeError, "recommendation mismatch"):
-                cli.verify_production_health(
-                    "https://example.test",
-                    "new_macau",
-                )
+            result = cli.verify_production_health(
+                "https://example.test",
+                "new_macau",
+            )
+        self.assertEqual(result["status"], "frozen")
+        self.assertEqual(result["revision"], 2)
 
-    def test_health_rejects_learning_counter_drift(self):
+    def test_health_rejects_invalid_raw_pattern_provenance(self):
         responses = self._v2_health_responses()
-        for recommendation in responses.patterns["recommendations"]:
-            recommendation["learningSettledCount"] = 4
-            recommendation["learningHitCount"] = 2
-        for forecast in responses.learning["forecasts"]:
-            forecast["learningSettledCount"] = 4
-            forecast["learningHitCount"] = 2
-        responses.learning["forecasts"][0]["learningHitCount"] = 3
+        responses.patterns["recommendations"][0]["sourceRunId"] = "other-run"
 
         with patch.object(cli, "fetch_json", side_effect=responses.sequence):
-            with self.assertRaisesRegex(RuntimeError, "recommendation mismatch"):
+            with self.assertRaisesRegex(RuntimeError, "invalid raw pattern five-slot set"):
                 cli.verify_production_health(
                     "https://example.test",
                     "new_macau",
@@ -1088,15 +1085,12 @@ def _resolved_recommendation_payloads(target_issue, revision=2):
             "learningSettledCount": 2,
             "learningHitCount": 1,
             "product": {
+                "runId": source_run_id,
                 "targetIssue": target_issue,
+                "kind": kind,
+                "values": values,
             },
         })
-    patterns = {
-        "game": "new_macau",
-        "status": "completed",
-        "run": {"runId": source_run_id, "targetIssue": target_issue},
-        "recommendations": recommendations,
-    }
     forecasts = json.loads(json.dumps(recommendations))
     for forecast, (slot, _result_key, _values) in zip(forecasts, slots):
         forecast.update({
@@ -1106,6 +1100,14 @@ def _resolved_recommendation_payloads(target_issue, revision=2):
             "revision": revision,
         })
         forecast.pop("product", None)
+    for recommendation in recommendations:
+        recommendation["revision"] = 0
+    patterns = {
+        "game": "new_macau",
+        "status": "completed",
+        "run": {"runId": source_run_id, "targetIssue": target_issue},
+        "recommendations": recommendations,
+    }
     learning = {
         "game": "new_macau",
         "status": "ready",

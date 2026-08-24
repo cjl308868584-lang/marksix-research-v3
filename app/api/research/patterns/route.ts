@@ -6,6 +6,7 @@ import {
   signalSupportsSpecialNumber,
 } from "../../../../lib/rolling-pattern-summary";
 import {
+  readBoundedLegacyProductHistory,
   readRollingPatternRun,
   readRollingPatternValueHistory,
   readRollingPatternValueLedger,
@@ -86,7 +87,8 @@ export async function GET(request: NextRequest) {
   const frozenProducts = valueLedger?.products.length
     ? valueLedger.products
     : buildRollingPatternProducts({ ...envelope.run, signals: envelope.signals });
-  const originalProducts = completeOriginalPatternProducts(
+  const originalProducts = await completeOriginalPatternProducts(
+    game,
     { ...envelope.run, signals: envelope.signals },
     frozenProducts,
   );
@@ -125,7 +127,8 @@ const REQUIRED_PRODUCT_KINDS = new Set<RollingPatternProductKind>([
   "special_number",
 ]);
 
-function completeOriginalPatternProducts(
+async function completeOriginalPatternProducts(
+  game: GameId,
   run: RollingPatternRun & { signals: RollingPatternSignal[] },
   products: readonly RollingPatternProduct[],
 ) {
@@ -133,7 +136,12 @@ function completeOriginalPatternProducts(
   if ([...REQUIRED_PRODUCT_KINDS].every((kind) => availableKinds.has(kind))) {
     return products;
   }
-  const baselineProducts = buildUnifiedRollingPatternProducts(run);
+  const priorHistory = await readBoundedLegacyProductHistory(game, run.targetIssue);
+  const baselineProducts = buildUnifiedRollingPatternProducts(run, {
+    legacy: new Map(),
+    learned: priorHistory?.legacy ?? new Map(),
+    legacyProductIds: new Map(),
+  });
   return [
     ...products,
     ...baselineProducts.filter((product) => !availableKinds.has(product.kind)),

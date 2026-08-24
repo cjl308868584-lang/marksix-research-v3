@@ -299,11 +299,11 @@ def _resolved_forward_learning_revision(
     return revision
 
 
-def _pattern_recommendations(
+def _raw_pattern_recommendations(
     payload: dict[str, object] | None,
     game: str,
     target_issue: str,
-) -> tuple[int, dict[str, dict[str, object]]] | None:
+) -> dict[str, dict[str, object]] | None:
     if not isinstance(payload, dict) or payload.get("game") != game:
         return None
     run = payload.get("run")
@@ -324,27 +324,30 @@ def _pattern_recommendations(
     typed = [item for item in recommendations if isinstance(item, dict)]
     slots = {item.get("kind") for item in typed}
     revisions = {item.get("revision") for item in typed}
-    if slots != FORWARD_LEARNING_SLOTS or len(revisions) != 1:
-        return None
-    revision = next(iter(revisions))
-    if not isinstance(revision, int) or isinstance(revision, bool) or revision < 1:
+    if slots != FORWARD_LEARNING_SLOTS or revisions != {0}:
         return None
     for recommendation in typed:
         product = recommendation.get("product")
+        values = recommendation.get("values")
         if (
             not isinstance(product, dict)
+            or not isinstance(values, list)
             or str(product.get("targetIssue") or "") != target_issue
+            or str(product.get("runId") or "") != run_id
+            or product.get("kind") != recommendation.get("kind")
+            or product.get("values") != values
+            or recommendation.get("resultKey") != "+".join(str(value) for value in values)
             or recommendation.get("sourceRunId") != run_id
             or any(field not in recommendation for field in RECOMMENDATION_FIELDS)
         ):
             return None
-    return revision, {
+    return {
         str(recommendation["kind"]): recommendation
         for recommendation in typed
     }
 
 
-def _validate_recommendation_alignment(
+def _validate_recommendation_sources(
     patterns: dict[str, object] | None,
     learning: dict[str, object] | None,
     game: str,
@@ -355,28 +358,14 @@ def _validate_recommendation_alignment(
         game,
         target_issue,
     )
-    resolved_patterns = _pattern_recommendations(patterns, game, target_issue)
-    forecasts = learning.get("forecasts") if isinstance(learning, dict) else None
-    if learning_revision is None or resolved_patterns is None:
+    if learning_revision is None:
         raise RuntimeError(
             f"{game} target {target_issue} has an invalid resolved-v2 five-slot revision"
         )
-    pattern_revision, by_kind = resolved_patterns
-    if pattern_revision != learning_revision:
+    if _raw_pattern_recommendations(patterns, game, target_issue) is None:
         raise RuntimeError(
-            f"{game} target {target_issue} recommendation mismatch: revision"
+            f"{game} target {target_issue} has an invalid raw pattern five-slot set"
         )
-    assert isinstance(forecasts, list)
-    for forecast in forecasts:
-        assert isinstance(forecast, dict)
-        recommendation = by_kind.get(str(forecast.get("slot") or ""))
-        if recommendation is None or any(
-            recommendation.get(field) != forecast.get(field)
-            for field in RECOMMENDATION_FIELDS
-        ):
-            raise RuntimeError(
-                f"{game} target {target_issue} recommendation mismatch"
-            )
     return learning_revision
 
 
@@ -498,7 +487,7 @@ def verify_production_health(
         f"{base}/api/research/patterns?game={game}",
         f"{base}/patterns",
     )
-    revision = _validate_recommendation_alignment(
+    revision = _validate_recommendation_sources(
         patterns,
         forward,
         game,
@@ -638,7 +627,7 @@ def check_update_required(
                 "targetIssue": target_issue,
             }
         try:
-            _validate_recommendation_alignment(
+            _validate_recommendation_sources(
                 patterns,
                 forward,
                 game,

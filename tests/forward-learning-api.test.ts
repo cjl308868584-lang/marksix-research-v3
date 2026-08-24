@@ -180,6 +180,34 @@ test("patterns purchase reference uses the original frozen 30-period ledger inde
   );
 });
 
+test("patterns fills a missing frozen kind from its own prior settlement history", async () => {
+  db.database.exec(
+    `DELETE FROM rolling_pattern_consensus_ledger
+     WHERE run_id = 'pattern:2026231' AND product_kind = 'special_number'`,
+  );
+  seedPriorPatternScore(db.database, "2026230", "special_number", "32", ["32"], true);
+
+  const { response, payload } = await getJson(
+    patternsRoute,
+    "/api/research/patterns?game=new_macau&issue=2026231&scope=special",
+  );
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(
+    payload.recommendations.map((item: { resultKey: string }) => item.resultKey),
+    RAW_PATTERN_PRODUCTS.map(([, resultKey]) => resultKey),
+  );
+  assert.deepEqual(
+    payload.recommendations.slice(0, 4).map((item: { sourceProductId: string }) => item.sourceProductId),
+    RAW_PATTERN_PRODUCTS.slice(0, 4).map(([kind, resultKey]) => `raw:2026231:${kind}:${resultKey}`),
+  );
+  const special = payload.recommendations[4];
+  assert.equal(special.resultKey, "32");
+  assert.equal(special.learningSettledCount, 1);
+  assert.equal(special.learningHitCount, 1);
+  assert.match(special.reason, /已前瞻结算1期，命中1期/);
+});
+
 test("reviews expose only five official scores from the resolved revision", async () => {
   const { response, payload } = await getJson(
     reviewsRoute,
@@ -427,6 +455,64 @@ const RAW_PATTERN_PRODUCTS = [
   ["coverage_zodiac_triple", "牛+虎+兔", ["牛", "虎", "兔"], "coverage_6_plus_1", 0.2, 9],
   ["special_number", "32", ["32"], "special", 0.05, 47],
 ] as const;
+
+function seedPriorPatternScore(
+  database: DatabaseSync,
+  targetIssue: string,
+  kind: string,
+  resultKey: string,
+  values: string[],
+  actualMatched: boolean,
+) {
+  const templateRow = database.prepare(
+    `SELECT product_json FROM rolling_pattern_consensus_ledger
+     WHERE run_id = 'pattern:2026231' AND product_kind = 'coverage_zodiac'
+     LIMIT 1`,
+  ).get() as { product_json: string };
+  const product = JSON.parse(templateRow.product_json);
+  const runId = `pattern:${targetIssue}`;
+  const productId = `prior:${targetIssue}:${kind}:${resultKey}`;
+  Object.assign(product, {
+    runId,
+    productId,
+    targetIssue,
+    scope: kind === "special_number" ? "special" : "coverage_6_plus_1",
+    kind,
+    label: values.join("＋"),
+    values,
+    netOdds: kind === "special_number" ? 47 : 1,
+    sourceProductId: productId,
+  });
+  database.prepare(
+    `INSERT INTO rolling_pattern_consensus_ledger
+     (run_id, product_id, game, target_issue, scope, product_kind, result_key, rank, product_json)
+     VALUES (?, ?, 'new_macau', ?, ?, ?, ?, 1, ?)`,
+  ).run(
+    runId,
+    productId,
+    targetIssue,
+    product.scope,
+    kind,
+    resultKey,
+    JSON.stringify(product),
+  );
+  const score = {
+    runId,
+    productId,
+    game: "new_macau",
+    targetIssue,
+    actualMatched,
+    unitProfit: actualMatched ? product.netOdds : -1,
+    actualNumbers: [1, 2, 3, 4, 5, 6],
+    actualSpecial: actualMatched ? Number(values[0]) : 49,
+    scoredAt: "2026-08-18T14:00:00.000Z",
+  };
+  database.prepare(
+    `INSERT INTO rolling_pattern_consensus_scores
+     (run_id, product_id, game, target_issue, scope, score_json)
+     VALUES (?, ?, 'new_macau', ?, ?, ?)`,
+  ).run(runId, productId, targetIssue, product.scope, JSON.stringify(score));
+}
 
 const OFFICIAL = [
   ["coverage_zodiac", "猴", ["猴"]],
