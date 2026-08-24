@@ -10,11 +10,18 @@ import {
   readRollingPatternValueHistory,
   readRollingPatternValueLedger,
 } from "../../../../lib/rolling-pattern-store";
-import { buildRollingPatternProducts } from "../../../../lib/rolling-pattern-value";
-import { readResolvedProductRecommendations } from "../../../../lib/forward-learning-v2-store";
+import {
+  buildRollingPatternProducts,
+  buildUnifiedRollingPatternProducts,
+  selectMandatoryProductRecommendations,
+} from "../../../../lib/rolling-pattern-value";
 import type {
   RollingPatternFamily,
+  RollingPatternProduct,
+  RollingPatternProductKind,
+  RollingPatternRun,
   RollingPatternScope,
+  RollingPatternSignal,
 } from "../../../../lib/rolling-pattern-types";
 
 export const dynamic = "force-dynamic";
@@ -51,25 +58,6 @@ export async function GET(request: NextRequest) {
       { status: 404, headers: noStore() },
     );
   }
-  let resolved;
-  try {
-    resolved = await readResolvedProductRecommendations(game, envelope.run.targetIssue);
-  } catch {
-    return NextResponse.json(
-      { error: "权威五项来源不完整或混合，暂不展示部分结果。" },
-      { status: 503, headers: noStore() },
-    );
-  }
-  if (!resolved || resolved.targetIssue !== envelope.run.targetIssue ||
-    resolved.recommendations.length !== 5 ||
-    resolved.recommendations.some((item) =>
-      item.sourceRunId !== envelope.run.runId || item.revision !== resolved.revision
-    )) {
-    return NextResponse.json(
-      { error: "权威五项与冻结规律运行不一致。" },
-      { status: 503, headers: noStore() },
-    );
-  }
   const view = selectRollingPatternView(envelope.signals, {
     scope,
     family,
@@ -98,6 +86,11 @@ export async function GET(request: NextRequest) {
   const frozenProducts = valueLedger?.products.length
     ? valueLedger.products
     : buildRollingPatternProducts({ ...envelope.run, signals: envelope.signals });
+  const originalProducts = completeOriginalPatternProducts(
+    { ...envelope.run, signals: envelope.signals },
+    frozenProducts,
+  );
+  const recommendations = selectMandatoryProductRecommendations(originalProducts, 0);
   const valueAnalysis = selectValueProducts(frozenProducts.filter((item) => item.scope === scope));
   const pages = Math.ceil(filteredSignals.length / PAGE_SIZE);
   const start = (page - 1) * PAGE_SIZE;
@@ -108,7 +101,7 @@ export async function GET(request: NextRequest) {
       run: { ...envelope.run, signals: [] },
       summary: view.summary,
       specialNumberConsensus,
-      recommendations: resolved.recommendations,
+      recommendations,
       valueAnalysis,
       settlementHistory,
       signals: filteredSignals.slice(start, start + PAGE_SIZE),
@@ -122,6 +115,29 @@ export async function GET(request: NextRequest) {
     },
     { headers: noStore() },
   );
+}
+
+const REQUIRED_PRODUCT_KINDS = new Set<RollingPatternProductKind>([
+  "coverage_zodiac",
+  "coverage_tail",
+  "coverage_zodiac_pair",
+  "coverage_zodiac_triple",
+  "special_number",
+]);
+
+function completeOriginalPatternProducts(
+  run: RollingPatternRun & { signals: RollingPatternSignal[] },
+  products: readonly RollingPatternProduct[],
+) {
+  const availableKinds = new Set(products.map((product) => product.kind));
+  if ([...REQUIRED_PRODUCT_KINDS].every((kind) => availableKinds.has(kind))) {
+    return products;
+  }
+  const baselineProducts = buildUnifiedRollingPatternProducts(run);
+  return [
+    ...products,
+    ...baselineProducts.filter((product) => !availableKinds.has(product.kind)),
+  ];
 }
 
 function selectValueProducts<T extends { kind: string; expectedValue: number }>(products: T[]) {

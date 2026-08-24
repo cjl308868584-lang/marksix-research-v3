@@ -356,7 +356,8 @@ export function PurchaseRecommendationPanel({
         ))}
       </div>
       <small>
-        五项与逐期学习中心同源；推荐依据来自开奖前冻结的近30期规律及既有逐期结算记录，仅作购买参考。
+        本页只使用开奖前冻结的近30期规律及本页既有逐期结算，
+        不读取逐期学习中心的学习结果；仅作购买参考。
       </small>
     </section>
   );

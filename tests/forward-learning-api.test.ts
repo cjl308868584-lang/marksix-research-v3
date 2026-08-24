@@ -157,7 +157,7 @@ test("signed learning treats a missing 30-draw prerequisite as an explicit abste
   assert.match(route, /awaiting_unified_target/);
 });
 
-test("patterns and learning expose the same authoritative recommendation fields", async () => {
+test("patterns purchase reference uses the original frozen 30-period ledger independently from learning", async () => {
   const [patterns, learning] = await Promise.all([
     getJson(patternsRoute, "/api/research/patterns?game=new_macau&issue=2026231&scope=special"),
     getJson(forecastRoute, "/api/learning/forecast?game=new_macau"),
@@ -167,8 +167,16 @@ test("patterns and learning expose the same authoritative recommendation fields"
   assert.equal(learning.response.status, 200);
   assert.equal(patterns.payload.recommendations.length, 5);
   assert.deepEqual(
-    projectRecommendations(learning.payload.forecasts),
+    patterns.payload.recommendations.map((item: { resultKey: string }) => item.resultKey),
+    RAW_PATTERN_PRODUCTS.map(([, resultKey]) => resultKey),
+  );
+  assert.deepEqual(
+    learning.payload.forecasts.map((item: { resultKey: string }) => item.resultKey),
+    OFFICIAL.map(([, resultKey]) => resultKey),
+  );
+  assert.notDeepEqual(
     projectRecommendations(patterns.payload.recommendations),
+    projectRecommendations(learning.payload.forecasts),
   );
 });
 
@@ -355,7 +363,70 @@ function seedPatternRun(database: DatabaseSync, targetIssue: string) {
   };
   database.prepare(`INSERT INTO rolling_pattern_runs VALUES (?, ?, ?, ?, 'completed', ?, ?)`)
     .run(run.runId, run.game, targetIssue, run.engineVersion, run.frozenAt, JSON.stringify(run));
+  for (const [index, [kind, resultKey, values, scope, probability, netOdds]] of RAW_PATTERN_PRODUCTS.entries()) {
+    const productId = `raw:${targetIssue}:${kind}:${resultKey}`;
+    const product = {
+      runId: run.runId,
+      productId,
+      dataVersion: run.window.dataHash,
+      game: run.game,
+      targetIssue,
+      scope,
+      kind,
+      label: values.join("＋"),
+      values,
+      evidenceEventIds: [],
+      strategyCount: 3,
+      support: 10,
+      hits: 7,
+      misses: 3,
+      baselineProbability: 0.2,
+      patternProbability: probability,
+      legacySeedProbability: probability,
+      estimatedProbability: probability,
+      netOdds,
+      breakEvenProbability: 1 / (netOdds + 1),
+      expectedValue: probability * netOdds - (1 - probability),
+      valueStatus: "positive",
+      legacySettledCount: 4,
+      legacyHitCount: 3,
+      learningSettledCount: 0,
+      learningHitCount: 0,
+      learningMissCount: 0,
+      sourceKind: "ledger",
+      sourceProductId: productId,
+      derivedDefinitionHash: `raw-${index}`,
+      forwardSettledCount: 4,
+      forwardHitCount: 3,
+      forwardMissCount: 1,
+      rank: index + 1,
+      frozenAt: run.frozenAt,
+    };
+    database.prepare(
+      `INSERT INTO rolling_pattern_consensus_ledger
+       (run_id, product_id, game, target_issue, scope, product_kind, result_key, rank, product_json)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      run.runId,
+      productId,
+      run.game,
+      targetIssue,
+      scope,
+      kind,
+      resultKey,
+      index + 1,
+      JSON.stringify(product),
+    );
+  }
 }
+
+const RAW_PATTERN_PRODUCTS = [
+  ["coverage_zodiac", "马", ["马"], "coverage_6_plus_1", 0.7, 0.75],
+  ["coverage_tail", "9尾", ["9尾"], "coverage_6_plus_1", 0.75, 0.75],
+  ["coverage_zodiac_pair", "牛+虎", ["牛", "虎"], "coverage_6_plus_1", 0.4, 3],
+  ["coverage_zodiac_triple", "牛+虎+兔", ["牛", "虎", "兔"], "coverage_6_plus_1", 0.2, 9],
+  ["special_number", "32", ["32"], "special", 0.05, 47],
+] as const;
 
 const OFFICIAL = [
   ["coverage_zodiac", "猴", ["猴"]],

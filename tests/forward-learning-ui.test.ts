@@ -41,6 +41,17 @@ test("independent learning page exposes five official slots and the learning aud
   assert.match(workspace, /api\/learning\/model/);
 });
 
+test("patterns purchase reference discloses that it excludes learning-center adjustments", async () => {
+  const workspace = await readFile(
+    new URL("app/patterns/RollingPatternWorkspace.tsx", root),
+    "utf8",
+  );
+
+  assert.match(workspace, /只使用开奖前冻结的近30期规律/);
+  assert.match(workspace, /不读取逐期学习中心的学习结果/);
+  assert.doesNotMatch(workspace, /五项与逐期学习中心同源/);
+});
+
 test("a negative-EV authoritative item remains a concrete purchase card", async () => {
   const module = await server.ssrLoadModule("/app/patterns/RollingPatternWorkspace.tsx") as {
     PurchaseRecommendationPanel: React.ComponentType<{ items: AuthoritativeRecommendation[] }>;
