@@ -3,16 +3,16 @@ import {
   getWave,
   type Draw,
   type Wave,
-} from "./lottery";
+} from "./lottery.ts";
 import {
   getZodiac,
   ZODIAC_NAMES,
-} from "./zodiac";
+} from "./zodiac.ts";
 import type {
   RollingPatternEvent,
   RollingPatternEventState,
   RollingPatternScope,
-} from "./rolling-pattern-types";
+} from "./rolling-pattern-types.ts";
 
 const WAVES: readonly Wave[] = ["red", "blue", "green"];
 

@@ -330,6 +330,67 @@ export type RollingPatternValueLedgerEntry = {
   score: RollingPatternProductScore | null;
 };
 
+export type RollingPatternReviewResultGroup = {
+  event: RollingPatternEvent;
+  summary: RollingPatternResultSummary;
+};
+
+export type RollingPatternReviewScopeSnapshot = {
+  summary: RollingPatternSummary;
+  resultGroups: RollingPatternReviewResultGroup[];
+};
+
+export type RollingPatternReviewSnapshot = {
+  runId: string;
+  game: GameId;
+  targetIssue: string;
+  frozenAt: string;
+  purchases: AuthoritativeRecommendation[];
+  coverage: RollingPatternReviewScopeSnapshot;
+  special: RollingPatternReviewScopeSnapshot;
+  specialNumbers: SpecialNumberConsensus[];
+};
+
+export type RollingPatternReviewResultScore = {
+  eventId: string;
+  actualMatched: boolean;
+  count: number;
+};
+
+export type RollingPatternReviewSpecialNumberScore = {
+  number: number;
+  actualMatched: boolean;
+};
+
+export type RollingPatternReviewScore = {
+  runId: string;
+  game: GameId;
+  targetIssue: string;
+  actualNumbers: number[];
+  actualSpecial: number;
+  purchases: RollingPatternProductScore[];
+  coverageResults: RollingPatternReviewResultScore[];
+  specialResults: RollingPatternReviewResultScore[];
+  specialNumbers: RollingPatternReviewSpecialNumberScore[];
+  scoredAt: string;
+};
+
+export type RollingPatternReviewRecord = {
+  snapshot: RollingPatternReviewSnapshot;
+  score: RollingPatternReviewScore | null;
+};
+
+export type RollingPatternReviewIndexItem = {
+  targetIssue: string;
+  frozenAt: string;
+  settled: boolean;
+};
+
+export type RollingPatternReviewIndexPage = {
+  items: RollingPatternReviewIndexItem[];
+  nextCursor: string | null;
+};
+
 export type RollingPatternCycleResult =
   | {
       status: "created" | "existing";
