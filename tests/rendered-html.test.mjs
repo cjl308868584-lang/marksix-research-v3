@@ -144,7 +144,12 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.match(workspace, /二连肖/);
   assert.match(workspace, /三连肖/);
   assert.match(workspace, /盈亏平衡/);
-  assert.match(workspace, /逐期汇总结算/);
+  assert.doesNotMatch(workspace, /逐期汇总结算/);
+  assert.match(workspace, /逐期预测复盘/);
+  assert.match(workspace, /五项购买参考/);
+  assert.match(workspace, /结果 B 支持复盘/);
+  assert.match(workspace, /特码号码交集前15复盘/);
+  assert.match(workspace, /加载更早期数/);
   assert.doesNotMatch(workspace, /本期不推荐/);
 });
 
@@ -215,7 +220,6 @@ test("rolling pattern API returns an explicit no-store unavailable state", async
     specialNumberConsensus: [],
     recommendations: [],
     valueAnalysis: [],
-    settlementHistory: [],
     pagination: { page: 1, pageSize: 20, total: 0, pages: 0 },
   });
 });

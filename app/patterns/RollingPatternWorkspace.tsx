@@ -8,7 +8,8 @@ import type {
   RollingPatternEnvelope,
   RollingPatternFamily,
   RollingPatternProduct,
-  RollingPatternValueLedgerEntry,
+  RollingPatternReviewIndexItem,
+  RollingPatternReviewRecord,
   RollingPatternResultSummary,
   RollingPatternRun,
   RollingPatternScope,
@@ -43,7 +44,6 @@ type PatternApiResponse = Partial<RollingPatternEnvelope> & {
   specialNumberConsensus: SpecialNumberConsensus[];
   recommendations: AuthoritativeRecommendation[];
   valueAnalysis: RollingPatternProduct[];
-  settlementHistory: RollingPatternValueLedgerEntry[];
   pagination: {
     page: number;
     pageSize: number;
@@ -232,7 +232,6 @@ export function RollingPatternWorkspace() {
                 onSelectResult={selectResult}
               />
             )}
-            <SettlementHistoryPanel entries={data.settlementHistory ?? []} />
             {scope === "special" && (
               <SpecialNumberConsensusPanel
                 items={data.specialNumberConsensus ?? []}
@@ -240,6 +239,7 @@ export function RollingPatternWorkspace() {
                 onSelectNumber={selectNumber}
               />
             )}
+            <PatternReviewArchive game={game} />
             <PatternFunnel run={data.run} scope={scope} />
             <section className="rolling-pattern-toolbar" aria-label="规律分类筛选">
               {filters.map((item) => (
@@ -363,49 +363,253 @@ export function PurchaseRecommendationPanel({
   );
 }
 
-function SettlementHistoryPanel({ entries }: { entries: RollingPatternValueLedgerEntry[] }) {
-  const periods = entries.reduce<Array<{
-    issue: string;
-    items: RollingPatternValueLedgerEntry[];
-  }>>((groups, entry) => {
-    const current = groups.find((group) => group.issue === entry.product.targetIssue);
-    if (current) current.items.push(entry);
-    else groups.push({ issue: entry.product.targetIssue, items: [entry] });
-    return groups;
-  }, []);
+type ReviewIndexResponse = {
+  game: GameId;
+  items: RollingPatternReviewIndexItem[];
+  nextCursor: string | null;
+};
+
+type ReviewDetailResponse = {
+  game: GameId;
+  review: RollingPatternReviewRecord | null;
+  error?: string;
+};
+
+function PatternReviewArchive({ game }: { game: GameId }) {
+  const [periods, setPeriods] = useState<RollingPatternReviewIndexItem[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
+  const [review, setReview] = useState<RollingPatternReviewRecord | null>(null);
+  const [loadingPeriods, setLoadingPeriods] = useState(true);
+  const [loadingReview, setLoadingReview] = useState(false);
+  const [reviewError, setReviewError] = useState("");
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPeriods([]);
+    setNextCursor(null);
+    setSelectedIssue(null);
+    setReview(null);
+    setReviewError("");
+    setLoadingPeriods(true);
+    void fetch(`/api/research/patterns/reviews?game=${game}&limit=20`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json() as ReviewIndexResponse;
+        if (!response.ok) throw new Error("逐期预测复盘暂时无法读取。");
+        return payload;
+      })
+      .then((payload) => {
+        setPeriods(payload.items);
+        setNextCursor(payload.nextCursor);
+        setSelectedIssue(payload.items[0]?.targetIssue ?? null);
+      })
+      .catch((reason) => {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+          setReviewError(reason instanceof Error ? reason.message : "逐期预测复盘暂时无法读取。");
+        }
+      })
+      .finally(() => setLoadingPeriods(false));
+    return () => controller.abort();
+  }, [game]);
+
+  useEffect(() => {
+    if (!selectedIssue) return;
+    const controller = new AbortController();
+    setReview(null);
+    setReviewError("");
+    setLoadingReview(true);
+    const query = new URLSearchParams({ game, issue: selectedIssue });
+    void fetch(`/api/research/patterns/reviews?${query.toString()}`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json() as ReviewDetailResponse;
+        if (!response.ok || !payload.review) {
+          throw new Error(payload.error || "这期预测复盘暂时无法读取。");
+        }
+        return payload.review;
+      })
+      .then(setReview)
+      .catch((reason) => {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) {
+          setReviewError(reason instanceof Error ? reason.message : "这期预测复盘暂时无法读取。");
+        }
+      })
+      .finally(() => setLoadingReview(false));
+    return () => controller.abort();
+  }, [game, selectedIssue]);
+
+  const loadEarlier = async () => {
+    if (!nextCursor || loadingPeriods) return;
+    setLoadingPeriods(true);
+    setReviewError("");
+    try {
+      const query = new URLSearchParams({ game, limit: "20", before: nextCursor });
+      const response = await fetch(`/api/research/patterns/reviews?${query.toString()}`, {
+        cache: "no-store",
+      });
+      const payload = await response.json() as ReviewIndexResponse;
+      if (!response.ok) throw new Error("更早期数暂时无法读取。");
+      setPeriods((current) => {
+        const known = new Set(current.map((item) => item.targetIssue));
+        return [...current, ...payload.items.filter((item) => !known.has(item.targetIssue))];
+      });
+      setNextCursor(payload.nextCursor);
+    } catch (reason) {
+      setReviewError(reason instanceof Error ? reason.message : "更早期数暂时无法读取。");
+    } finally {
+      setLoadingPeriods(false);
+    }
+  };
+
   return (
-    <section className="rolling-settlement-history" aria-labelledby="rolling-history-title">
+    <section className="rolling-review-archive" aria-labelledby="rolling-review-title">
       <header>
-        <span>FORWARD LEDGER · IMMUTABLE</span>
-        <h2 id="rolling-history-title">逐期汇总结算</h2>
-        <p>每期展示冻结时排名前15的项目；开奖后标记命中、失败和每1单位实际盈亏。</p>
-      </header>
-      {periods.length === 0 ? (
-        <p className="rolling-pattern-result-empty">新账本将从本次发布后的冻结期开始逐期累积。</p>
-      ) : (
-        <div className="rolling-settlement-periods">
-          {periods.map((period) => (
-            <details key={period.issue}>
-              <summary>
-                <strong>{period.issue}期</strong>
-                <span>{period.items.filter((item) => item.score?.actualMatched).length}中 / {period.items.filter((item) => item.score && !item.score.actualMatched).length}不中</span>
-              </summary>
-              <div>
-                {period.items.map(({ product, score }) => (
-                  <p key={product.productId}>
-                    <span>{productKindLabel(product.kind)} · <b>{product.label}</b></span>
-                    <strong className={!score ? "pending" : score.actualMatched ? "hit" : "miss"}>
-                      {!score ? "待开奖" : score.actualMatched ? `命中 +${odds(score.unitProfit)}` : "不中 -1"}
-                    </strong>
-                  </p>
-                ))}
-              </div>
-            </details>
-          ))}
+        <div>
+          <span>PERIOD ARCHIVE · FROZEN BEFORE DRAW</span>
+          <h2 id="rolling-review-title">逐期预测复盘</h2>
         </div>
+        <p>每期完整保存开奖前的五项购买参考、结果 B 支持汇总和特码号码交集前15；开奖后只追加真实对错。</p>
+      </header>
+      {loadingPeriods && periods.length === 0 ? (
+        <p className="rolling-pattern-result-empty">正在读取逐期预测记录…</p>
+      ) : periods.length === 0 ? (
+        <p className="rolling-pattern-result-empty">新复盘账本会从已冻结期数开始持续保存。</p>
+      ) : (
+        <>
+          <nav className="rolling-review-periods" aria-label="选择复盘期数">
+            {periods.map((period) => (
+              <button
+                type="button"
+                className={selectedIssue === period.targetIssue ? "active" : ""}
+                onClick={() => setSelectedIssue(period.targetIssue)}
+                key={period.targetIssue}
+              >
+                <strong>{period.targetIssue}期</strong>
+                <span>{period.settled ? "已结算" : "待开奖"}</span>
+              </button>
+            ))}
+          </nav>
+          {loadingReview && <p className="rolling-pattern-result-empty">正在读取本期冻结内容…</p>}
+          {!loadingReview && review && <PatternReviewDetail review={review} />}
+          {nextCursor && (
+            <button
+              type="button"
+              className="rolling-review-load-more"
+              disabled={loadingPeriods}
+              onClick={() => void loadEarlier()}
+            >
+              {loadingPeriods ? "正在读取…" : "加载更早期数"}
+            </button>
+          )}
+        </>
       )}
+      {reviewError && <p className="rolling-review-error" role="alert">{reviewError}</p>}
     </section>
   );
+}
+
+function PatternReviewDetail({ review }: { review: RollingPatternReviewRecord }) {
+  const { snapshot, score } = review;
+  const purchaseScores = new Map(score?.purchases.map((item) => [item.productId, item]));
+  const coverageScores = new Map(score?.coverageResults.map((item) => [item.eventId, item]));
+  const specialScores = new Map(score?.specialResults.map((item) => [item.eventId, item]));
+  const numberScores = new Map(score?.specialNumbers.map((item) => [item.number, item]));
+  return (
+    <article className="rolling-review-detail">
+      <header>
+        <div><span>冻结期号</span><strong>{snapshot.targetIssue}期</strong></div>
+        <div><span>冻结时间</span><strong>{beijingTime(snapshot.frozenAt)}</strong></div>
+        <div><span>开奖结果</span><strong>{score ? `${score.actualNumbers.map(twoDigits).join(" · ")}（特码 ${twoDigits(score.actualSpecial)}）` : "等待开奖"}</strong></div>
+      </header>
+
+      <section className="rolling-review-section">
+        <h3>五项购买参考</h3>
+        <div className="rolling-review-purchases">
+          {snapshot.purchases.map((item) => {
+            const result = purchaseScores.get(item.product.productId);
+            return (
+              <article key={item.kind}>
+                <header>
+                  <span>{productKindLabel(item.kind)}</span>
+                  <strong>{item.product.label}</strong>
+                  <OutcomeBadge settled={Boolean(score)} matched={result?.actualMatched} />
+                </header>
+                <p>参考概率 {percent(item.product.estimatedProbability)} · 净赔率 1:{odds(item.product.netOdds)} · 每1单位EV {signedReturn(item.product.expectedValue)}</p>
+                <small>{item.reason}</small>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="rolling-review-section">
+        <h3>结果 B 支持复盘</h3>
+        <ReviewResultScope title="6+1生肖、尾数" groups={snapshot.coverage.resultGroups} scores={coverageScores} settled={Boolean(score)} />
+        <ReviewResultScope title="特码生肖、尾数、波色、头数" groups={snapshot.special.resultGroups} scores={specialScores} settled={Boolean(score)} />
+      </section>
+
+      <section className="rolling-review-section">
+        <h3>特码号码交集前15复盘</h3>
+        {snapshot.specialNumbers.length === 0 ? (
+          <p className="rolling-pattern-result-empty">本期没有形成号码交集。</p>
+        ) : (
+          <div className="rolling-review-numbers">
+            {snapshot.specialNumbers.map((item, index) => (
+              <article key={item.number}>
+                <span>#{String(index + 1).padStart(2, "0")}</span>
+                <strong>{twoDigits(item.number)}</strong>
+                <em>研究分 +{(item.score * 100).toFixed(1)}</em>
+                <OutcomeBadge settled={Boolean(score)} matched={numberScores.get(item.number)?.actualMatched} />
+              </article>
+            ))}
+          </div>
+        )}
+      </section>
+    </article>
+  );
+}
+
+function ReviewResultScope({
+  title,
+  groups,
+  scores,
+  settled,
+}: {
+  title: string;
+  groups: RollingPatternReviewRecord["snapshot"]["coverage"]["resultGroups"];
+  scores: Map<string, { actualMatched: boolean; count: number }>;
+  settled: boolean;
+}) {
+  return (
+    <div className="rolling-review-results">
+      <h4>{title}</h4>
+      <div>
+        {groups.map(({ event, summary }) => {
+          const outcome = scores.get(event.eventId);
+          return (
+            <article key={event.eventId}>
+              <header>
+                <strong>{summary.label}</strong>
+                <OutcomeBadge settled={settled} matched={outcome?.actualMatched} />
+              </header>
+              <p>{summary.strategyCount}条策略 · 命中/失败 {summary.hitCount}/{summary.missCount} · 历史命中率 {percent(summary.hitRate)}</p>
+              {settled && <small>开奖实际出现 {outcome?.count ?? 0} 个</small>}
+            </article>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function OutcomeBadge({ settled, matched }: { settled: boolean; matched?: boolean }) {
+  const status = !settled ? "pending" : matched ? "hit" : "miss";
+  return <b className={`rolling-review-status ${status}`}>{!settled ? "待开奖" : matched ? "命中" : "未命中"}</b>;
 }
 
 function SpecialNumberConsensusPanel({
@@ -758,4 +962,8 @@ function beijingTime(value: string) {
     minute: "2-digit",
     hour12: false,
   }).format(new Date(value));
+}
+
+function twoDigits(value: number) {
+  return String(value).padStart(2, "0");
 }

@@ -8,7 +8,6 @@ import {
 import {
   readBoundedLegacyProductHistory,
   readRollingPatternRun,
-  readRollingPatternValueHistory,
   readRollingPatternValueLedger,
 } from "../../../../lib/rolling-pattern-store";
 import {
@@ -53,7 +52,6 @@ export async function GET(request: NextRequest) {
         specialNumberConsensus: [],
         recommendations: [],
         valueAnalysis: [],
-        settlementHistory: [],
         pagination: { page, pageSize: PAGE_SIZE, total: 0, pages: 0 },
       },
       { status: 404, headers: noStore() },
@@ -64,10 +62,7 @@ export async function GET(request: NextRequest) {
     family,
     resultEventId: null,
   });
-  const [valueLedger, settlementHistory] = await Promise.all([
-    readRollingPatternValueLedger(game, envelope.run.targetIssue),
-    readRollingPatternValueHistory(game, scope, 8),
-  ]);
+  const valueLedger = await readRollingPatternValueLedger(game, envelope.run.targetIssue);
   if (result && !view.summary.resultGroups.some((group) => group.eventId === result)) {
     return NextResponse.json(
       { error: "所选结果不属于当前结果域或分类。" },
@@ -105,7 +100,6 @@ export async function GET(request: NextRequest) {
       specialNumberConsensus,
       recommendations,
       valueAnalysis,
-      settlementHistory,
       signals: filteredSignals.slice(start, start + PAGE_SIZE),
       scores: envelope.scores,
       pagination: {
