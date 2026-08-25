@@ -154,7 +154,7 @@ test("a warm research database does not replay schema DDL in a fresh isolate", a
     prepare(sql: string) {
       prepared.push(sql);
       return {
-        first: async () => ({ present: 48 }),
+        first: async () => ({ present: 52 }),
         run: async () => ({ meta: { changes: 0 } }),
       };
     },
@@ -171,7 +171,7 @@ test("a research database missing one index replays idempotent schema repair", a
       prepared.push(sql);
       return {
         bind: () => this,
-        first: async () => ({ present: 47 }),
+        first: async () => ({ present: 51 }),
         run: async () => ({ meta: { changes: 0 } }),
       };
     },
