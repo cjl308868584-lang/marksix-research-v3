@@ -9066,6 +9066,31 @@ footer p {
 .forward-learning-score-grid .miss > strong { color: #d97062; }
 .forward-learning-score-grid p { margin: 7px 0 0; color: #777f7b; font-size: 9px; }
 .forward-learning-review > footer { margin-top: 13px; color: #606864; font-size: 8px; }
+.forward-learning-review-history { display: grid; gap: 8px; }
+.forward-learning-review-history > details { overflow: hidden; border: 1px solid #292f30; border-radius: 10px; background: #0d1011; }
+.forward-learning-review-history > details > summary {
+  padding: 12px 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--learning-accent);
+  cursor: pointer;
+  list-style: none;
+}
+.forward-learning-review-history > details > summary::-webkit-details-marker { display: none; }
+.forward-learning-review-history > details > summary strong { color: #8b938f; font-family: var(--font-mono); font-size: 9px; }
+.forward-learning-review-history .forward-learning-review { border-width: 1px 0 0; border-radius: 0; }
+.forward-learning-review-history > button {
+  margin: 5px auto 0;
+  padding: 9px 15px;
+  border: 1px solid #4a4129;
+  border-radius: 999px;
+  background: transparent;
+  color: #d1b765;
+  font-size: 9px;
+}
+.forward-learning-review-history > button:disabled { opacity: .55; }
+.forward-learning-review-history > p { margin: 2px 0 0; color: #d97062; font-size: 9px; text-align: center; }
 .forward-learning-performance { display: grid; gap: 10px; }
 .forward-learning-performance article { padding: 15px; border: 1px solid #292f30; border-radius: 10px; background: #101314; }
 .forward-learning-performance article > header { display: flex; justify-content: space-between; padding-bottom: 11px; border-bottom: 1px solid #252b2d; }

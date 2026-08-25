@@ -5,19 +5,21 @@ import { readForwardLearningReviews } from "../../../../lib/forward-learning-sto
 export const dynamic = "force-dynamic";
 
 export async function GET(request: NextRequest) {
-  const allowed = new Set(["game", "limit"]);
+  const allowed = new Set(["game", "limit", "before"]);
   if ([...request.nextUrl.searchParams.keys()].some((key) => !allowed.has(key))) {
     return NextResponse.json({ error: "请求包含不受支持的参数。" }, { status: 400, headers: noStore() });
   }
   const requested = request.nextUrl.searchParams.get("game");
   const game = GAME_IDS.includes(requested as GameId) ? requested as GameId : null;
   const limit = Number(request.nextUrl.searchParams.get("limit") ?? 30);
-  if (!game || !Number.isInteger(limit) || limit < 1 || limit > 100) {
-    return NextResponse.json({ error: "彩种或数量无效。" }, { status: 400, headers: noStore() });
+  const before = request.nextUrl.searchParams.get("before");
+  if (!game || !Number.isInteger(limit) || limit < 1 || limit > 100 ||
+    (before !== null && !/^\d{4,16}$/.test(before))) {
+    return NextResponse.json({ error: "彩种、数量或游标无效。" }, { status: 400, headers: noStore() });
   }
-  let reviews;
+  let page;
   try {
-    reviews = await readForwardLearningReviews(game, limit);
+    page = await readForwardLearningReviews(game, limit, before);
   } catch {
     return NextResponse.json(
       { error: "resolved-v2正式复盘不完整。" },
@@ -25,7 +27,7 @@ export async function GET(request: NextRequest) {
     );
   }
   return NextResponse.json(
-    { game, reviews },
+    { game, reviews: page.reviews, nextCursor: page.nextCursor },
     { headers: noStore() },
   );
 }

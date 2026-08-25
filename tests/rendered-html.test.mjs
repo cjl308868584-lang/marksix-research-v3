@@ -105,6 +105,14 @@ test("server-renders the independent forward learning center", async () => {
   assert.match(html, /正在读取不可变学习账本/);
   assert.match(html, /与近30期购买参考同源/);
   assert.match(html, /赔率参与排序/);
+  const workspace = await readFile(
+    new URL("../app/learning/ForwardLearningWorkspace.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.match(workspace, /逐期五项结算/);
+  assert.match(workspace, /全部历史期数/);
+  assert.match(workspace, /加载更早期数/);
+  assert.doesNotMatch(workspace, /最近一期逐项结算/);
   assert.doesNotMatch(html, /赔率不参与模型排序/);
   assert.doesNotMatch(html, /THREE EXPERTS/);
   assert.doesNotMatch(html, /赔率价值分析/);

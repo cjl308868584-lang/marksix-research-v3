@@ -276,6 +276,11 @@ export type ForwardLearningReview = {
   ruleUpdates: ForwardRuleUpdate[];
 };
 
+export type ForwardLearningReviewPage = {
+  reviews: ForwardLearningReview[];
+  nextCursor: string | null;
+};
+
 export type ForwardLearningCycleResult = {
   status: "created" | "existing" | "awaiting_verification" | "awaiting_rollout";
   runId: string | null;

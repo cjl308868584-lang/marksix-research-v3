@@ -23,6 +23,7 @@ const SLOT_LABELS: Record<ForwardLearningSlot, string> = {
 type LearningData = {
   forecasts: AuthoritativeLearningForecast[];
   reviews: ForwardLearningReview[];
+  reviewsNextCursor: string | null;
   performance: ResolvedV2SlotPerformance[];
   learning: ProductLearningSlotStatus[];
 };
@@ -32,20 +33,24 @@ export function ForwardLearningWorkspace() {
   const [data, setData] = useState<LearningData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [historyError, setHistoryError] = useState("");
+  const [loadingEarlier, setLoadingEarlier] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoading(true);
     setError("");
+    setHistoryError("");
     void Promise.all([
       readJson<{ forecasts?: AuthoritativeLearningForecast[] }>(`/api/learning/forecast?game=${game}`, controller.signal),
-      readJson<{ reviews?: ForwardLearningReview[] }>(`/api/learning/reviews?game=${game}&limit=30`, controller.signal),
+      readJson<{ reviews?: ForwardLearningReview[]; nextCursor?: string | null }>(`/api/learning/reviews?game=${game}&limit=20`, controller.signal),
       readJson<{ slots?: ResolvedV2SlotPerformance[] }>(`/api/learning/performance?game=${game}`, controller.signal),
       readJson<{ learning?: ProductLearningSlotStatus[] }>(`/api/learning/model?game=${game}`, controller.signal),
     ]).then(([forecast, reviews, performance, model]) => {
       setData({
         forecasts: forecast.forecasts ?? [],
         reviews: reviews.reviews ?? [],
+        reviewsNextCursor: reviews.nextCursor ?? null,
         performance: performance.slots ?? [],
         learning: model.learning ?? [],
       });
@@ -59,8 +64,32 @@ export function ForwardLearningWorkspace() {
     return () => controller.abort();
   }, [game]);
 
-  const latest = data?.reviews[0] ?? null;
   const conclusion = useMemo(() => learningConclusion(data?.performance ?? []), [data?.performance]);
+
+  const loadEarlierReviews = async () => {
+    if (!data?.reviewsNextCursor || loadingEarlier) return;
+    setLoadingEarlier(true);
+    setHistoryError("");
+    try {
+      const query = new URLSearchParams({ game, limit: "20", before: data.reviewsNextCursor });
+      const page = await readJson<{ reviews?: ForwardLearningReview[]; nextCursor?: string | null }>(
+        `/api/learning/reviews?${query.toString()}`,
+      );
+      setData((current) => {
+        if (!current) return current;
+        const known = new Set(current.reviews.map((review) => review.run.settledIssue));
+        return {
+          ...current,
+          reviews: [...current.reviews, ...(page.reviews ?? []).filter((review) => !known.has(review.run.settledIssue))],
+          reviewsNextCursor: page.nextCursor ?? null,
+        };
+      });
+    } catch (reason) {
+      setHistoryError(reason instanceof Error ? reason.message : "更早期数暂时无法读取。");
+    } finally {
+      setLoadingEarlier(false);
+    }
+  };
 
   return (
     <div className="v3-shell forward-learning-shell">
@@ -86,7 +115,7 @@ export function ForwardLearningWorkspace() {
             <section className="forward-learning-status">
               <div><span>研究彩种</span><strong>{GAME_META[game].name}</strong></div>
               <div><span>下一目标期</span><strong>{data.forecasts[0]?.targetIssue ?? "待冻结"}</strong></div>
-              <div><span>正式样本</span><strong>{data.reviews.length}期</strong></div>
+              <div><span>正式样本</span><strong>{officialPeriodCount(data.learning, data.reviews)}期</strong></div>
               <div><span>学习口径</span><strong>同源产品五项</strong></div>
             </section>
 
@@ -109,10 +138,26 @@ export function ForwardLearningWorkspace() {
             )}
 
             <section className="v3-section-head forward-learning-heading">
-              <div><span>LATEST SETTLEMENT</span><h2>最近一期逐项结算</h2></div>
-              <p>正式命中率只统计五个冻结槽位，不把候选规律的多次触发相加。</p>
+              <div><span>ALL SETTLEMENTS · IMMUTABLE</span><h2>逐期五项结算</h2></div>
+              <p>全部历史期数逐期保存；正式命中率只统计五个冻结槽位，不把候选规律的多次触发相加。</p>
             </section>
-            {latest ? <LatestReview review={latest} /> : <EmptyLearning text="尚无开奖后结算样本。首期只冻结，不制造历史成绩。" />}
+            {data.reviews.length ? (
+              <section className="forward-learning-review-history">
+                {data.reviews.map((review, index) => (
+                  <LearningReviewPeriod
+                    review={review}
+                    initiallyOpen={index === 0}
+                    key={review.run.settledIssue}
+                  />
+                ))}
+                {data.reviewsNextCursor && (
+                  <button type="button" disabled={loadingEarlier} onClick={() => void loadEarlierReviews()}>
+                    {loadingEarlier ? "正在读取…" : "加载更早期数"}
+                  </button>
+                )}
+                {historyError && <p role="alert">{historyError}</p>}
+              </section>
+            ) : <EmptyLearning text="尚无开奖后结算样本。首期只冻结，不制造历史成绩。" />}
 
             <section className="v3-section-head forward-learning-heading">
               <div><span>RELATIVE TO EXACT BASELINE</span><h2>分槽位学习表现</h2></div>
@@ -152,7 +197,7 @@ function ForecastCard({ forecast, index }: { forecast: AuthoritativeLearningFore
   </article>;
 }
 
-function LatestReview({ review }: { review: ForwardLearningReview }) {
+function LearningReviewCard({ review }: { review: ForwardLearningReview }) {
   const hits = review.scores.filter((score) => score.actualMatched).length;
   const official = review.scores.filter((score) => score.official);
   const mean = (read: (score: typeof official[number]) => number) => official.length ? official.reduce((sum, score) => sum + read(score), 0) / official.length : 0;
@@ -167,6 +212,20 @@ function LatestReview({ review }: { review: ForwardLearningReview }) {
     </div>
     <footer>实际特码 {String(official[0]?.actualSpecial ?? "—").padStart(2, "0")} · 结算 {formatTime(official[0]?.scoredAt ?? review.run.completedAt ?? "")}</footer>
   </section>;
+}
+
+function LearningReviewPeriod({
+  review,
+  initiallyOpen,
+}: {
+  review: ForwardLearningReview;
+  initiallyOpen: boolean;
+}) {
+  const [open, setOpen] = useState(initiallyOpen);
+  return <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary><span>第 {review.run.settledIssue} 期</span><strong>{reviewHitSummary(review)}</strong></summary>
+    <LearningReviewCard review={review} />
+  </details>;
 }
 
 function PerformanceBoard({ performance }: { performance: ResolvedV2SlotPerformance[] }) {
@@ -194,11 +253,23 @@ function LearningStatusCard({ status }: { status: ProductLearningSlotStatus }) {
 
 function EmptyLearning({ text }: { text: string }) { return <section className="forward-learning-empty">{text}</section>; }
 
-async function readJson<T>(url: string, signal: AbortSignal): Promise<T> {
+async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { cache: "no-store", signal });
   const payload = await response.json() as T & { error?: string };
   if (!response.ok && response.status !== 404) throw new Error(payload.error || "逐期学习账本暂不可用。");
   return payload;
+}
+
+function reviewHitSummary(review: ForwardLearningReview) {
+  const official = review.scores.filter((score) => score.official);
+  return `${official.filter((score) => score.actualMatched).length}/${official.length} 命中`;
+}
+
+function officialPeriodCount(
+  learning: ProductLearningSlotStatus[],
+  reviews: ForwardLearningReview[],
+) {
+  return Math.max(reviews.length, ...learning.map((item) => item.officialSamples), 0);
 }
 
 function learningConclusion(performance: ResolvedV2SlotPerformance[]) {

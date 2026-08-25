@@ -16,6 +16,7 @@ import {
   type ForwardLearningModelState,
   type ForwardLearningPerformanceWindow,
   type ForwardLearningReview,
+  type ForwardLearningReviewPage,
   type ForwardLearningRun,
   type ForwardLearningScore,
   type ForwardLearningScoreV2,
@@ -385,17 +386,26 @@ export async function readForwardLearningPerformance(game: GameId) {
 export async function readForwardLearningReviews(
   game: GameId,
   limit = 50,
-): Promise<ForwardLearningReview[]> {
-  if (!await ensureForwardLearningStore()) return [];
+  beforeIssue: string | null = null,
+): Promise<ForwardLearningReviewPage> {
+  if (!await ensureForwardLearningStore()) return { reviews: [], nextCursor: null };
   const db = runtime.__marksixD1;
-  if (!db) return [];
+  if (!db) return { reviews: [], nextCursor: null };
   const bounded = Math.max(1, Math.min(100, Math.trunc(limit)));
-  const runRows = await db.prepare(
+  const beforeClause = beforeIssue
+    ? " AND CAST(settled_issue AS INTEGER) < CAST(? AS INTEGER)"
+    : "";
+  const statement = db.prepare(
     `SELECT run_json FROM forward_learning_runs
-     WHERE game = ? AND status = 'completed'
-     ORDER BY completed_at DESC LIMIT ?`,
-  ).bind(game, bounded).all<JsonRow>();
-  const runs = rowsAs<ForwardLearningRun>(runRows.results, "run_json");
+     WHERE game = ? AND status = 'completed'${beforeClause}
+     ORDER BY CAST(settled_issue AS INTEGER) DESC, completed_at DESC LIMIT ?`,
+  );
+  const runRows = beforeIssue
+    ? await statement.bind(game, beforeIssue, bounded + 1).all<JsonRow>()
+    : await statement.bind(game, bounded + 1).all<JsonRow>();
+  const allRuns = rowsAs<ForwardLearningRun>(runRows.results, "run_json");
+  const hasMore = allRuns.length > bounded;
+  const runs = allRuns.slice(0, bounded);
   const scores = await readResolvedV2Scores(game, true);
   const modelRows = await db.prepare(
     `SELECT state_json FROM forward_learning_model_states
@@ -407,7 +417,7 @@ export async function readForwardLearningReviews(
      WHERE game = ? ORDER BY generated_at DESC, rowid DESC`,
   ).bind(game).all<JsonRow>();
   const updates = rowsAs<ForwardRuleUpdate>(updateRows.results, "update_json");
-  return runs.flatMap((run) => {
+  const reviews = runs.flatMap((run) => {
     const issueScores = scores.filter((score) => score.targetIssue === run.settledIssue);
     if (!issueScores.length) return [];
     assertCompleteOfficialIssue(issueScores, run.settledIssue);
@@ -424,6 +434,12 @@ export async function readForwardLearningReviews(
       ruleUpdates: updates.filter((update) => update.runId === run.runId),
     }];
   });
+  return {
+    reviews,
+    nextCursor: hasMore && runs.length
+      ? runs[runs.length - 1].settledIssue
+      : null,
+  };
 }
 
 async function readResolvedV2Scores(game: GameId, officialOnly: boolean) {

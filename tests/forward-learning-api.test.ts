@@ -218,6 +218,45 @@ test("reviews expose only five official scores from the resolved revision", asyn
   assert.equal(payload.reviews[0].scores.length, 5);
   assert.ok(payload.reviews[0].scores.every((item: { official: boolean }) => item.official));
   assert.equal(payload.reviews[0].run.revision, 2);
+  assert.equal(payload.nextCursor, null);
+});
+
+test("reviews page through every settled issue without overlap", async () => {
+  seedRevision(db.database, "2026230", 2, "older-resolved");
+  seedScores(db.database, "2026230", 2, "older-resolved");
+  seedCompletedRun(db.database, "2026230");
+  seedRevision(db.database, "2026229", 2, "oldest-resolved");
+  seedScores(db.database, "2026229", 2, "oldest-resolved");
+  seedCompletedRun(db.database, "2026229");
+
+  const first = await getJson(
+    reviewsRoute,
+    "/api/learning/reviews?game=new_macau&limit=2",
+  );
+  assert.deepEqual(
+    first.payload.reviews.map((review: { run: { settledIssue: string } }) => review.run.settledIssue),
+    ["2026231", "2026230"],
+  );
+  assert.equal(first.payload.nextCursor, "2026230");
+
+  const second = await getJson(
+    reviewsRoute,
+    `/api/learning/reviews?game=new_macau&limit=2&before=${first.payload.nextCursor}`,
+  );
+  assert.deepEqual(
+    second.payload.reviews.map((review: { run: { settledIssue: string } }) => review.run.settledIssue),
+    ["2026229"],
+  );
+  assert.equal(second.payload.nextCursor, null);
+});
+
+test("reviews reject an invalid history cursor", async () => {
+  const { response } = await getJson(
+    reviewsRoute,
+    "/api/learning/reviews?game=new_macau&before=not-an-issue",
+  );
+  assert.equal(response.status, 400);
+  assert.equal(response.headers.get("cache-control"), "private, no-store");
 });
 
 test("reviews and performance exclude v1 and lower committed revisions", async () => {
