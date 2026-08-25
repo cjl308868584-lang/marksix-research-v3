@@ -230,7 +230,11 @@ export async function readRollingPatternReviewIndex(
       : "";
     const statement = db.prepare(
       `SELECT r.target_issue, MIN(r.frozen_at) AS frozen_at,
-              MAX(CASE WHEN rs.run_id IS NULL THEN 0 ELSE 1 END) AS settled
+              MAX(CASE WHEN rs.run_id IS NOT NULL OR EXISTS (
+                SELECT 1 FROM lottery_draws d
+                WHERE d.game = r.game AND d.issue = r.target_issue
+                  AND d.verified = 1
+              ) THEN 1 ELSE 0 END) AS settled
        FROM rolling_pattern_runs r
        LEFT JOIN rolling_pattern_review_scores rs ON rs.run_id = r.run_id
        WHERE r.game = ? AND r.engine_version = ? AND r.status = 'completed'

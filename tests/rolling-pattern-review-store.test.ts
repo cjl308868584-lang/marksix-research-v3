@@ -114,6 +114,35 @@ test("pages every saved issue newest-first without overlap", async () => {
   assert.equal(second.nextCursor, null);
 });
 
+test("marks a legacy issue settled when its verified draw already exists", async () => {
+  await store.persistRollingPatternRun(run("2026238", "2026237"));
+  db.database.exec("DELETE FROM rolling_pattern_review_scores;");
+  const draw = verifiedDraw("2026238");
+  db.database.prepare(
+    `INSERT INTO lottery_draws (
+       draw_id, game, issue, draw_at, main_1, main_2, main_3, main_4,
+       main_5, main_6, special, source_grade, verified, source_hash,
+       available_at, ingested_at, dataset_version
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `fixture:${draw.issue}`,
+    draw.game,
+    draw.issue,
+    draw.drawAt,
+    ...draw.numbers,
+    draw.special,
+    "A",
+    1,
+    `hash:${draw.issue}`,
+    draw.drawAt,
+    draw.drawAt,
+    "fixture-v1",
+  );
+
+  const page = await store.readRollingPatternReviewIndex("new_macau", 20);
+  assert.equal(page.items[0]?.settled, true);
+});
+
 test("signed settlement backfills a legacy run whose compact review row is missing", async () => {
   const frozen = run("2026238", "2026237");
   await store.persistRollingPatternRun(frozen);
