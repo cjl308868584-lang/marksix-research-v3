@@ -147,6 +147,37 @@ test("the value ledger migration enforces one frozen product and score per run",
   database.close();
 });
 
+test("the prediction review migration creates one immutable snapshot and score per issue", async () => {
+  const migration = await readFile(
+    new URL("../drizzle/0012_prediction_review.sql", import.meta.url),
+    "utf8",
+  );
+  const database = new DatabaseSync(":memory:");
+  for (const statement of migration.split("--> statement-breakpoint")) {
+    if (statement.trim()) database.exec(statement);
+  }
+  const tables = database.prepare(
+    `SELECT name FROM sqlite_schema
+     WHERE type = 'table' AND name LIKE 'rolling_pattern_review_%'
+     ORDER BY name`,
+  ).all().map((row) => row.name);
+  assert.deepEqual(tables, [
+    "rolling_pattern_review_scores",
+    "rolling_pattern_review_snapshots",
+  ]);
+  database.exec(
+    `INSERT INTO rolling_pattern_review_snapshots
+      (run_id, game, target_issue, snapshot_json, frozen_at)
+     VALUES ('run-1','new_macau','2026238','{}','2026-08-24T14:27:00Z')`,
+  );
+  assert.throws(() => database.exec(
+    `INSERT INTO rolling_pattern_review_snapshots
+      (run_id, game, target_issue, snapshot_json, frozen_at)
+     VALUES ('run-2','new_macau','2026238','{}','2026-08-24T14:28:00Z')`,
+  ));
+  database.close();
+});
+
 test("the forward learning migration creates seven independent learning tables", async () => {
   const migration = await readFile(
     new URL("../drizzle/0010_forward_learning.sql", import.meta.url),

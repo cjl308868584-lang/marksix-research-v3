@@ -481,7 +481,7 @@ test("settlement scores only the previously frozen verified target and is idempo
   assert.equal(db.productScores.size, db.products.size);
 });
 
-test("settlement locates pending runs once across a long verified history", async () => {
+test("settlement uses two bounded run queries across a long verified history", async () => {
   await store.persistRollingPatternRun(runFixture);
   db.settlementRunQueries = 0;
 
@@ -494,7 +494,7 @@ test("settlement locates pending runs once across a long verified history", asyn
     "ok",
   );
 
-  assert.equal(db.settlementRunQueries, 1);
+  assert.equal(db.settlementRunQueries, 2);
   assert.equal(db.scores.size, runFixture.signals.length);
   assert.equal(db.productScores.size, db.products.size);
 });

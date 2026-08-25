@@ -775,6 +775,20 @@ CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_consensus_score_identity_idx
   ON rolling_pattern_consensus_scores (run_id, product_id);
 CREATE INDEX IF NOT EXISTS rolling_pattern_consensus_score_issue_idx
   ON rolling_pattern_consensus_scores (game, target_issue, scope);
+CREATE TABLE IF NOT EXISTS rolling_pattern_review_snapshots (
+  run_id text PRIMARY KEY NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, snapshot_json text NOT NULL,
+  frozen_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_review_snapshot_issue_idx
+  ON rolling_pattern_review_snapshots (game, target_issue);
+CREATE TABLE IF NOT EXISTS rolling_pattern_review_scores (
+  run_id text PRIMARY KEY NOT NULL, game text NOT NULL,
+  target_issue text NOT NULL, actual_json text NOT NULL,
+  score_json text NOT NULL, scored_at text NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_review_score_issue_idx
+  ON rolling_pattern_review_scores (game, target_issue);
 `;
 
 export async function readResearchV3Reviews(

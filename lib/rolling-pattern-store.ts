@@ -3,14 +3,24 @@ import { evaluateRollingResultEvent } from "./rolling-pattern-events";
 import {
   applyForwardProductHistory,
   buildRollingPatternProducts,
+  buildUnifiedRollingPatternProducts,
   settleRollingPatternProduct,
 } from "./rolling-pattern-value";
+import {
+  buildRollingPatternReviewSnapshot,
+  settleRollingPatternReviewSnapshot,
+} from "./rolling-pattern-review.ts";
 import { ensureResearchV3Store } from "./research-v3-store";
 import type {
   RollingPatternEnvelope,
   ProductHistoryCounts,
   RollingPatternProduct,
+  RollingPatternProductKind,
   RollingPatternProductScore,
+  RollingPatternReviewIndexPage,
+  RollingPatternReviewRecord,
+  RollingPatternReviewScore,
+  RollingPatternReviewSnapshot,
   RollingPatternRun,
   RollingPatternScore,
   RollingPatternSignal,
@@ -40,7 +50,27 @@ type ProductAggregateRow = {
   settled_count: number;
   hit_count: number;
 };
+type ReviewSnapshotRow = {
+  run_id: string;
+  target_issue: string;
+  snapshot_json: string;
+  frozen_at: string;
+};
+type ReviewScoreRow = { score_json: string };
+type ReviewIndexRow = {
+  target_issue: string;
+  frozen_at: string;
+  settled: number;
+};
 const D1_BATCH_SIZE = 80;
+const REVIEW_BACKFILL_LIMIT = 50;
+const REQUIRED_REVIEW_PRODUCT_KINDS = new Set<RollingPatternProductKind>([
+  "coverage_zodiac",
+  "coverage_tail",
+  "coverage_zodiac_pair",
+  "coverage_zodiac_triple",
+  "special_number",
+]);
 
 export async function ensureRollingPatternStore() {
   return ensureResearchV3Store();
@@ -99,7 +129,12 @@ export async function persistRollingPatternRun(
       );
       await runBatches(db, statements);
     }
-    await persistRollingPatternProducts(db, run);
+    const products = await persistRollingPatternProducts(db, run);
+    const reviewProducts = await completeReviewProducts(db, run, products);
+    await persistRollingPatternReviewSnapshot(
+      db,
+      buildRollingPatternReviewSnapshot(run, reviewProducts),
+    );
     const completed = await db.prepare(
       `UPDATE rolling_pattern_runs SET status = 'completed'
        WHERE run_id = ? AND engine_version = ? AND window_data_hash = ?`,
@@ -177,6 +212,85 @@ export async function readRollingPatternValueHistory(
     });
   } catch {
     return [];
+  }
+}
+
+export async function readRollingPatternReviewIndex(
+  game: GameId,
+  limit = 20,
+  beforeIssue?: string | null,
+): Promise<RollingPatternReviewIndexPage> {
+  if (!await ensureRollingPatternStore()) return { items: [], nextCursor: null };
+  const db = runtime.__marksixD1;
+  if (!db) return { items: [], nextCursor: null };
+  const bounded = Math.max(1, Math.min(50, Math.trunc(limit)));
+  try {
+    const beforeSql = beforeIssue
+      ? "AND CAST(r.target_issue AS INTEGER) < CAST(? AS INTEGER)"
+      : "";
+    const statement = db.prepare(
+      `SELECT r.target_issue, MIN(r.frozen_at) AS frozen_at,
+              MAX(CASE WHEN rs.run_id IS NULL THEN 0 ELSE 1 END) AS settled
+       FROM rolling_pattern_runs r
+       LEFT JOIN rolling_pattern_review_scores rs ON rs.run_id = r.run_id
+       WHERE r.game = ? AND r.engine_version = ? AND r.status = 'completed'
+         ${beforeSql}
+       GROUP BY r.target_issue
+       ORDER BY CAST(r.target_issue AS INTEGER) DESC
+       LIMIT ?`,
+    );
+    const bound = beforeIssue
+      ? statement.bind(game, ROLLING_PATTERN_ENGINE_VERSION, beforeIssue, bounded + 1)
+      : statement.bind(game, ROLLING_PATTERN_ENGINE_VERSION, bounded + 1);
+    const rows = await bound.all<ReviewIndexRow>();
+    const valid = (rows.results ?? []).filter((row) =>
+      /^\d{4,16}$/.test(row.target_issue) && typeof row.frozen_at === "string"
+    );
+    const visible = valid.slice(0, bounded);
+    return {
+      items: visible.map((row) => ({
+        targetIssue: row.target_issue,
+        frozenAt: row.frozen_at,
+        settled: Number(row.settled) === 1,
+      })),
+      nextCursor: valid.length > bounded
+        ? visible.at(-1)?.target_issue ?? null
+        : null,
+    };
+  } catch {
+    return { items: [], nextCursor: null };
+  }
+}
+
+export async function readRollingPatternReview(
+  game: GameId,
+  issue: string,
+): Promise<RollingPatternReviewRecord | null> {
+  if (!await ensureRollingPatternStore()) return null;
+  const db = runtime.__marksixD1;
+  if (!db) return null;
+  try {
+    const row = await db.prepare(
+      `SELECT run_id, target_issue, snapshot_json, frozen_at
+       FROM rolling_pattern_review_snapshots
+       WHERE game = ? AND target_issue = ?
+       ORDER BY frozen_at ASC, run_id ASC LIMIT 1`,
+    ).bind(game, issue).first<ReviewSnapshotRow>();
+    const snapshotValue = parseJson(row?.snapshot_json ?? "");
+    if (isRollingPatternReviewSnapshot(snapshotValue)) {
+      const scoreRow = await db.prepare(
+        `SELECT score_json FROM rolling_pattern_review_scores
+         WHERE run_id = ? LIMIT 1`,
+      ).bind(snapshotValue.runId).first<ReviewScoreRow>();
+      const scoreValue = parseJson(scoreRow?.score_json ?? "");
+      return {
+        snapshot: snapshotValue,
+        score: isRollingPatternReviewScore(scoreValue) ? scoreValue : null,
+      };
+    }
+    return reconstructRollingPatternReview(db, game, issue);
+  } catch {
+    return null;
   }
 }
 
@@ -444,6 +558,8 @@ export async function settleRollingPatternRuns(
         });
       await runBatches(db, productStatements);
     }
+    await backfillRollingPatternReviewSnapshots(db, game);
+    await settleRollingPatternReviewSnapshots(db, game, verifiedByIssue, settledAt);
     return "ok";
   } catch {
     return "unavailable";
@@ -521,6 +637,236 @@ async function persistRollingPatternProducts(
       )
     );
   await runBatches(db, statements);
+  return products;
+}
+
+async function completeReviewProducts(
+  db: D1Database,
+  run: RollingPatternRun,
+  products: readonly RollingPatternProduct[],
+) {
+  const availableKinds = new Set(products.map((product) => product.kind));
+  if ([...REQUIRED_REVIEW_PRODUCT_KINDS].every((kind) => availableKinds.has(kind))) {
+    return [...products];
+  }
+  const histories = await readPriorProductHistories(db, run.game, run.targetIssue);
+  const universe = buildUnifiedRollingPatternProducts(run, {
+    legacy: new Map(),
+    learned: histories.legacy,
+    legacyProductIds: histories.legacyProductIds,
+  });
+  return [
+    ...products,
+    ...universe.filter((product) => !availableKinds.has(product.kind)),
+  ];
+}
+
+async function readPriorProductHistories(
+  db: D1Database,
+  game: GameId,
+  beforeIssue: string,
+) {
+  const rows = await db.prepare(
+    `SELECT l.product_json, s.score_json
+     FROM rolling_pattern_consensus_ledger l
+     INNER JOIN rolling_pattern_consensus_scores s
+       ON s.run_id = l.run_id AND s.product_id = l.product_id
+     WHERE l.game = ?
+       AND CAST(l.target_issue AS INTEGER) < CAST(? AS INTEGER)
+     ORDER BY CAST(l.target_issue AS INTEGER) DESC, l.rowid DESC`,
+  ).bind(game, beforeIssue).all<ProductHistoryRow>();
+  const legacy = new Map<string, ProductHistoryCounts>();
+  const legacyProductIds = new Map<string, string>();
+  for (const row of rows.results ?? []) {
+    const product = parseJson(row.product_json);
+    const score = parseJson(row.score_json ?? "");
+    if (!isRollingPatternProduct(product) || !isRollingPatternProductScore(score) ||
+      product.game !== game || compareIssues(product.targetIssue, beforeIssue) >= 0) {
+      continue;
+    }
+    const key = `${product.kind}:${product.values.join("+")}`;
+    const current = legacy.get(key) ?? { settledCount: 0, hitCount: 0 };
+    legacy.set(key, {
+      settledCount: current.settledCount + 1,
+      hitCount: current.hitCount + (score.actualMatched ? 1 : 0),
+    });
+    if (!legacyProductIds.has(key) && product.productId.trim()) {
+      legacyProductIds.set(key, product.productId);
+    }
+  }
+  return { legacy, legacyProductIds };
+}
+
+async function persistRollingPatternReviewSnapshot(
+  db: D1Database,
+  snapshot: RollingPatternReviewSnapshot,
+) {
+  await db.prepare(
+    `INSERT OR IGNORE INTO rolling_pattern_review_snapshots (
+       run_id, game, target_issue, snapshot_json, frozen_at
+     ) VALUES (?, ?, ?, ?, ?)`,
+  ).bind(
+    snapshot.runId,
+    snapshot.game,
+    snapshot.targetIssue,
+    JSON.stringify(snapshot),
+    snapshot.frozenAt,
+  ).run();
+}
+
+async function backfillRollingPatternReviewSnapshots(
+  db: D1Database,
+  game: GameId,
+) {
+  const rows = await db.prepare(
+    `SELECT r.run_id, r.run_json
+     FROM rolling_pattern_runs r
+     LEFT JOIN rolling_pattern_review_snapshots review ON review.run_id = r.run_id
+     WHERE r.game = ? AND r.engine_version = ? AND r.status = 'completed'
+       AND review.run_id IS NULL
+     ORDER BY CAST(r.target_issue AS INTEGER) ASC, r.frozen_at ASC, r.run_id ASC
+     LIMIT ?`,
+  ).bind(game, ROLLING_PATTERN_ENGINE_VERSION, REVIEW_BACKFILL_LIMIT).all<RunRow>();
+  for (const row of rows.results ?? []) {
+    const storedRun = parseJson(row.run_json);
+    if (!isRollingPatternRun(storedRun) || storedRun.runId !== row.run_id) continue;
+    const [signalRows, productRows] = await Promise.all([
+      db.prepare(
+        `SELECT signal_json FROM rolling_pattern_signals
+         WHERE run_id = ? ORDER BY rowid ASC`,
+      ).bind(storedRun.runId).all<SignalRow>(),
+      db.prepare(
+        `SELECT product_json FROM rolling_pattern_consensus_ledger
+         WHERE run_id = ? ORDER BY rank ASC, rowid ASC`,
+      ).bind(storedRun.runId).all<ProductRow>(),
+    ]);
+    const signals = (signalRows.results ?? [])
+      .map((item) => parseJson(item.signal_json))
+      .filter(isRollingPatternSignal);
+    const run = { ...storedRun, signals };
+    const storedProducts = (productRows.results ?? [])
+      .map((item) => parseJson(item.product_json))
+      .filter(isRollingPatternProduct);
+    const products = storedProducts.length
+      ? storedProducts
+      : buildRollingPatternProducts(run);
+    const reviewProducts = await completeReviewProducts(db, run, products);
+    await persistRollingPatternReviewSnapshot(
+      db,
+      buildRollingPatternReviewSnapshot(run, reviewProducts),
+    );
+  }
+}
+
+async function settleRollingPatternReviewSnapshots(
+  db: D1Database,
+  game: GameId,
+  verifiedByIssue: ReadonlyMap<string, Draw>,
+  scoredAt: string,
+) {
+  const rows = await db.prepare(
+    `SELECT review.run_id, review.target_issue, review.snapshot_json,
+            review.frozen_at
+     FROM rolling_pattern_review_snapshots review
+     LEFT JOIN rolling_pattern_review_scores score ON score.run_id = review.run_id
+     WHERE review.game = ? AND score.run_id IS NULL
+     ORDER BY CAST(review.target_issue AS INTEGER) ASC, review.frozen_at ASC`,
+  ).bind(game).all<ReviewSnapshotRow>();
+  const statements: D1PreparedStatement[] = [];
+  for (const row of rows.results ?? []) {
+    const snapshot = parseJson(row.snapshot_json);
+    const draw = verifiedByIssue.get(row.target_issue);
+    if (!draw || !isRollingPatternReviewSnapshot(snapshot)) continue;
+    const score = settleRollingPatternReviewSnapshot(snapshot, draw, scoredAt);
+    statements.push(db.prepare(
+      `INSERT OR IGNORE INTO rolling_pattern_review_scores (
+         run_id, game, target_issue, actual_json, score_json, scored_at
+       ) VALUES (?, ?, ?, ?, ?, ?)`,
+    ).bind(
+      snapshot.runId,
+      snapshot.game,
+      snapshot.targetIssue,
+      JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
+      JSON.stringify(score),
+      score.scoredAt,
+    ));
+  }
+  await runBatches(db, statements);
+}
+
+async function reconstructRollingPatternReview(
+  db: D1Database,
+  game: GameId,
+  issue: string,
+): Promise<RollingPatternReviewRecord | null> {
+  const envelope = await readRollingPatternRun(game, issue);
+  if (!envelope) return null;
+  const productRows = await db.prepare(
+    `SELECT product_json FROM rolling_pattern_consensus_ledger
+     WHERE run_id = ? ORDER BY rank ASC, rowid ASC`,
+  ).bind(envelope.run.runId).all<ProductRow>();
+  const storedProducts = (productRows.results ?? [])
+    .map((item) => parseJson(item.product_json))
+    .filter(isRollingPatternProduct);
+  const baseProducts = storedProducts.length
+    ? storedProducts
+    : buildRollingPatternProducts({ ...envelope.run, signals: envelope.signals });
+  const products = await completeReviewProducts(
+    db,
+    { ...envelope.run, signals: envelope.signals },
+    baseProducts,
+  );
+  const snapshot = buildRollingPatternReviewSnapshot(
+    { ...envelope.run, signals: envelope.signals },
+    products,
+  );
+  const draw = await readVerifiedStoredDraw(db, game, issue);
+  if (!draw) return { snapshot, score: null };
+  const scored = await db.prepare(
+    `SELECT scored_at FROM rolling_pattern_scores
+     WHERE run_id = ? ORDER BY scored_at ASC LIMIT 1`,
+  ).bind(snapshot.runId).first<{ scored_at: string }>();
+  return {
+    snapshot,
+    score: settleRollingPatternReviewSnapshot(
+      snapshot,
+      draw,
+      scored?.scored_at ?? draw.drawAt,
+    ),
+  };
+}
+
+async function readVerifiedStoredDraw(
+  db: D1Database,
+  game: GameId,
+  issue: string,
+): Promise<Draw | null> {
+  const row = await db.prepare(
+    `SELECT draw_at, main_1, main_2, main_3, main_4, main_5, main_6,
+            special, verified
+     FROM lottery_draws
+     WHERE game = ? AND issue = ? AND verified = 1 LIMIT 1`,
+  ).bind(game, issue).first<{
+    draw_at: string;
+    main_1: number;
+    main_2: number;
+    main_3: number;
+    main_4: number;
+    main_5: number;
+    main_6: number;
+    special: number;
+    verified: number;
+  }>();
+  if (!row) return null;
+  return {
+    game,
+    issue,
+    drawAt: row.draw_at,
+    numbers: [row.main_1, row.main_2, row.main_3, row.main_4, row.main_5, row.main_6],
+    special: row.special,
+    source: "stored-verified-draw",
+    verified: Number(row.verified) === 1,
+  };
 }
 
 async function runBatches(
@@ -582,6 +928,38 @@ function isRollingPatternProductScore(
   return typeof score.productId === "string" &&
     typeof score.actualMatched === "boolean" &&
     typeof score.unitProfit === "number";
+}
+
+function isRollingPatternReviewSnapshot(
+  value: unknown,
+): value is RollingPatternReviewSnapshot {
+  if (!value || typeof value !== "object") return false;
+  const snapshot = value as Partial<RollingPatternReviewSnapshot>;
+  return typeof snapshot.runId === "string" &&
+    (snapshot.game === "hk" || snapshot.game === "new_macau") &&
+    typeof snapshot.targetIssue === "string" &&
+    typeof snapshot.frozenAt === "string" &&
+    Array.isArray(snapshot.purchases) && snapshot.purchases.length === 5 &&
+    Boolean(snapshot.coverage && Array.isArray(snapshot.coverage.resultGroups)) &&
+    Boolean(snapshot.special && Array.isArray(snapshot.special.resultGroups)) &&
+    Array.isArray(snapshot.specialNumbers);
+}
+
+function isRollingPatternReviewScore(
+  value: unknown,
+): value is RollingPatternReviewScore {
+  if (!value || typeof value !== "object") return false;
+  const score = value as Partial<RollingPatternReviewScore>;
+  return typeof score.runId === "string" &&
+    (score.game === "hk" || score.game === "new_macau") &&
+    typeof score.targetIssue === "string" &&
+    Array.isArray(score.actualNumbers) &&
+    typeof score.actualSpecial === "number" &&
+    Array.isArray(score.purchases) && score.purchases.length === 5 &&
+    Array.isArray(score.coverageResults) &&
+    Array.isArray(score.specialResults) &&
+    Array.isArray(score.specialNumbers) &&
+    typeof score.scoredAt === "string";
 }
 
 function parseJson(value: string): unknown {

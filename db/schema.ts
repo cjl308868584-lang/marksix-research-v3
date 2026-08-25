@@ -666,6 +666,41 @@ export const rollingPatternConsensusScores = sqliteTable(
   ],
 );
 
+export const rollingPatternReviewSnapshots = sqliteTable(
+  "rolling_pattern_review_snapshots",
+  {
+    runId: text("run_id").primaryKey(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+    frozenAt: text("frozen_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_review_snapshot_issue_idx").on(
+      table.game,
+      table.targetIssue,
+    ),
+  ],
+);
+
+export const rollingPatternReviewScores = sqliteTable(
+  "rolling_pattern_review_scores",
+  {
+    runId: text("run_id").primaryKey(),
+    game: text("game").notNull(),
+    targetIssue: text("target_issue").notNull(),
+    actualJson: text("actual_json").notNull(),
+    scoreJson: text("score_json").notNull(),
+    scoredAt: text("scored_at").notNull(),
+  },
+  (table) => [
+    uniqueIndex("rolling_pattern_review_score_issue_idx").on(
+      table.game,
+      table.targetIssue,
+    ),
+  ],
+);
+
 export const researchModelArtifacts = sqliteTable(
   "research_model_artifacts",
   {
