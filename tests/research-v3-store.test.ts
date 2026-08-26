@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { DatabaseSync, type SQLInputValue, type StatementSync } from "node:sqlite";
 import test, { after, before } from "node:test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { createServer, type ViteDevServer } from "vite";
 
 type TaskRow = {
@@ -28,12 +31,15 @@ type ChampionRow = ReturnType<typeof championRows>[number] & {
 };
 
 type ModelWeightRow = {
+  engine_version?: string;
   slot: string;
   model_id: "baseline" | "interpretable_rules" | "logistic" | "black_box";
   weight_after: number;
 };
 
 type RuleStateRow = {
+  state_id?: string;
+  engine_version?: string;
   slot: string;
   rule_id: string;
   triggers: number;
@@ -42,6 +48,39 @@ type RuleStateRow = {
   consecutive_misses: number;
   status: "active" | "suppressed" | "retired";
 };
+
+class SqliteD1Statement {
+  private values: SQLInputValue[] = [];
+  private readonly statement: StatementSync;
+  constructor(statement: StatementSync) { this.statement = statement; }
+  bind(...values: SQLInputValue[]) { this.values = values; return this; }
+  async run() {
+    const result = this.statement.run(...this.values);
+    return { meta: { changes: Number(result.changes) } };
+  }
+  async first<T>() {
+    return (this.statement.get(...this.values) ?? null) as T | null;
+  }
+  async all<T>() {
+    return { results: this.statement.all(...this.values) as T[] };
+  }
+}
+
+class SqliteD1 {
+  readonly database = new DatabaseSync(":memory:");
+  prepare(sql: string) { return new SqliteD1Statement(this.database.prepare(sql)); }
+  async batch(statements: SqliteD1Statement[]) {
+    return Promise.all(statements.map((statement) => statement.run()));
+  }
+  close() { this.database.close(); }
+}
+
+function sqliteCount(database: DatabaseSync, table: string) {
+  const row = database.prepare(`SELECT COUNT(*) AS count FROM ${table}`).get() as
+    | { count: number }
+    | undefined;
+  return Number(row?.count ?? 0);
+}
 
 class FakeTaskD1 {
   tasks = new Map<string, TaskRow>();
@@ -215,7 +254,14 @@ class FakeTaskD1 {
         }
         if (sql.includes("FROM research_model_weights")) {
           if (!sql.includes("JOIN research_event_scores")) {
-            return { results: this.modelWeights };
+            const engineVersion = sql.includes("engine_version = ?")
+              ? String(values[1])
+              : null;
+            return {
+              results: this.modelWeights.filter((row) =>
+                !engineVersion || row.engine_version === engineVersion
+              ),
+            };
           }
           const engineVersion = sql.includes("engine_version = ?")
             ? String(values[1])
@@ -227,7 +273,14 @@ class FakeTaskD1 {
           };
         }
         if (sql.includes("FROM research_rule_states")) {
-          return { results: this.ruleStates };
+          const engineVersion = sql.includes("engine_version = ?")
+            ? String(values[1])
+            : null;
+          return {
+            results: this.ruleStates.filter((row) =>
+              !engineVersion || row.engine_version === engineVersion
+            ),
+          };
         }
         return { results: [] };
       },
@@ -419,8 +472,30 @@ type EngineModule = {
     previousWeights?: Record<string, Record<string, number>>;
   }): unknown;
 };
+type ServiceModule = {
+  runResearchV3Cycle(input: {
+    game: "new_macau";
+    asOf: Date;
+    forceCompute?: boolean;
+  }): Promise<{ snapshot: { runId: string }; cycleStatus: string }>;
+  researchV3FreezeWindow(
+    game: "new_macau",
+    latest: { issue: string; drawAt: string },
+    asOf: Date,
+  ): { targetIssue: string; expectedDrawAt: string; canFreeze: boolean };
+};
+type ReviewUiModule = {
+  IssuePicker(props: {
+    reviews: any[];
+    selectedRunId: string;
+    onSelect: (runId: string) => void;
+  }): unknown;
+};
 let store: StoreModule;
 let engine: EngineModule;
+let service: ServiceModule;
+let reviewUi: ReviewUiModule;
+let fallbackDraws: any[];
 const testRuntime = globalThis as typeof globalThis & {
   __marksixD1?: unknown;
   __marksixResearchV3SchemaReady?: unknown;
@@ -436,6 +511,12 @@ before(async () => {
   });
   store = await server.ssrLoadModule("/lib/research-v3-store.ts") as StoreModule;
   engine = await server.ssrLoadModule("/lib/research-v3-engine.ts") as EngineModule;
+  service = await server.ssrLoadModule("/lib/research-v3-service.ts") as ServiceModule;
+  reviewUi = await server.ssrLoadModule(
+    "/app/research/review/ResearchReviewWorkspace.tsx",
+  ) as ReviewUiModule;
+  const lottery = await server.ssrLoadModule("/lib/lottery.ts") as any;
+  fallbackDraws = lottery.FALLBACK_DRAWS.new_macau;
 });
 
 after(async () => {
@@ -453,6 +534,24 @@ function snapshotFixture(input: {
   targetIssue?: string;
   frozenAt?: string;
 }) {
+  const eventContract = (slot: string) => {
+    if (slot === "zodiac_6_plus_1") {
+      return { scope: "draw.6_plus_1", family: "zodiac", predictedValue: "猴" };
+    }
+    if (slot === "tail_6_plus_1") {
+      return { scope: "draw.6_plus_1", family: "tail", predictedValue: "7尾" };
+    }
+    if (slot === "special_parity") {
+      return { scope: "special", family: "parity", predictedValue: "单" };
+    }
+    if (slot === "special_size") {
+      return { scope: "special", family: "size", predictedValue: "大" };
+    }
+    if (slot === "position_parity") {
+      return { scope: "main.position.3", family: "parity", predictedValue: "单" };
+    }
+    return { scope: "main.position.4", family: "size", predictedValue: "大" };
+  };
   return {
     schemaVersion: "3",
     engineVersion: input.engineVersion,
@@ -468,6 +567,7 @@ function snapshotFixture(input: {
     events: input.slots.map((slot, index) => ({
       eventId: `event_${index}`,
       slot,
+      ...eventContract(slot),
       probability: 0.5,
       baselineProbability: 0.5,
     })),
@@ -608,6 +708,141 @@ test("v3.2 requires the two special-only slots while v3.1 stays readable", () =>
     ...current,
     frozenAt: current.expectedDrawAt,
   }), false);
+  for (const mutation of [
+    { index: 0, patch: { scope: "special" } },
+    { index: 1, patch: { family: "zodiac" } },
+    { index: 2, patch: { predictedValue: "奇" } },
+    { index: 3, patch: { predictedValue: "中" } },
+  ]) {
+    assert.equal(store.isResearchV3Snapshot({
+      ...current,
+      events: current.events.map((event, index) =>
+        index === mutation.index ? { ...event, ...mutation.patch } : event
+      ),
+    }), false);
+  }
+});
+
+test("the review picker renders same-issue engine revisions as separate selectable runs", () => {
+  const shared = {
+    targetIssue: "2026237",
+    hits: 2,
+    settledAt: "2026-08-26T14:05:00.000Z",
+  };
+  const html = renderToStaticMarkup(createElement(reviewUi.IssuePicker as any, {
+    reviews: [
+      {
+        ...shared,
+        runId: "run-v31",
+        reviewVersion: "research-event-review-v3",
+      },
+      {
+        ...shared,
+        runId: "run-v32",
+        reviewVersion: "research-event-review-v4",
+      },
+    ],
+    selectedRunId: "run-v32",
+    onSelect: () => undefined,
+  }));
+
+  assert.equal((html.match(/2026237/g) ?? []).length, 2);
+  assert.match(html, /v3\.1 历史口径/);
+  assert.match(html, /v3\.2 当前口径/);
+  assert.match(html, /<button type="button" class="active"><span>2026237<\/span><strong>2\/4<\/strong><small>v3\.2 当前口径/);
+});
+
+test("a real D1-compatible ledger stores all eight old/new child events for one issue", async () => {
+  const db = new SqliteD1();
+  testRuntime.__marksixD1 = db;
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  try {
+    assert.equal(await store.ensureResearchV3Store(), true);
+    const current = engine.buildResearchV3Snapshot({
+      game: "new_macau",
+      draws: engineHistory(60),
+      targetIssue: "2026237",
+      expectedDrawAt: "2026-08-02T14:00:00.000Z",
+      generatedAt: "2026-08-01T14:00:00.000Z",
+    }) as any;
+    const prior = structuredClone(current);
+    prior.runId = "prior-engine-run";
+    prior.engineVersion = "high-probability-events-v3.1";
+    prior.modelVersion = "champion-challenger-v3.1-deadbeef";
+    prior.events[0].eventId = `evt_zodiac_6_plus_1_draw_6_plus_1_${prior.events[0].predictedValue}_b4a8ac54`;
+    prior.events[1].eventId = `evt_tail_6_plus_1_draw_6_plus_1_${prior.events[1].predictedValue}_b4a8ac54`;
+    prior.events[2] = {
+      ...prior.events[2], eventId: "prior-position-parity", slot: "position_parity",
+      scope: "main.position.3", family: "parity", predictedValue: "单",
+    };
+    prior.events[3] = {
+      ...prior.events[3], eventId: "prior-position-size", slot: "position_size",
+      scope: "main.position.4", family: "size", predictedValue: "大",
+    };
+
+    assert.equal(await store.persistResearchV3Snapshot(prior), "created");
+    assert.equal(await store.persistResearchV3Snapshot(current), "created");
+    assert.equal(
+      sqliteCount(db.database, "research_event_ledger"),
+      8,
+    );
+    assert.equal(await store.persistResearchV3Snapshot(current), "existing");
+    assert.equal(
+      sqliteCount(db.database, "research_event_ledger"),
+      8,
+    );
+  } finally {
+    db.close();
+  }
+});
+
+test("the service returns the frozen snapshot without writes when a stale source is past cutoff", async () => {
+  const db = new SqliteD1();
+  testRuntime.__marksixD1 = db;
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("offline fixture"); };
+  try {
+    assert.equal(await store.ensureResearchV3Store(), true);
+    const latest = fallbackDraws[0];
+    const initialWindow = service.researchV3FreezeWindow(
+      "new_macau",
+      latest,
+      new Date(latest.drawAt),
+    );
+    const frozen = engine.buildResearchV3Snapshot({
+      game: "new_macau",
+      draws: fallbackDraws,
+      targetIssue: initialWindow.targetIssue,
+      expectedDrawAt: initialWindow.expectedDrawAt,
+      generatedAt: new Date(
+        Date.parse(initialWindow.expectedDrawAt) - 60 * 60_000,
+      ).toISOString(),
+    }) as any;
+    assert.equal(await store.persistResearchV3Snapshot(frozen), "created");
+    const forecastCount = sqliteCount(db.database, "research_v3_forecasts");
+    const eventCount = sqliteCount(db.database, "research_event_ledger");
+
+    const envelope = await service.runResearchV3Cycle({
+      game: "new_macau",
+      asOf: new Date(Date.parse(initialWindow.expectedDrawAt) + 60_000),
+      forceCompute: true,
+    });
+
+    assert.equal(envelope.cycleStatus, "awaiting_verification");
+    assert.equal(envelope.snapshot.runId, frozen.runId);
+    assert.equal(
+      sqliteCount(db.database, "research_v3_forecasts"),
+      forecastCount,
+    );
+    assert.equal(
+      sqliteCount(db.database, "research_event_ledger"),
+      eventCount,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    db.close();
+  }
 });
 
 test("engine-generated special slots are accepted as the current snapshot", () => {
@@ -659,6 +894,7 @@ test("a warm research database does not replay schema DDL in a fresh isolate", a
     prepare(sql: string) {
       prepared.push(sql);
       return {
+        all: async () => ({ results: [] }),
         first: async () => ({ present: 52 }),
         run: async () => ({ meta: { changes: 0 } }),
       };
@@ -676,6 +912,7 @@ test("a research database missing one index replays idempotent schema repair", a
       prepared.push(sql);
       return {
         bind: () => this,
+        all: async () => ({ results: [] }),
         first: async () => ({ present: 51 }),
         run: async () => ({ meta: { changes: 0 } }),
       };
@@ -866,17 +1103,19 @@ test("the audit reader keeps prior and current reviews while current scope isola
 test("current learning readers exclude legacy position slots without remapping them", async () => {
   const db = new FakeResearchD1();
   db.modelWeights = [
-    { slot: "zodiac_6_plus_1", model_id: "baseline", weight_after: 0.4 },
-    { slot: "tail_6_plus_1", model_id: "baseline", weight_after: 0.4 },
-    { slot: "special_parity", model_id: "baseline", weight_after: 0.35 },
-    { slot: "special_size", model_id: "baseline", weight_after: 0.35 },
-    { slot: "position_parity", model_id: "baseline", weight_after: 0.99 },
-    { slot: "position_size", model_id: "baseline", weight_after: 0.98 },
+    { engine_version: "high-probability-events-v3.1", slot: "zodiac_6_plus_1", model_id: "baseline", weight_after: 0.99 },
+    { engine_version: "high-probability-events-v3.2", slot: "zodiac_6_plus_1", model_id: "baseline", weight_after: 0.4 },
+    { engine_version: "high-probability-events-v3.2", slot: "tail_6_plus_1", model_id: "baseline", weight_after: 0.4 },
+    { engine_version: "high-probability-events-v3.2", slot: "special_parity", model_id: "baseline", weight_after: 0.35 },
+    { engine_version: "high-probability-events-v3.2", slot: "special_size", model_id: "baseline", weight_after: 0.35 },
+    { engine_version: "high-probability-events-v3.1", slot: "position_parity", model_id: "baseline", weight_after: 0.99 },
+    { engine_version: "high-probability-events-v3.1", slot: "position_size", model_id: "baseline", weight_after: 0.98 },
   ];
   db.ruleStates = [
     {
+      engine_version: "high-probability-events-v3.2",
       slot: "special_parity",
-      rule_id: "current-rule",
+      rule_id: "shared-rule",
       triggers: 8,
       hits: 5,
       consecutive_hits: 1,
@@ -884,6 +1123,17 @@ test("current learning readers exclude legacy position slots without remapping t
       status: "active",
     },
     {
+      engine_version: "high-probability-events-v3.1",
+      slot: "special_parity",
+      rule_id: "shared-rule",
+      triggers: 80,
+      hits: 79,
+      consecutive_hits: 20,
+      consecutive_misses: 0,
+      status: "active",
+    },
+    {
+      engine_version: "high-probability-events-v3.1",
       slot: "position_parity",
       rule_id: "legacy-rule",
       triggers: 80,
@@ -903,9 +1153,119 @@ test("current learning readers exclude legacy position slots without remapping t
     "special_parity",
     "special_size",
   ]);
+  assert.equal((weights as any).zodiac_6_plus_1?.baseline, 0.4);
   assert.equal(weights.position_parity, undefined);
   assert.deepEqual(Object.keys(ruleStates), ["special_parity"]);
+  assert.equal((ruleStates as any).special_parity?.["shared-rule"]?.triggers, 8);
   assert.equal(ruleStates.position_parity, undefined);
+});
+
+test("rule-state migration is idempotent and preserves legacy rows", async () => {
+  const db = new SqliteD1();
+  db.database.exec(`
+    CREATE TABLE research_rule_states (
+      state_id text PRIMARY KEY NOT NULL, game text NOT NULL, slot text NOT NULL,
+      rule_id text NOT NULL, posterior_alpha real NOT NULL, posterior_beta real NOT NULL,
+      triggers integer NOT NULL, hits integer NOT NULL, consecutive_hits integer NOT NULL,
+      consecutive_misses integer NOT NULL, recent_20_json text NOT NULL,
+      recent_50_json text NOT NULL, status text NOT NULL, updated_at text NOT NULL
+    );
+    CREATE UNIQUE INDEX research_rule_state_identity_idx
+      ON research_rule_states (game, slot, rule_id);
+  `);
+  db.database.prepare(
+    `INSERT INTO research_rule_states VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    "legacy-state", "new_macau", "zodiac_6_plus_1", "shared-rule",
+    2, 2, 1, 1, 1, 0, "[true]", "[true]", "active",
+    "2026-08-01T14:00:00.000Z",
+  );
+  testRuntime.__marksixD1 = db;
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  try {
+    assert.equal(await store.ensureResearchV3Store(), true);
+    delete testRuntime.__marksixResearchV3SchemaReady;
+    assert.equal(await store.ensureResearchV3Store(), true);
+    const columns = db.database.prepare("PRAGMA table_info(research_rule_states)").all() as Array<{ name: string }>;
+    assert.ok(columns.some((column) => column.name === "engine_version"));
+    const legacy = db.database.prepare(
+      "SELECT state_id, engine_version, triggers FROM research_rule_states WHERE state_id = 'legacy-state'",
+    ).get() as { state_id: string; engine_version: string; triggers: number };
+    assert.equal(legacy.state_id, "legacy-state");
+    assert.equal(legacy.engine_version, "legacy");
+    assert.equal(legacy.triggers, 1);
+    const identityColumns = db.database.prepare(
+      "PRAGMA index_info(research_rule_state_identity_idx)",
+    ).all() as Array<{ name: string }>;
+    assert.deepEqual(identityColumns.map((column) => column.name), [
+      "game", "engine_version", "slot", "rule_id",
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+test("settling old and new engines for one issue records separate rule-state updates", async () => {
+  const db = new SqliteD1();
+  testRuntime.__marksixD1 = db;
+  delete testRuntime.__marksixResearchV3SchemaReady;
+  try {
+    assert.equal(await store.ensureResearchV3Store(), true);
+    const current = engine.buildResearchV3Snapshot({
+      game: "new_macau",
+      draws: engineHistory(60),
+      targetIssue: "2026237",
+      expectedDrawAt: "2026-08-02T14:00:00.000Z",
+      generatedAt: "2026-08-01T14:00:00.000Z",
+    }) as any;
+    const prior = structuredClone(current);
+    prior.runId = "prior-shared-rule-run";
+    prior.engineVersion = "high-probability-events-v3.1";
+    prior.modelVersion = "champion-challenger-v3.1-deadbeef";
+    prior.events[0].eventId = "prior-shared-zodiac";
+    prior.events[1].eventId = "prior-shared-tail";
+    prior.events[2] = {
+      ...prior.events[2], eventId: "prior-shared-position-parity",
+      slot: "position_parity", scope: "main.position.3", family: "parity",
+      predictedValue: "单", predictionLabel: "下一期：第3个正码单",
+    };
+    prior.events[3] = {
+      ...prior.events[3], eventId: "prior-shared-position-size",
+      slot: "position_size", scope: "main.position.4", family: "size",
+      predictedValue: "大", predictionLabel: "下一期：第4个正码大",
+    };
+    assert.equal(await store.persistResearchV3Snapshot(prior), "created");
+    assert.equal(await store.persistResearchV3Snapshot(current), "created");
+    assert.equal(await store.settleResearchV3Forecasts(
+      "new_macau",
+      [{
+        game: "new_macau", issue: "2026237",
+        drawAt: "2026-08-02T14:00:00.000Z",
+        numbers: [1, 3, 25, 49, 8, 10], special: 24,
+        source: "dual-engine settlement", verified: true,
+      }],
+      "2026-08-02T14:05:00.000Z",
+    ), "ok");
+
+    const sharedRuleId = current.events[0].ruleContributions[0].ruleId;
+    const rows = db.database.prepare(
+      `SELECT engine_version, triggers
+       FROM research_rule_states
+       WHERE game = ? AND slot = ? AND rule_id = ?
+       ORDER BY engine_version`,
+    ).all("new_macau", "zodiac_6_plus_1", sharedRuleId) as Array<{
+      engine_version: string;
+      triggers: number;
+    }>;
+    assert.deepEqual(rows.map((row) => [row.engine_version, row.triggers]), [
+      ["high-probability-events-v3.1", 1],
+      ["high-probability-events-v3.2", 1],
+    ]);
+    const currentStates = await store.readResearchRuleStates("new_macau");
+    assert.equal((currentStates as any).zodiac_6_plus_1?.[sharedRuleId]?.triggers, 1);
+  } finally {
+    db.close();
+  }
 });
 
 test("settling a frozen prior-engine snapshot preserves its review version and evidence", async () => {

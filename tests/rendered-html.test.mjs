@@ -450,6 +450,12 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(reviewWorkspace, /误差归因/);
   assert.match(reviewWorkspace, /模型权重如何变化/);
   assert.match(reviewWorkspace, /模型是否真的在进步/);
+  assert.match(reviewWorkspace, /selectedRunId/);
+  assert.match(reviewWorkspace, /item\.runId === selectedRunId/);
+  assert.match(reviewWorkspace, /onSelect\(review\.runId\)/);
+  assert.match(reviewWorkspace, /v3\.2 当前口径/);
+  assert.match(reviewWorkspace, /v3\.1 历史口径/);
+  assert.doesNotMatch(reviewWorkspace, /item\.targetIssue === selectedIssue/);
   assert.match(reviewEngine, /buildResearchReview/);
   assert.match(reviewEngine, /negative_avoided/);
   assert.match(researchStore, /INSERT OR IGNORE INTO research_rule_ledger/);

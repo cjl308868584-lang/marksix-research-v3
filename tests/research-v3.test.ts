@@ -39,6 +39,11 @@ let cycleAction: (
 ) => "compute" | "await_verification" | "bootstrap";
 let publicSnapshot: (snapshot: any) => any;
 let chooseResearchCandidate: (evaluations: any[], history: any) => any;
+let freezeWindow: (
+  game: "new_macau",
+  latest: Pick<Draw, "issue" | "drawAt">,
+  asOf: Date,
+) => { targetIssue: string; expectedDrawAt: string; canFreeze: boolean };
 
 before(async () => {
   server = await createServer({
@@ -51,6 +56,7 @@ before(async () => {
   const engine = await server.ssrLoadModule("/lib/research-v3-engine.ts") as any;
   const review = await server.ssrLoadModule("/lib/research-v3-review.ts") as any;
   const lottery = await server.ssrLoadModule("/lib/lottery.ts") as any;
+  const service = await server.ssrLoadModule("/lib/research-v3-service.ts") as any;
   buildSnapshot = engine.buildResearchV3Snapshot;
   baseline = engine.exactEventBaseline;
   buildReview = review.buildResearchV3Review;
@@ -59,12 +65,26 @@ before(async () => {
   cycleAction = engine.researchCycleAction;
   publicSnapshot = engine.toPublicResearchV3Snapshot;
   chooseResearchCandidate = engine.chooseResearchCandidateForSlot;
+  freezeWindow = service.researchV3FreezeWindow;
 });
 
 test("a new database bootstraps a baseline forecast without learning from an unverified latest draw", () => {
   assert.equal(cycleAction(false, false), "bootstrap");
   assert.equal(cycleAction(false, true), "await_verification");
   assert.equal(cycleAction(true, false), "compute");
+});
+
+test("a stale source after the target cutoff cannot backfill a forecast", () => {
+  const window = freezeWindow(
+    "new_macau",
+    { issue: "2026237", drawAt: "2026-08-25T13:32:32.000Z" },
+    new Date("2026-08-26T13:40:00.000Z"),
+  );
+  assert.deepEqual(window, {
+    targetIssue: "2026238",
+    expectedDrawAt: "2026-08-26T13:32:00.000Z",
+    canFreeze: false,
+  });
 });
 
 after(async () => {

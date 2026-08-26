@@ -18,7 +18,7 @@ export function ResearchReviewWorkspace() {
   const [performance, setPerformance] = useState<ResearchV3Performance | null>(
     null,
   );
-  const [selectedIssue, setSelectedIssue] = useState("");
+  const [selectedRunId, setSelectedRunId] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
@@ -29,7 +29,7 @@ export function ResearchReviewWorkspace() {
     setLoading(true);
     setError("");
     setReviews([]);
-    setSelectedIssue("");
+    setSelectedRunId("");
     void Promise.all([
       fetch(`/api/research/reviews?game=${game}&limit=50`, {
         cache: "no-store",
@@ -55,7 +55,7 @@ export function ResearchReviewWorkspace() {
       .then(([items, summary]) => {
         setReviews(items);
         setPerformance(summary);
-        setSelectedIssue(items[0]?.targetIssue ?? "");
+        setSelectedRunId(items[0]?.runId ?? "");
         if (items.length === 0) {
           retryTimer = setTimeout(() => {
             setRefreshKey((value) => value + 1);
@@ -77,7 +77,7 @@ export function ResearchReviewWorkspace() {
   }, [game, refreshKey]);
 
   const review =
-    reviews.find((item) => item.targetIssue === selectedIssue) ??
+    reviews.find((item) => item.runId === selectedRunId) ??
     reviews[0] ??
     null;
 
@@ -152,8 +152,8 @@ export function ResearchReviewWorkspace() {
           <>
             <IssuePicker
               reviews={reviews}
-              selectedIssue={review.targetIssue}
-              onSelect={setSelectedIssue}
+              selectedRunId={review.runId}
+              onSelect={setSelectedRunId}
             />
             <PerformanceBoard performance={performance} />
             <ReviewSummary review={review} />
@@ -188,31 +188,37 @@ export function ResearchReviewWorkspace() {
   );
 }
 
-function IssuePicker({
+export function IssuePicker({
   reviews,
-  selectedIssue,
+  selectedRunId,
   onSelect,
 }: {
   reviews: ResearchV3Review[];
-  selectedIssue: string;
-  onSelect: (issue: string) => void;
+  selectedRunId: string;
+  onSelect: (runId: string) => void;
 }) {
   return (
     <section className="v3-issue-picker" aria-label="选择复盘期号">
       {reviews.map((review) => (
         <button
           type="button"
-          className={selectedIssue === review.targetIssue ? "active" : ""}
-          onClick={() => onSelect(review.targetIssue)}
+          className={selectedRunId === review.runId ? "active" : ""}
+          onClick={() => onSelect(review.runId)}
           key={review.runId}
         >
           <span>{review.targetIssue}</span>
           <strong>{review.hits}/4</strong>
-          <small>{formatDate(review.settledAt)}</small>
+          <small>{reviewVersionLabel(review)} · {formatDate(review.settledAt)}</small>
         </button>
       ))}
     </section>
   );
+}
+
+function reviewVersionLabel(review: ResearchV3Review) {
+  return review.reviewVersion === "research-event-review-v4"
+    ? "v3.2 当前口径"
+    : "v3.1 历史口径";
 }
 
 function PerformanceBoard({

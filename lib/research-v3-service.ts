@@ -75,6 +75,20 @@ export async function runResearchV3Cycle({
   if (!await ensureResearchV3Store()) {
     throw new Error("research D1 binding unavailable");
   }
+  const freezeWindow = researchV3FreezeWindow(game, latest, asOf);
+  if (!freezeWindow.canFreeze) {
+    const frozen =
+      await readResearchV3Snapshot(game, freezeWindow.targetIssue) ??
+      await readResearchV3Snapshot(game);
+    if (!frozen) {
+      throw new Error("target draw cutoff passed before a forecast was frozen");
+    }
+    return {
+      snapshot: frozen,
+      source: "stored",
+      cycleStatus: "awaiting_verification",
+    };
+  }
   if (researchArtifact) {
     if (researchArtifact.game !== game) throw new Error("artifact game mismatch");
     if (researchArtifact.audit.newestIssue !== latest.issue) {
@@ -109,8 +123,7 @@ export async function runResearchV3Cycle({
   if (settlement !== "ok") {
     throw new Error("previous frozen forecasts could not be settled");
   }
-  const expectedDrawAt = nextScheduledDraw(game, asOf).toISOString();
-  const targetIssue = nextIssue(latest.issue);
+  const { expectedDrawAt, targetIssue } = freezeWindow;
   let rollingPatterns: RollingPatternCycleResult;
   try {
     rollingPatterns = await runRollingPatternCycle({
@@ -217,6 +230,22 @@ export async function runResearchV3Cycle({
   });
   pruneCache();
   return envelope;
+}
+
+export function researchV3FreezeWindow(
+  game: GameId,
+  latest: { issue: string; drawAt: string },
+  asOf: Date,
+) {
+  const latestDrawTime = Date.parse(latest.drawAt);
+  if (!Number.isFinite(latestDrawTime)) throw new Error("latest draw time invalid");
+  const expectedDrawAt = nextScheduledDraw(game, new Date(latestDrawTime))
+    .toISOString();
+  return {
+    targetIssue: nextIssue(latest.issue),
+    expectedDrawAt,
+    canFreeze: asOf.getTime() < Date.parse(expectedDrawAt),
+  };
 }
 
 async function importLegacySnapshot(game: GameId, issue: string) {

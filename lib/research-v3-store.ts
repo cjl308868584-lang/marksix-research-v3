@@ -44,6 +44,7 @@ export async function ensureResearchV3Store() {
 }
 
 async function initializeResearchV3Schema(db: D1Database) {
+  await migrateResearchRuleStateIdentity(db);
   const expectedObjects = schemaObjectNames(RESEARCH_V3_SCHEMA);
   const existing = await db.prepare(
     `SELECT COUNT(*) AS present FROM sqlite_master
@@ -58,6 +59,41 @@ async function initializeResearchV3Schema(db: D1Database) {
     .filter(Boolean);
   for (const statement of statements) {
     await db.prepare(statement).run();
+  }
+}
+
+async function migrateResearchRuleStateIdentity(db: D1Database) {
+  const columns = await db.prepare(
+    "PRAGMA table_info(research_rule_states)",
+  ).all<{ name: string }>();
+  if (!(columns.results ?? []).length) return;
+  if (!(columns.results ?? []).some((column) => column.name === "engine_version")) {
+    try {
+      await db.prepare(
+        "ALTER TABLE research_rule_states ADD COLUMN engine_version text NOT NULL DEFAULT 'legacy'",
+      ).run();
+    } catch (error) {
+      const refreshed = await db.prepare(
+        "PRAGMA table_info(research_rule_states)",
+      ).all<{ name: string }>();
+      if (!(refreshed.results ?? []).some((column) => column.name === "engine_version")) {
+        throw error;
+      }
+    }
+  }
+  const identityColumns = await db.prepare(
+    "PRAGMA index_info(research_rule_state_identity_idx)",
+  ).all<{ name: string }>();
+  const expected = ["game", "engine_version", "slot", "rule_id"];
+  if (
+    (identityColumns.results ?? []).map((column) => column.name).join(":") !==
+      expected.join(":")
+  ) {
+    await db.prepare("DROP INDEX IF EXISTS research_rule_state_identity_idx").run();
+    await db.prepare(
+      `CREATE UNIQUE INDEX IF NOT EXISTS research_rule_state_identity_idx
+       ON research_rule_states (game, engine_version, slot, rule_id)`,
+    ).run();
   }
 }
 
@@ -444,7 +480,7 @@ export async function settleResearchV3Forecasts(
           const successBaseline = rule.direction === "support"
             ? rule.baselineRate
             : 1 - rule.baselineRate;
-          const stateId = `${parsed.game}:${event.slot}:${rule.ruleId}`;
+          const stateId = `${parsed.game}:${parsed.engineVersion}:${event.slot}:${rule.ruleId}`;
           const previous = stateHistory.get(stateId) ?? {
             recent20: [],
             recent50: [],
@@ -455,10 +491,11 @@ export async function settleResearchV3Forecasts(
           statements.push(
             db.prepare(
               `INSERT INTO research_rule_states (
-                 state_id, game, slot, rule_id, posterior_alpha, posterior_beta,
+                 state_id, game, engine_version, slot, rule_id,
+                 posterior_alpha, posterior_beta,
                  triggers, hits, consecutive_hits, consecutive_misses,
                  recent_20_json, recent_50_json, status, updated_at
-               ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(state_id) DO UPDATE SET
                  posterior_alpha = posterior_alpha + excluded.hits,
                  posterior_beta = posterior_beta + (1 - excluded.hits),
@@ -479,6 +516,7 @@ export async function settleResearchV3Forecasts(
             ).bind(
               stateId,
               parsed.game,
+              parsed.engineVersion,
               event.slot,
               rule.ruleId,
               successBaseline * 20 + (ruleMatched ? 1 : 0),
@@ -722,14 +760,15 @@ CREATE UNIQUE INDEX IF NOT EXISTS research_model_weight_identity_idx
 CREATE INDEX IF NOT EXISTS research_model_weight_latest_idx
   ON research_model_weights (game, slot, updated_at);
 CREATE TABLE IF NOT EXISTS research_rule_states (
-  state_id text PRIMARY KEY NOT NULL, game text NOT NULL, slot text NOT NULL,
+  state_id text PRIMARY KEY NOT NULL, game text NOT NULL,
+  engine_version text NOT NULL DEFAULT 'legacy', slot text NOT NULL,
   rule_id text NOT NULL, posterior_alpha real NOT NULL, posterior_beta real NOT NULL,
   triggers integer NOT NULL, hits integer NOT NULL, consecutive_hits integer NOT NULL,
   consecutive_misses integer NOT NULL, recent_20_json text NOT NULL,
   recent_50_json text NOT NULL, status text NOT NULL, updated_at text NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS research_rule_state_identity_idx
-  ON research_rule_states (game, slot, rule_id);
+  ON research_rule_states (game, engine_version, slot, rule_id);
 CREATE INDEX IF NOT EXISTS research_rule_state_status_idx
   ON research_rule_states (game, status, updated_at);
 CREATE TABLE IF NOT EXISTS research_v3_forecasts (
@@ -897,11 +936,12 @@ export async function readLatestModelWeights(
   if (!db) return {};
   try {
     const rows = await db.prepare(
-      `SELECT slot, model_id, weight_after
-       FROM research_model_weights
-       WHERE game = ?
-       ORDER BY updated_at DESC`,
-    ).bind(game).all<{
+      `SELECT mw.slot, mw.model_id, mw.weight_after
+       FROM research_model_weights mw
+       JOIN research_v3_forecasts f ON f.run_id = mw.run_id
+       WHERE mw.game = ? AND f.engine_version = ?
+       ORDER BY mw.updated_at DESC`,
+    ).bind(game, RESEARCH_V3_ENGINE_VERSION).all<{
       slot: ResearchEventSlot;
       model_id: ResearchExpertId;
       weight_after: number;
@@ -936,8 +976,8 @@ export async function readResearchRuleStates(
       `SELECT slot, rule_id, triggers, hits, consecutive_hits,
               consecutive_misses, status
        FROM research_rule_states
-       WHERE game = ?`,
-    ).bind(game).all<{
+       WHERE game = ? AND engine_version = ?`,
+    ).bind(game, RESEARCH_V3_ENGINE_VERSION).all<{
       slot: ResearchEventSlot;
       rule_id: string;
       triggers: number;
@@ -1347,6 +1387,8 @@ export function isResearchV3Snapshot(
     Date.parse(snapshot.frozenAt) < Date.parse(snapshot.expectedDrawAt) &&
     Array.isArray(snapshot.events) &&
     slotsMatch(snapshot.events, expectedSlots) &&
+    (snapshot.engineVersion !== RESEARCH_V3_ENGINE_VERSION ||
+      currentEventContractsMatch(snapshot.events)) &&
     snapshot.events.every((event) =>
       typeof event?.eventId === "string" &&
       typeof event?.probability === "number" &&
@@ -1357,6 +1399,38 @@ export function isResearchV3Snapshot(
       event.baselineProbability <= 0.7
     )
   );
+}
+
+function currentEventContractsMatch(
+  events: Array<{
+    slot?: unknown;
+    scope?: unknown;
+    family?: unknown;
+    predictedValue?: unknown;
+  }>,
+) {
+  const zodiacs = new Set([
+    "鼠", "牛", "虎", "兔", "龙", "蛇", "马", "羊", "猴", "鸡", "狗", "猪",
+  ]);
+  return events.every((event) => {
+    if (event.slot === "zodiac_6_plus_1") {
+      return event.scope === "draw.6_plus_1" && event.family === "zodiac" &&
+        typeof event.predictedValue === "string" && zodiacs.has(event.predictedValue);
+    }
+    if (event.slot === "tail_6_plus_1") {
+      return event.scope === "draw.6_plus_1" && event.family === "tail" &&
+        typeof event.predictedValue === "string" && /^[0-9]尾$/.test(event.predictedValue);
+    }
+    if (event.slot === "special_parity") {
+      return event.scope === "special" && event.family === "parity" &&
+        (event.predictedValue === "单" || event.predictedValue === "双");
+    }
+    if (event.slot === "special_size") {
+      return event.scope === "special" && event.family === "size" &&
+        (event.predictedValue === "大" || event.predictedValue === "小");
+    }
+    return false;
+  });
 }
 
 export function isCurrentResearchV3Snapshot(

@@ -467,6 +467,7 @@ export const researchRuleStates = sqliteTable(
   {
     stateId: text("state_id").primaryKey(),
     game: text("game").notNull(),
+    engineVersion: text("engine_version").notNull().default("legacy"),
     slot: text("slot").notNull(),
     ruleId: text("rule_id").notNull(),
     posteriorAlpha: real("posterior_alpha").notNull(),
@@ -483,6 +484,7 @@ export const researchRuleStates = sqliteTable(
   (table) => [
     uniqueIndex("research_rule_state_identity_idx").on(
       table.game,
+      table.engineVersion,
       table.slot,
       table.ruleId,
     ),

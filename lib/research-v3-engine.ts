@@ -884,7 +884,7 @@ function toEventForecast(
       Math.abs(right.contribution) - Math.abs(left.contribution),
   )[0];
   return {
-    eventId: `evt_${candidate.slot}_${scopeKey(candidate.scope)}_${candidate.value}_${stableHash(expectedDrawAt)}`,
+    eventId: `evt_${candidate.slot}_${scopeKey(candidate.scope)}_${candidate.value}_${stableHash(`${RESEARCH_V3_ENGINE_VERSION}:${expectedDrawAt}`)}`,
     slot: candidate.slot,
     slotLabel: slotLabel(candidate.slot),
     scope: candidate.scope,
