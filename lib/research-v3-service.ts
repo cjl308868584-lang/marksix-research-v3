@@ -220,7 +220,7 @@ export async function runResearchV3Cycle({
 }
 
 async function importLegacySnapshot(game: GameId, issue: string) {
-  if (await readResearchV3Snapshot(game, issue)) return;
+  if (await readResearchV3Snapshot(game, issue, "any")) return;
   const bundled = LEGACY_SNAPSHOTS.find(
     (snapshot) => snapshot.game === game && snapshot.targetIssue === issue,
   );

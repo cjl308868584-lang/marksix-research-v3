@@ -77,19 +77,36 @@ type SnapshotRow = {
 export async function readResearchV3Snapshot(
   game: GameId,
   targetIssue?: string | null,
+  scope: "current" | "any" = "current",
 ): Promise<ResearchV3Snapshot | null> {
   const db = runtime.__marksixD1;
   if (!db) return null;
   try {
     const row = targetIssue
-      ? await db.prepare(
+      ? scope === "current"
+        ? await db.prepare(
+          `SELECT run_id, snapshot_json, review_json, settled_at
+           FROM research_v3_forecasts
+           WHERE game = ? AND target_issue = ? AND engine_version = ?
+           ORDER BY frozen_at ASC, run_id ASC
+           LIMIT 1`,
+        ).bind(game, targetIssue, RESEARCH_V3_ENGINE_VERSION).first<SnapshotRow>()
+        : await db.prepare(
         `SELECT run_id, snapshot_json, review_json, settled_at
          FROM research_v3_forecasts
          WHERE game = ? AND target_issue = ?
          ORDER BY frozen_at ASC, run_id ASC
          LIMIT 1`,
       ).bind(game, targetIssue).first<SnapshotRow>()
-      : await db.prepare(
+      : scope === "current"
+        ? await db.prepare(
+          `SELECT run_id, snapshot_json, review_json, settled_at
+           FROM research_v3_forecasts
+           WHERE game = ? AND engine_version = ?
+           ORDER BY expected_draw_at DESC, frozen_at ASC
+           LIMIT 1`,
+        ).bind(game, RESEARCH_V3_ENGINE_VERSION).first<SnapshotRow>()
+        : await db.prepare(
         `SELECT run_id, snapshot_json, review_json, settled_at
          FROM research_v3_forecasts
          WHERE game = ?
@@ -97,7 +114,9 @@ export async function readResearchV3Snapshot(
          LIMIT 1`,
       ).bind(game).first<SnapshotRow>();
     const parsed = parseJson(row?.snapshot_json ?? "");
-    return isResearchV3Snapshot(parsed) ? parsed : null;
+    return scope === "current"
+      ? isCurrentResearchV3Snapshot(parsed) ? parsed : null
+      : isResearchV3Snapshot(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -713,8 +732,9 @@ CREATE TABLE IF NOT EXISTS research_v3_forecasts (
   frozen_at text NOT NULL, actual_json text, review_version text,
   review_json text, settled_at text
 );
-CREATE UNIQUE INDEX IF NOT EXISTS research_v3_forecast_identity_idx
-  ON research_v3_forecasts (game, target_issue);
+DROP INDEX IF EXISTS research_v3_forecast_identity_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS research_v3_forecast_engine_identity_idx
+  ON research_v3_forecasts (game, target_issue, engine_version);
 CREATE INDEX IF NOT EXISTS research_v3_forecast_unsettled_idx
   ON research_v3_forecasts (game, settled_at, target_issue);
 CREATE TABLE IF NOT EXISTS research_settlement_claims (
@@ -986,8 +1006,8 @@ export async function countSettledResearchV3Forecasts(game: GameId) {
     const row = await db.prepare(
       `SELECT COUNT(*) AS count
        FROM research_v3_forecasts
-       WHERE game = ? AND settled_at IS NOT NULL`,
-    ).bind(game).first<{ count: number }>();
+       WHERE game = ? AND engine_version = ? AND settled_at IS NOT NULL`,
+    ).bind(game, RESEARCH_V3_ENGINE_VERSION).first<{ count: number }>();
     return Number(row?.count ?? 0);
   } catch {
     return 0;
@@ -1041,10 +1061,11 @@ async function readChampionEvidenceRows(db: D1Database, game: GameId) {
      FROM research_model_weights mw
      JOIN research_event_scores es
        ON es.run_id = mw.run_id AND es.slot = mw.slot
-     WHERE mw.game = ?
+     JOIN research_v3_forecasts f ON f.run_id = mw.run_id
+     WHERE mw.game = ? AND f.engine_version = ?
      ORDER BY es.scored_at DESC
      LIMIT 2000`,
-  ).bind(game).all<ChampionEvidenceRow>();
+  ).bind(game, RESEARCH_V3_ENGINE_VERSION).all<ChampionEvidenceRow>();
   return rows.results ?? [];
 }
 
@@ -1055,10 +1076,15 @@ async function readPersistedFormalChampion(
   const row = await db.prepare(
     `SELECT champion_after
      FROM research_learning_runs
-     WHERE game = ? AND challenger_promoted = 1
+     JOIN research_v3_forecasts f
+       ON f.run_id = research_learning_runs.run_id
+     WHERE research_learning_runs.game = ? AND f.engine_version = ?
+       AND challenger_promoted = 1
      ORDER BY completed_at DESC
      LIMIT 1`,
-  ).bind(game).first<{ champion_after: ResearchExpertId }>();
+  ).bind(game, RESEARCH_V3_ENGINE_VERSION).first<{
+    champion_after: ResearchExpertId;
+  }>();
   return row?.champion_after ?? null;
 }
 
