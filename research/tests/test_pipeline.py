@@ -464,13 +464,10 @@ class ResearchPipelineTest(unittest.TestCase):
             {
                 "targetIssue": "2026217",
                 "events": [
-                    {"slot": slot, "family": "zodiac" if index == 0 else "parity"}
-                    for index, slot in enumerate((
-                        "zodiac_6_plus_1",
-                        "tail_6_plus_1",
-                        "position_parity",
-                        "position_size",
-                    ))
+                    {"slot": "zodiac_6_plus_1", "scope": "draw.6_plus_1", "family": "zodiac"},
+                    {"slot": "tail_6_plus_1", "scope": "draw.6_plus_1", "family": "tail"},
+                    {"slot": "special_parity", "scope": "special", "family": "parity"},
+                    {"slot": "special_size", "scope": "special", "family": "size"},
                 ],
             },
             {"reviews": []},
@@ -488,6 +485,37 @@ class ResearchPipelineTest(unittest.TestCase):
         self.assertEqual(result["status"], "frozen")
         self.assertEqual(result["targetIssue"], "2026217")
         self.assertIsNone(result["settledIssue"])
+
+    def test_health_rejects_current_slots_in_a_noncurrent_order(self):
+        responses = self._health_responses()
+        events = responses[1]["events"]
+        events[2], events[3] = events[3], events[2]
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "不是当前四槽位"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_rejects_nonobject_events_alongside_current_slots(self):
+        responses = self._health_responses()
+        responses[1]["events"].append("unexpected")
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "不是当前四槽位"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
+
+    def test_health_rejects_special_slots_outside_the_special_scope(self):
+        responses = self._health_responses()
+        responses[1]["events"][2]["scope"] = "draw.6_plus_1"
+        with patch.object(cli, "fetch_json", side_effect=responses):
+            with self.assertRaisesRegex(RuntimeError, "不是特码"):
+                cli.verify_production_health(
+                    "https://example.test",
+                    "new_macau",
+                )
 
     def test_health_accepts_only_an_advanced_four_slot_number_free_forecast(self):
         responses = self._health_responses()
@@ -910,8 +938,8 @@ class ResearchPipelineTest(unittest.TestCase):
         slots = (
             "zodiac_6_plus_1",
             "tail_6_plus_1",
-            "position_parity",
-            "position_size",
+            "special_parity",
+            "special_size",
         )
         if reviews is None:
             reviews = [{"targetIssue": "2026216"}]
@@ -924,7 +952,11 @@ class ResearchPipelineTest(unittest.TestCase):
             {
                 "targetIssue": target_issue,
                 "events": [
-                    {"slot": slot, "family": "zodiac" if index == 0 else "parity"}
+                    {
+                        "slot": slot,
+                        "scope": "special" if index >= 2 else "draw.6_plus_1",
+                        "family": ("zodiac", "tail", "parity", "size")[index],
+                    }
                     for index, slot in enumerate(slots)
                 ],
             },
@@ -1166,14 +1198,18 @@ class _V2HealthResponses:
         primary_slots = (
             "zodiac_6_plus_1",
             "tail_6_plus_1",
-            "position_parity",
-            "position_size",
+            "special_parity",
+            "special_size",
         )
         self.lottery = {"draws": [testcase._draw_payload("2026216", True)]}
         self.primary = {
             "targetIssue": target_issue,
             "events": [
-                {"slot": slot, "family": "zodiac" if index == 0 else "parity"}
+                {
+                    "slot": slot,
+                    "scope": "special" if index >= 2 else "draw.6_plus_1",
+                    "family": ("zodiac", "tail", "parity", "size")[index],
+                }
                 for index, slot in enumerate(primary_slots)
             ],
         }

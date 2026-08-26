@@ -409,16 +409,20 @@ def verify_production_health(
             f"target {target_issue or 'missing'}"
         )
     events = forecast.get("events")
-    expected_slots = {
+    expected_slots = (
         "zodiac_6_plus_1",
         "tail_6_plus_1",
-        "position_parity",
-        "position_size",
-    }
-    if not isinstance(events, list) or {
-        event.get("slot") for event in events if isinstance(event, dict)
-    } != expected_slots:
-        raise RuntimeError(f"{game} target {target_issue} has invalid event slots")
+        "special_parity",
+        "special_size",
+    )
+    if (
+        not isinstance(events, list)
+        or not all(isinstance(event, dict) for event in events)
+        or tuple(event.get("slot") for event in events) != expected_slots
+    ):
+        raise RuntimeError("远端冻结快照不是当前四槽位")
+    if events[2].get("scope") != "special" or events[3].get("scope") != "special":
+        raise RuntimeError("特码单双/大小范围不是特码")
     if any(
         isinstance(event, dict) and event.get("family") == "number"
         for event in events

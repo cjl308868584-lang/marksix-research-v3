@@ -1,16 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GAME_IDS, type GameId } from "../../../../lib/lottery";
 import { readResearchV3Envelope } from "../../../../lib/research-v3-service";
-import type { ResearchEventSlot } from "../../../../lib/research-v3-types";
+import {
+  CURRENT_RESEARCH_EVENT_SLOTS,
+  type CurrentResearchEventSlot,
+} from "../../../../lib/research-v3-types";
 
 export const dynamic = "force-dynamic";
 
-const SLOTS = new Set<ResearchEventSlot>([
-  "zodiac_6_plus_1",
-  "tail_6_plus_1",
-  "position_parity",
-  "position_size",
-]);
+const SLOTS = new Set<CurrentResearchEventSlot>(CURRENT_RESEARCH_EVENT_SLOTS);
 
 export async function GET(request: NextRequest) {
   const allowed = new Set(["game", "slot", "page", "limit"]);
@@ -28,8 +26,8 @@ export async function GET(request: NextRequest) {
     : null;
   const requestedSlot = request.nextUrl.searchParams.get("slot");
   const slot =
-    requestedSlot && SLOTS.has(requestedSlot as ResearchEventSlot)
-      ? requestedSlot as ResearchEventSlot
+    requestedSlot && SLOTS.has(requestedSlot as CurrentResearchEventSlot)
+      ? requestedSlot as CurrentResearchEventSlot
       : null;
   const page = Number(request.nextUrl.searchParams.get("page") ?? 1);
   const limit = Number(request.nextUrl.searchParams.get("limit") ?? 20);

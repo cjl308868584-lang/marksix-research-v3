@@ -278,6 +278,9 @@ test("public research reads never settle, train, or freeze forecasts", async () 
   assert.doesNotMatch(lotteryRoute, /settleResearchForecasts/);
   assert.doesNotMatch(lotteryRoute, /settleLatestResearch/);
   assert.match(forecastRoute, /readResearchV3Envelope/);
+  assert.match(rulesRoute, /CURRENT_RESEARCH_EVENT_SLOTS/);
+  assert.doesNotMatch(rulesRoute, /"position_parity"/);
+  assert.doesNotMatch(rulesRoute, /"position_size"/);
   const analyzeGet = analyzeRoute.slice(
     analyzeRoute.indexOf("export async function GET"),
     analyzeRoute.indexOf("export async function POST"),
