@@ -78,6 +78,7 @@ type Claim =
 type StoreModule = {
   ensureResearchV3Store(): Promise<boolean>;
   isResearchV3Snapshot(value: unknown): boolean;
+  isCurrentResearchV3Snapshot(value: unknown): boolean;
   claimResearchTask(input: {
     taskId: string;
     game: "new_macau";
@@ -126,25 +127,74 @@ after(async () => {
   await server.close();
 });
 
-test("snapshot reader accepts frozen v3.0 ledgers but rejects unknown future engines", () => {
-  const snapshot = {
+function snapshotFixture(input: {
+  engineVersion: string;
+  modelVersion: string;
+  reviewVersion: string;
+  slots: [string, string, string, string];
+}) {
+  return {
     schemaVersion: "3",
-    engineVersion: "high-probability-events-v3.0",
-    modelVersion: "champion-challenger-v3.0-deadbeef",
-    runId: "legacy_run",
+    engineVersion: input.engineVersion,
+    modelVersion: input.modelVersion,
+    reviewVersion: input.reviewVersion,
+    runId: "run_1",
     game: "new_macau",
     targetIssue: "2026218",
-    events: Array.from({ length: 4 }, (_, index) => ({
-      eventId: `legacy_${index}`,
+    expectedDrawAt: "2026-08-02T14:00:00.000Z",
+    generatedAt: "2026-08-01T14:00:00.000Z",
+    frozenAt: "2026-08-01T14:01:00.000Z",
+    events: input.slots.map((slot, index) => ({
+      eventId: `event_${index}`,
+      slot,
       probability: 0.5,
       baselineProbability: 0.5,
     })),
   };
+}
+
+test("snapshot reader accepts frozen v3.0 ledgers but rejects unknown future engines", () => {
+  const snapshot = snapshotFixture({
+    engineVersion: "high-probability-events-v3.0",
+    modelVersion: "champion-challenger-v3.0-deadbeef",
+    reviewVersion: "research-event-review-v3",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size"],
+  });
   assert.equal(store.isResearchV3Snapshot(snapshot), true);
   assert.equal(store.isResearchV3Snapshot({
     ...snapshot,
     engineVersion: "high-probability-events-v4.0",
     modelVersion: "champion-challenger-v4.0-deadbeef",
+  }), false);
+});
+
+test("v3.2 requires the two special-only slots while v3.1 stays readable", () => {
+  const current = snapshotFixture({
+    engineVersion: "high-probability-events-v3.2",
+    modelVersion: "champion-challenger-v3.2-deadbeef",
+    reviewVersion: "research-event-review-v4",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "special_parity", "special_size"],
+  });
+  const prior = snapshotFixture({
+    engineVersion: "high-probability-events-v3.1",
+    modelVersion: "champion-challenger-v3.1-deadbeef",
+    reviewVersion: "research-event-review-v3",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size"],
+  });
+
+  assert.equal(store.isResearchV3Snapshot(current), true);
+  assert.equal(store.isCurrentResearchV3Snapshot(current), true);
+  assert.equal(store.isResearchV3Snapshot(prior), true);
+  assert.equal(store.isCurrentResearchV3Snapshot(prior), false);
+  assert.equal(store.isResearchV3Snapshot({
+    ...current,
+    events: current.events.map((event, index) =>
+      index === 2 ? { ...event, slot: "position_parity" } : event
+    ),
+  }), false);
+  assert.equal(store.isResearchV3Snapshot({
+    ...current,
+    frozenAt: current.expectedDrawAt,
   }), false);
 });
 

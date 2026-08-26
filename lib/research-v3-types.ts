@@ -2,17 +2,31 @@ import type { GameId } from "./lottery";
 import type { RollingPatternCycleResult } from "./rolling-pattern-types";
 
 export const RESEARCH_V3_SCHEMA_VERSION = "3" as const;
-export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.1" as const;
-export const RESEARCH_V3_MODEL_VERSION = "champion-challenger-v3.1" as const;
-export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v3" as const;
+export const RESEARCH_V3_ENGINE_VERSION = "high-probability-events-v3.2" as const;
+export const RESEARCH_V3_MODEL_VERSION = "champion-challenger-v3.2" as const;
+export const RESEARCH_V3_REVIEW_VERSION = "research-event-review-v4" as const;
+export const RESEARCH_V3_PRIOR_ENGINE_VERSION = "high-probability-events-v3.1" as const;
+export const RESEARCH_V3_PRIOR_MODEL_VERSION = "champion-challenger-v3.1" as const;
+export const RESEARCH_V3_PRIOR_REVIEW_VERSION = "research-event-review-v3" as const;
 export const RESEARCH_V3_LEGACY_ENGINE_VERSION = "high-probability-events-v3.0" as const;
 export const RESEARCH_V3_LEGACY_MODEL_VERSION = "champion-challenger-v3.0" as const;
 
-export type ResearchEventSlot =
-  | "zodiac_6_plus_1"
-  | "tail_6_plus_1"
-  | "position_parity"
-  | "position_size";
+export const CURRENT_RESEARCH_EVENT_SLOTS = [
+  "zodiac_6_plus_1",
+  "tail_6_plus_1",
+  "special_parity",
+  "special_size",
+] as const;
+export const LEGACY_RESEARCH_EVENT_SLOTS = [
+  "zodiac_6_plus_1",
+  "tail_6_plus_1",
+  "position_parity",
+  "position_size",
+] as const;
+
+export type CurrentResearchEventSlot = typeof CURRENT_RESEARCH_EVENT_SLOTS[number];
+export type LegacyResearchEventSlot = typeof LEGACY_RESEARCH_EVENT_SLOTS[number];
+export type ResearchEventSlot = CurrentResearchEventSlot | LegacyResearchEventSlot;
 
 export type ResearchEventFamily = "zodiac" | "tail" | "parity" | "size";
 
@@ -173,6 +187,7 @@ export type ResearchV3Snapshot = {
   schemaVersion: typeof RESEARCH_V3_SCHEMA_VERSION;
   engineVersion:
     | typeof RESEARCH_V3_ENGINE_VERSION
+    | typeof RESEARCH_V3_PRIOR_ENGINE_VERSION
     | typeof RESEARCH_V3_LEGACY_ENGINE_VERSION;
   modelVersion: string;
   runId: string;
@@ -248,7 +263,9 @@ export type ResearchChampionDecision = {
 };
 
 export type ResearchV3Review = {
-  reviewVersion: typeof RESEARCH_V3_REVIEW_VERSION;
+  reviewVersion:
+    | typeof RESEARCH_V3_REVIEW_VERSION
+    | typeof RESEARCH_V3_PRIOR_REVIEW_VERSION;
   runId: string;
   game: GameId;
   targetIssue: string;

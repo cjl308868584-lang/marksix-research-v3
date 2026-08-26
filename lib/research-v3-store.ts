@@ -5,10 +5,15 @@ import {
   buildResearchV3Review,
 } from "./research-v3-review";
 import {
+  CURRENT_RESEARCH_EVENT_SLOTS,
+  LEGACY_RESEARCH_EVENT_SLOTS,
   RESEARCH_V3_ENGINE_VERSION,
   RESEARCH_V3_LEGACY_ENGINE_VERSION,
   RESEARCH_V3_LEGACY_MODEL_VERSION,
   RESEARCH_V3_MODEL_VERSION,
+  RESEARCH_V3_PRIOR_ENGINE_VERSION,
+  RESEARCH_V3_PRIOR_MODEL_VERSION,
+  RESEARCH_V3_PRIOR_REVIEW_VERSION,
   RESEARCH_V3_REVIEW_VERSION,
   RESEARCH_V3_SCHEMA_VERSION,
   type ResearchEventSlot,
@@ -1271,18 +1276,21 @@ export function isResearchV3Snapshot(
 ): value is ResearchV3Snapshot {
   if (!value || typeof value !== "object") return false;
   const snapshot = value as Partial<ResearchV3Snapshot>;
+  const expectedSlots = expectedSlotsForVersion(
+    snapshot.engineVersion,
+    snapshot.modelVersion,
+  );
   return (
     snapshot.schemaVersion === RESEARCH_V3_SCHEMA_VERSION &&
-    (snapshot.engineVersion === RESEARCH_V3_ENGINE_VERSION ||
-      snapshot.engineVersion === RESEARCH_V3_LEGACY_ENGINE_VERSION) &&
-    typeof snapshot.modelVersion === "string" &&
-    (snapshot.modelVersion.startsWith(RESEARCH_V3_MODEL_VERSION) ||
-      snapshot.modelVersion.startsWith(RESEARCH_V3_LEGACY_MODEL_VERSION)) &&
+    expectedSlots !== null &&
     typeof snapshot.runId === "string" &&
     (snapshot.game === "hk" || snapshot.game === "new_macau") &&
     typeof snapshot.targetIssue === "string" &&
+    isValidTime(snapshot.frozenAt) &&
+    isValidTime(snapshot.expectedDrawAt) &&
+    Date.parse(snapshot.frozenAt) < Date.parse(snapshot.expectedDrawAt) &&
     Array.isArray(snapshot.events) &&
-    snapshot.events.length === 4 &&
+    slotsMatch(snapshot.events, expectedSlots) &&
     snapshot.events.every((event) =>
       typeof event?.eventId === "string" &&
       typeof event?.probability === "number" &&
@@ -1295,11 +1303,57 @@ export function isResearchV3Snapshot(
   );
 }
 
+export function isCurrentResearchV3Snapshot(
+  value: unknown,
+): value is ResearchV3Snapshot {
+  return isResearchV3Snapshot(value) &&
+    value.engineVersion === RESEARCH_V3_ENGINE_VERSION;
+}
+
+function expectedSlotsForVersion(
+  engineVersion: unknown,
+  modelVersion: unknown,
+): readonly string[] | null {
+  if (typeof modelVersion !== "string") return null;
+  if (
+    engineVersion === RESEARCH_V3_ENGINE_VERSION &&
+    modelVersion.startsWith(`${RESEARCH_V3_MODEL_VERSION}-`)
+  ) {
+    return CURRENT_RESEARCH_EVENT_SLOTS;
+  }
+  if (
+    engineVersion === RESEARCH_V3_PRIOR_ENGINE_VERSION &&
+    modelVersion.startsWith(`${RESEARCH_V3_PRIOR_MODEL_VERSION}-`)
+  ) {
+    return LEGACY_RESEARCH_EVENT_SLOTS;
+  }
+  if (
+    engineVersion === RESEARCH_V3_LEGACY_ENGINE_VERSION &&
+    modelVersion.startsWith(`${RESEARCH_V3_LEGACY_MODEL_VERSION}-`)
+  ) {
+    return LEGACY_RESEARCH_EVENT_SLOTS;
+  }
+  return null;
+}
+
+function slotsMatch(
+  events: Array<{ slot?: unknown }>,
+  expected: readonly string[],
+) {
+  return events.length === expected.length &&
+    events.every((event, index) => event.slot === expected[index]);
+}
+
+function isValidTime(value: unknown): value is string {
+  return typeof value === "string" && Number.isFinite(Date.parse(value));
+}
+
 function isResearchV3Review(value: unknown): value is ResearchV3Review {
   if (!value || typeof value !== "object") return false;
   const review = value as Partial<ResearchV3Review>;
   return (
-    review.reviewVersion === RESEARCH_V3_REVIEW_VERSION &&
+    (review.reviewVersion === RESEARCH_V3_REVIEW_VERSION ||
+      review.reviewVersion === RESEARCH_V3_PRIOR_REVIEW_VERSION) &&
     typeof review.runId === "string" &&
     Array.isArray(review.events) &&
     review.events.length === 4

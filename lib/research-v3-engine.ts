@@ -1025,6 +1025,8 @@ function slotLabel(slot: ResearchEventSlot) {
   return {
     zodiac_6_plus_1: "6+1生肖覆盖",
     tail_6_plus_1: "6+1尾数覆盖",
+    special_parity: "特码单双",
+    special_size: "特码大小",
     position_parity: "指定位置单双",
     position_size: "指定位置大小",
   }[slot];
