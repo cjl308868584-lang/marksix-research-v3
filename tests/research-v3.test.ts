@@ -19,6 +19,7 @@ let buildSnapshot: (input: {
   targetIssue: string;
   expectedDrawAt: string;
   generatedAt: string;
+  previousWeights?: Record<string, Record<string, number>>;
   ruleStates?: Record<string, Record<string, unknown>>;
   researchArtifact?: Record<string, unknown>;
   formalChampion?: "baseline" | "interpretable_rules" | "logistic" | "black_box" | null;
@@ -126,6 +127,109 @@ test("special-only slots never select a main-number position", () => {
   assert.match(parity?.predictionLabel, /^下一期：特码(单|双)$/);
   assert.match(size?.predictionLabel, /^下一期：特码(大|小)$/);
   assert.doesNotMatch(JSON.stringify([parity, size]), /main\.position/);
+});
+
+test("extreme legacy position weights cannot influence current special slots", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+    previousWeights: {
+      position_parity: {
+        baseline: 0.001,
+        interpretable_rules: 0.001,
+        logistic: 0.998,
+        black_box: 0,
+      },
+      position_size: {
+        baseline: 0.001,
+        interpretable_rules: 0.998,
+        logistic: 0.001,
+        black_box: 0,
+      },
+    },
+  });
+
+  for (const slot of ["special_parity", "special_size"]) {
+    const event = snapshot.events.find((item: any) => item.slot === slot);
+    assert.ok(event);
+    assert.deepEqual(
+      Object.fromEntries(event.experts.map((expert: any) => [expert.modelId, expert.weight])),
+      {
+        baseline: 0.35,
+        interpretable_rules: 0.35,
+        logistic: 0.3,
+        black_box: 0,
+      },
+    );
+  }
+});
+
+test("prior-engine review preserves the frozen position semantics and review version", () => {
+  const current = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const prior = structuredClone(current);
+  prior.engineVersion = "high-probability-events-v3.1";
+  prior.modelVersion = "champion-challenger-v3.1-deadbeef";
+  prior.runId = "prior-engine-review";
+  prior.events[2] = {
+    ...prior.events[2],
+    eventId: "prior-position-parity",
+    slot: "position_parity",
+    slotLabel: "指定位置单双",
+    scope: "main.position.3",
+    scopeLabel: "第3个正码",
+    predictedValue: "单",
+    predictionLabel: "下一期：第3个正码单",
+  };
+  prior.events[3] = {
+    ...prior.events[3],
+    eventId: "prior-position-size",
+    slot: "position_size",
+    slotLabel: "指定位置大小",
+    scope: "main.position.4",
+    scopeLabel: "第4个正码",
+    predictedValue: "大",
+    predictionLabel: "下一期：第4个正码大",
+  };
+
+  const review = buildReview(
+    prior,
+    verifiedDraw({
+      issue: "2026999",
+      numbers: [1, 3, 25, 49, 8, 10],
+      special: 24,
+    }),
+    "2026-10-01T22:00:00+08:00",
+  );
+
+  assert.equal(review.reviewVersion, "research-event-review-v3");
+  assert.deepEqual(
+    review.events.slice(2).map((event: any) => ({
+      slot: event.slot,
+      scopeLabel: event.scopeLabel,
+      prediction: event.prediction,
+    })),
+    [
+      {
+        slot: "position_parity",
+        scopeLabel: "第3个正码",
+        prediction: "下一期：第3个正码单",
+      },
+      {
+        slot: "position_size",
+        scopeLabel: "第4个正码",
+        prediction: "下一期：第4个正码大",
+      },
+    ],
+  );
 });
 
 test("special parity and size use exact 01-49 boundaries", () => {

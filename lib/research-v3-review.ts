@@ -1,6 +1,8 @@
 import { getZodiac, type Draw } from "./lottery";
 import { eventMatches } from "./research-v3-engine";
 import {
+  RESEARCH_V3_ENGINE_VERSION,
+  RESEARCH_V3_PRIOR_REVIEW_VERSION,
   RESEARCH_V3_REVIEW_VERSION,
   type ResearchEventForecast,
   type ResearchEventReview,
@@ -55,9 +57,12 @@ export function buildResearchV3Review(
     event.diagnosis.some((item) => item.includes("漂移"))
   );
   const completedAt = settledAt;
+  const reviewVersion = snapshot.engineVersion === RESEARCH_V3_ENGINE_VERSION
+    ? RESEARCH_V3_REVIEW_VERSION
+    : RESEARCH_V3_PRIOR_REVIEW_VERSION;
 
   return {
-    reviewVersion: RESEARCH_V3_REVIEW_VERSION,
+    reviewVersion,
     runId: snapshot.runId,
     game: snapshot.game,
     targetIssue: snapshot.targetIssue,

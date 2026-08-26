@@ -27,11 +27,29 @@ type ChampionRow = ReturnType<typeof championRows>[number] & {
   engine_version: string;
 };
 
+type ModelWeightRow = {
+  slot: string;
+  model_id: "baseline" | "interpretable_rules" | "logistic" | "black_box";
+  weight_after: number;
+};
+
+type RuleStateRow = {
+  slot: string;
+  rule_id: string;
+  triggers: number;
+  hits: number;
+  consecutive_hits: number;
+  consecutive_misses: number;
+  status: "active" | "suppressed" | "retired";
+};
+
 class FakeTaskD1 {
   tasks = new Map<string, TaskRow>();
   forecasts = new Map<string, ForecastRow>();
   indexes = new Set<string>();
   championEvidence: ChampionRow[] = [];
+  modelWeights: ModelWeightRow[] = [];
+  ruleStates: RuleStateRow[] = [];
   promotedChampions: Array<{
     run_id: string;
     engine_version: string;
@@ -183,7 +201,22 @@ class FakeTaskD1 {
         return null;
       },
       all: async () => {
+        if (sql.includes("FROM research_v3_forecasts")) {
+          const limit = Number(values.at(-1));
+          const rows = this.filteredForecasts(sql, values)
+            .filter((row) => row.settled_at !== null && row.review_json !== null)
+            .sort((left, right) =>
+              right.expected_draw_at.localeCompare(left.expected_draw_at)
+            )
+            .slice(0, Number.isFinite(limit) ? limit : undefined);
+          return {
+            results: rows.map((row) => ({ review_json: row.review_json! })),
+          };
+        }
         if (sql.includes("FROM research_model_weights")) {
+          if (!sql.includes("JOIN research_event_scores")) {
+            return { results: this.modelWeights };
+          }
           const engineVersion = sql.includes("engine_version = ?")
             ? String(values[1])
             : null;
@@ -192,6 +225,9 @@ class FakeTaskD1 {
               .filter((row) => !engineVersion || row.engine_version === engineVersion)
               .map(({ run_id: _runId, engine_version: _engineVersion, ...row }) => row),
           };
+        }
+        if (sql.includes("FROM research_rule_states")) {
+          return { results: this.ruleStates };
         }
         return { results: [] };
       },
@@ -219,6 +255,80 @@ class FakeTaskD1 {
 
 class FakeResearchD1 extends FakeTaskD1 {}
 
+class FakeSettlementD1 {
+  claimed = false;
+  persistedReviewVersion: string | null = null;
+  persistedReview: any = null;
+  private readonly snapshot: any;
+  private readonly priorEvidence: ReturnType<typeof championRows>;
+
+  constructor(
+    snapshot: any,
+    priorEvidence: ReturnType<typeof championRows>,
+  ) {
+    this.snapshot = snapshot;
+    this.priorEvidence = priorEvidence;
+  }
+
+  prepare(sql: string) {
+    let values: unknown[] = [];
+    const statement = {
+      bind: (...bound: unknown[]) => {
+        values = bound;
+        return statement;
+      },
+      first: async () => {
+        if (sql.includes("FROM sqlite_master")) return { present: 52 };
+        return null;
+      },
+      all: async () => {
+        if (sql.includes("FROM research_rule_states")) {
+          return { results: [] };
+        }
+        if (
+          sql.includes("FROM research_v3_forecasts") &&
+          sql.includes("settled_at IS NULL")
+        ) {
+          return {
+            results: [{
+              run_id: this.snapshot.runId,
+              snapshot_json: JSON.stringify(this.snapshot),
+              review_json: null,
+              settled_at: null,
+            }],
+          };
+        }
+        if (sql.includes("FROM research_model_weights")) {
+          return {
+            results: values[1] === this.snapshot.engineVersion
+              ? this.priorEvidence
+              : [],
+          };
+        }
+        return { results: [] };
+      },
+      run: async () => {
+        if (sql.includes("INSERT OR IGNORE INTO research_settlement_claims")) {
+          if (this.claimed) return { meta: { changes: 0 } };
+          this.claimed = true;
+          return { meta: { changes: 1 } };
+        }
+        if (sql.includes("UPDATE research_v3_forecasts")) {
+          this.persistedReviewVersion = String(values[1]);
+          this.persistedReview = JSON.parse(String(values[2]));
+          return { meta: { changes: 1 } };
+        }
+        return { meta: { changes: 0 } };
+      },
+    };
+    return statement;
+  }
+
+  async batch(statements: Array<{ run(): Promise<unknown> }>) {
+    return Promise.all(statements.map((statement) => statement.run()));
+  }
+}
+
 let server: ViteDevServer;
 type Claim =
   | { status: "claimed" | "processing" | "conflict" | "unavailable" }
@@ -236,6 +346,31 @@ type StoreModule = {
     "created" | "existing" | "unavailable" | "invalid"
   >;
   countSettledResearchV3Forecasts(game: "new_macau"): Promise<number>;
+  readResearchV3Reviews(
+    game: "new_macau",
+    limit?: number,
+    scope?: "current" | "all",
+  ): Promise<any[]>;
+  readResearchV3Performance(game: "new_macau"): Promise<{
+    settledIssues: number;
+    settledEvents: number;
+    curve: Array<{ issue: string }>;
+  }>;
+  readLatestModelWeights(game: "new_macau"): Promise<Record<string, unknown>>;
+  readResearchRuleStates(game: "new_macau"): Promise<Record<string, unknown>>;
+  settleResearchV3Forecasts(
+    game: "new_macau",
+    draws: Array<{
+      game: "new_macau";
+      issue: string;
+      drawAt: string;
+      numbers: number[];
+      special: number;
+      source: string;
+      verified: boolean;
+    }>,
+    settledAt?: string,
+  ): Promise<"ok" | "unavailable">;
   readChampionChallengeState(game: "new_macau"): Promise<{
     champion: string;
     formalChampion: string | null;
@@ -281,6 +416,7 @@ type EngineModule = {
     targetIssue: string;
     expectedDrawAt: string;
     generatedAt: string;
+    previousWeights?: Record<string, Record<string, number>>;
   }): unknown;
 };
 let store: StoreModule;
@@ -358,6 +494,75 @@ function snapshotFixture(input: {
     },
     notice: "test fixture",
   };
+}
+
+function reviewFixture(input: {
+  reviewVersion: "research-event-review-v3" | "research-event-review-v4";
+  runId: string;
+  targetIssue: string;
+  settledAt: string;
+  slots: [string, string, string, string];
+}) {
+  return {
+    reviewVersion: input.reviewVersion,
+    runId: input.runId,
+    game: "new_macau",
+    targetIssue: input.targetIssue,
+    expectedDrawAt: input.settledAt,
+    frozenAt: "2026-08-01T12:00:00.000Z",
+    settledAt: input.settledAt,
+    hits: 2,
+    total: 4,
+    expectedHits: 2,
+    hitRate: 0.5,
+    baselineHitRate: 0.5,
+    brier: 0.2,
+    baselineBrier: 0.25,
+    brierSkill: 0.2,
+    logLoss: 0.6,
+    baselineLogLoss: 0.7,
+    logLossSkill: 1 - 0.6 / 0.7,
+    events: input.slots.map((slot, index) => ({
+      eventId: `${input.runId}:event:${index}`,
+      slot,
+      scopeLabel: slot.startsWith("position_") ? `第${index + 1}个正码` : "特码",
+      prediction: `${slot}:frozen-prediction`,
+    })),
+    learningRun: {
+      learningRunId: `learn_${input.runId}`,
+      runId: input.runId,
+      game: "new_macau",
+      settledIssue: input.targetIssue,
+      startedAt: input.settledAt,
+      completedAt: input.settledAt,
+      status: "completed",
+      championBefore: "baseline",
+      championAfter: "baseline",
+      challengerPromoted: false,
+      driftDetected: false,
+      summary: "fixture",
+    },
+    summary: "fixture",
+    nextAction: "fixture",
+  };
+}
+
+function addSettledReview(
+  db: FakeResearchD1,
+  engineVersion: string,
+  review: ReturnType<typeof reviewFixture>,
+) {
+  db.forecasts.set(review.runId, {
+    run_id: review.runId,
+    game: "new_macau",
+    target_issue: review.targetIssue,
+    expected_draw_at: review.expectedDrawAt,
+    engine_version: engineVersion,
+    snapshot_json: "{}",
+    frozen_at: review.frozenAt,
+    review_json: JSON.stringify(review),
+    settled_at: review.settledAt,
+  });
 }
 
 test("snapshot reader accepts frozen v3.0 ledgers but rejects unknown future engines", () => {
@@ -542,7 +747,7 @@ test("schema repair replaces the legacy forecast identity without rewriting snap
   assert.equal(db.forecasts.size, rowCountBeforeRepair);
 });
 
-test("settled and champion evidence excludes rows from prior engines", async () => {
+test("current performance and champion evidence exclude prior-engine rows", async () => {
   const db = new FakeResearchD1();
   const current = snapshotFixture({
     runId: "current-settled",
@@ -560,6 +765,20 @@ test("settled and champion evidence excludes rows from prior engines", async () 
     reviewVersion: "research-event-review-v3",
     slots: ["zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size"],
   });
+  const currentReview = reviewFixture({
+    reviewVersion: "research-event-review-v4",
+    runId: "current-settled",
+    targetIssue: "2026236",
+    settledAt: "2026-08-02T14:01:00.000Z",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "special_parity", "special_size"],
+  });
+  const priorReview = reviewFixture({
+    reviewVersion: "research-event-review-v3",
+    runId: "prior-settled",
+    targetIssue: "2026235",
+    settledAt: "2026-08-01T14:01:00.000Z",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size"],
+  });
   db.forecasts.set("current-settled", {
     run_id: "current-settled",
     game: "new_macau",
@@ -568,7 +787,7 @@ test("settled and champion evidence excludes rows from prior engines", async () 
     engine_version: current.engineVersion,
     snapshot_json: JSON.stringify(current),
     frozen_at: current.frozenAt,
-    review_json: null,
+    review_json: JSON.stringify(currentReview),
     settled_at: "2026-08-02T14:01:00.000Z",
   });
   db.forecasts.set("prior-settled", {
@@ -579,7 +798,7 @@ test("settled and champion evidence excludes rows from prior engines", async () 
     engine_version: prior.engineVersion,
     snapshot_json: JSON.stringify(prior),
     frozen_at: prior.frozenAt,
-    review_json: null,
+    review_json: JSON.stringify(priorReview),
     settled_at: "2026-08-01T14:01:00.000Z",
   });
   db.championEvidence = championRows(50).map((row) => ({
@@ -596,10 +815,172 @@ test("settled and champion evidence excludes rows from prior engines", async () 
   testRuntime.__marksixD1 = db;
 
   assert.equal(await store.countSettledResearchV3Forecasts("new_macau"), 1);
+  const performance = await store.readResearchV3Performance("new_macau");
+  assert.equal(performance.settledIssues, 1);
+  assert.equal(performance.settledEvents, 4);
+  assert.deepEqual(performance.curve.map((point) => point.issue), ["2026236"]);
   const challenge = await store.readChampionChallengeState("new_macau");
   assert.equal(challenge.sampleIssues, 0);
   assert.equal(challenge.champion, "baseline");
   assert.equal(challenge.formalChampion, null);
+});
+
+test("the audit reader keeps prior and current reviews while current scope isolates v3.2", async () => {
+  const db = new FakeResearchD1();
+  const prior = reviewFixture({
+    reviewVersion: "research-event-review-v3",
+    runId: "prior-audit",
+    targetIssue: "2026235",
+    settledAt: "2026-08-01T14:01:00.000Z",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size"],
+  });
+  const current = reviewFixture({
+    reviewVersion: "research-event-review-v4",
+    runId: "current-audit",
+    targetIssue: "2026236",
+    settledAt: "2026-08-02T14:01:00.000Z",
+    slots: ["zodiac_6_plus_1", "tail_6_plus_1", "special_parity", "special_size"],
+  });
+  addSettledReview(db, "high-probability-events-v3.1", prior);
+  addSettledReview(db, "high-probability-events-v3.2", current);
+  testRuntime.__marksixD1 = db;
+
+  const defaultAudit = await store.readResearchV3Reviews("new_macau", 10);
+  const explicitAudit = await store.readResearchV3Reviews("new_macau", 10, "all");
+  const currentOnly = await store.readResearchV3Reviews("new_macau", 10, "current");
+  assert.deepEqual(defaultAudit, explicitAudit);
+  assert.deepEqual(
+    explicitAudit.map((review) => review.reviewVersion).sort(),
+    ["research-event-review-v3", "research-event-review-v4"],
+  );
+  assert.deepEqual(
+    explicitAudit.flatMap((review) => review.events.map((event: any) => event.slot)),
+    [
+      "zodiac_6_plus_1", "tail_6_plus_1", "special_parity", "special_size",
+      "zodiac_6_plus_1", "tail_6_plus_1", "position_parity", "position_size",
+    ],
+  );
+  assert.deepEqual(currentOnly.map((review) => review.runId), ["current-audit"]);
+});
+
+test("current learning readers exclude legacy position slots without remapping them", async () => {
+  const db = new FakeResearchD1();
+  db.modelWeights = [
+    { slot: "zodiac_6_plus_1", model_id: "baseline", weight_after: 0.4 },
+    { slot: "tail_6_plus_1", model_id: "baseline", weight_after: 0.4 },
+    { slot: "special_parity", model_id: "baseline", weight_after: 0.35 },
+    { slot: "special_size", model_id: "baseline", weight_after: 0.35 },
+    { slot: "position_parity", model_id: "baseline", weight_after: 0.99 },
+    { slot: "position_size", model_id: "baseline", weight_after: 0.98 },
+  ];
+  db.ruleStates = [
+    {
+      slot: "special_parity",
+      rule_id: "current-rule",
+      triggers: 8,
+      hits: 5,
+      consecutive_hits: 1,
+      consecutive_misses: 0,
+      status: "active",
+    },
+    {
+      slot: "position_parity",
+      rule_id: "legacy-rule",
+      triggers: 80,
+      hits: 79,
+      consecutive_hits: 20,
+      consecutive_misses: 0,
+      status: "active",
+    },
+  ];
+  testRuntime.__marksixD1 = db;
+
+  const weights = await store.readLatestModelWeights("new_macau");
+  const ruleStates = await store.readResearchRuleStates("new_macau");
+  assert.deepEqual(Object.keys(weights), [
+    "zodiac_6_plus_1",
+    "tail_6_plus_1",
+    "special_parity",
+    "special_size",
+  ]);
+  assert.equal(weights.position_parity, undefined);
+  assert.deepEqual(Object.keys(ruleStates), ["special_parity"]);
+  assert.equal(ruleStates.position_parity, undefined);
+});
+
+test("settling a frozen prior-engine snapshot preserves its review version and evidence", async () => {
+  const generated = engine.buildResearchV3Snapshot({
+    game: "new_macau",
+    draws: engineHistory(60),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-08-02T14:00:00.000Z",
+    generatedAt: "2026-08-01T14:00:00.000Z",
+  }) as any;
+  const prior = structuredClone(generated);
+  prior.engineVersion = "high-probability-events-v3.1";
+  prior.modelVersion = "champion-challenger-v3.1-deadbeef";
+  prior.runId = "prior-settlement";
+  prior.events[2] = {
+    ...prior.events[2],
+    eventId: "prior-position-parity",
+    slot: "position_parity",
+    slotLabel: "指定位置单双",
+    scope: "main.position.3",
+    scopeLabel: "第3个正码",
+    predictedValue: "单",
+    predictionLabel: "下一期：第3个正码单",
+  };
+  prior.events[3] = {
+    ...prior.events[3],
+    eventId: "prior-position-size",
+    slot: "position_size",
+    slotLabel: "指定位置大小",
+    scope: "main.position.4",
+    scopeLabel: "第4个正码",
+    predictedValue: "大",
+    predictionLabel: "下一期：第4个正码大",
+  };
+  const db = new FakeSettlementD1(prior, championRows(50));
+  testRuntime.__marksixD1 = db;
+  delete testRuntime.__marksixResearchV3SchemaReady;
+
+  const result = await store.settleResearchV3Forecasts(
+    "new_macau",
+    [{
+      game: "new_macau",
+      issue: "2026999",
+      drawAt: "2026-08-02T14:00:00.000Z",
+      numbers: [1, 3, 25, 49, 8, 10],
+      special: 24,
+      source: "prior settlement regression",
+      verified: true,
+    }],
+    "2026-08-02T14:05:00.000Z",
+  );
+
+  assert.equal(result, "ok");
+  assert.equal(db.persistedReviewVersion, "research-event-review-v3");
+  assert.equal(db.persistedReview.reviewVersion, "research-event-review-v3");
+  assert.equal(db.persistedReview.learningRun.championAfter, "logistic");
+  assert.deepEqual(
+    db.persistedReview.events.slice(2).map((event: any) => ({
+      slot: event.slot,
+      scopeLabel: event.scopeLabel,
+      prediction: event.prediction,
+    })),
+    [
+      {
+        slot: "position_parity",
+        scopeLabel: "第3个正码",
+        prediction: "下一期：第3个正码单",
+      },
+      {
+        slot: "position_size",
+        scopeLabel: "第4个正码",
+        prediction: "下一期：第4个正码大",
+      },
+    ],
+  );
 });
 
 test("concurrent task claims allow exactly one learner and restore the immutable result", async () => {

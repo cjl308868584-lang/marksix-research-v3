@@ -303,7 +303,11 @@ export async function settleResearchV3Forecasts(
       const draw = verifiedByIssue.get(parsed.targetIssue);
       if (!draw) continue;
       const preliminaryReview = buildResearchV3Review(parsed, draw, settledAt);
-      const priorEvidenceRows = await readChampionEvidenceRows(db, parsed.game);
+      const priorEvidenceRows = await readChampionEvidenceRows(
+        db,
+        parsed.game,
+        parsed.engineVersion,
+      );
       const currentEvidenceRows: ChampionEvidenceRow[] = preliminaryReview.events
         .flatMap((event) => event.modelWeightsBefore.map((model) => ({
           target_issue: parsed.targetIssue,
@@ -316,7 +320,11 @@ export async function settleResearchV3Forecasts(
         ...priorEvidenceRows,
         ...currentEvidenceRows,
       ]);
-      const persistedChampion = await readPersistedFormalChampion(db, parsed.game);
+      const persistedChampion = await readPersistedFormalChampion(
+        db,
+        parsed.game,
+        parsed.engineVersion,
+      );
       const championDecision = withPersistedChampion(
         evaluatedDecision,
         persistedChampion,
@@ -342,7 +350,7 @@ export async function settleResearchV3Forecasts(
            WHERE run_id = ? AND settled_at IS NULL`,
         ).bind(
           JSON.stringify(review.actual),
-          RESEARCH_V3_REVIEW_VERSION,
+          review.reviewVersion,
           JSON.stringify(review),
           settledAt,
           parsed.runId,
@@ -819,18 +827,29 @@ CREATE UNIQUE INDEX IF NOT EXISTS rolling_pattern_review_score_issue_idx
 export async function readResearchV3Reviews(
   game: GameId,
   limit = 50,
+  scope: "current" | "all" = "all",
 ): Promise<ResearchV3Review[]> {
   const db = runtime.__marksixD1;
   if (!db) return [];
   const bounded = Math.max(1, Math.min(Math.floor(limit), 100));
   try {
-    const rows = await db.prepare(
-      `SELECT review_json
-       FROM research_v3_forecasts
-       WHERE game = ? AND settled_at IS NOT NULL AND review_json IS NOT NULL
-       ORDER BY expected_draw_at DESC
-       LIMIT ?`,
-    ).bind(game, bounded).all<{ review_json: string }>();
+    const rows = scope === "current"
+      ? await db.prepare(
+        `SELECT review_json
+         FROM research_v3_forecasts
+         WHERE game = ? AND engine_version = ?
+           AND settled_at IS NOT NULL AND review_json IS NOT NULL
+         ORDER BY expected_draw_at DESC
+         LIMIT ?`,
+      ).bind(game, RESEARCH_V3_ENGINE_VERSION, bounded)
+        .all<{ review_json: string }>()
+      : await db.prepare(
+        `SELECT review_json
+         FROM research_v3_forecasts
+         WHERE game = ? AND settled_at IS NOT NULL AND review_json IS NOT NULL
+         ORDER BY expected_draw_at DESC
+         LIMIT ?`,
+      ).bind(game, bounded).all<{ review_json: string }>();
     return (rows.results ?? [])
       .map((row) => parseJson(row.review_json))
       .filter(isResearchV3Review);
@@ -842,7 +861,7 @@ export async function readResearchV3Reviews(
 export async function readResearchV3Performance(
   game: GameId,
 ): Promise<ResearchV3Performance> {
-  const reviews = await readResearchV3Reviews(game, 100);
+  const reviews = await readResearchV3Reviews(game, 100, "current");
   return buildResearchV3Performance(game, reviews);
 }
 
@@ -892,6 +911,9 @@ export async function readLatestModelWeights(
     > = {};
     const seen = new Set<string>();
     for (const row of rows.results ?? []) {
+      if (!CURRENT_RESEARCH_EVENT_SLOTS.some((slot) => slot === row.slot)) {
+        continue;
+      }
       const key = `${row.slot}:${row.model_id}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -926,6 +948,9 @@ export async function readResearchRuleStates(
     }>();
     const result: ResearchRuleStateMap = {};
     for (const row of rows.results ?? []) {
+      if (!CURRENT_RESEARCH_EVENT_SLOTS.some((slot) => slot === row.slot)) {
+        continue;
+      }
       result[row.slot] ??= {};
       result[row.slot]![row.rule_id] = {
         ruleId: row.rule_id,
@@ -1054,7 +1079,11 @@ export async function readChampionChallengeState(game: GameId): Promise<{
   }
 }
 
-async function readChampionEvidenceRows(db: D1Database, game: GameId) {
+async function readChampionEvidenceRows(
+  db: D1Database,
+  game: GameId,
+  engineVersion: ResearchV3Snapshot["engineVersion"] = RESEARCH_V3_ENGINE_VERSION,
+) {
   const rows = await db.prepare(
     `SELECT mw.target_issue, mw.model_id, mw.probability, mw.status,
             es.actual_matched
@@ -1065,13 +1094,14 @@ async function readChampionEvidenceRows(db: D1Database, game: GameId) {
      WHERE mw.game = ? AND f.engine_version = ?
      ORDER BY es.scored_at DESC
      LIMIT 2000`,
-  ).bind(game, RESEARCH_V3_ENGINE_VERSION).all<ChampionEvidenceRow>();
+  ).bind(game, engineVersion).all<ChampionEvidenceRow>();
   return rows.results ?? [];
 }
 
 async function readPersistedFormalChampion(
   db: D1Database,
   game: GameId,
+  engineVersion: ResearchV3Snapshot["engineVersion"] = RESEARCH_V3_ENGINE_VERSION,
 ): Promise<ResearchExpertId | null> {
   const row = await db.prepare(
     `SELECT champion_after
@@ -1082,7 +1112,7 @@ async function readPersistedFormalChampion(
        AND challenger_promoted = 1
      ORDER BY completed_at DESC
      LIMIT 1`,
-  ).bind(game, RESEARCH_V3_ENGINE_VERSION).first<{
+  ).bind(game, engineVersion).first<{
     champion_after: ResearchExpertId;
   }>();
   return row?.champion_after ?? null;
