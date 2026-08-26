@@ -16,12 +16,33 @@ export function eventDisplay(event: ResearchEventForecast) {
     event.evidenceTier === "verified" ? "formal" : "abstain"
   );
   if (status === "formal") {
-    return { status, badge: "正式验证方向", probability: event.probability, probabilityLabel: "正式模型概率" };
+    return {
+      status,
+      badge: "正式验证方向",
+      probability: event.probability,
+      probabilityLabel: "正式模型概率",
+      rationale: event.rationale,
+      warning: event.warning,
+    };
   }
   if (status === "research_candidate") {
-    return { status, badge: "本期验证方向·研究候选", probability: event.experimentalProbability, probabilityLabel: "校准候选概率" };
+    return {
+      status,
+      badge: "本期验证方向·研究候选",
+      probability: event.experimentalProbability,
+      probabilityLabel: "校准候选概率",
+      rationale: "该方向已在开奖前冻结，供逐期前瞻验证；尚未证明优于随机基线。",
+      warning: "研究候选尚未达到正式晋级门槛，不构成正式模型优势。",
+    };
   }
-  return { status, badge: "本期验证方向·基线记录", probability: event.probability, probabilityLabel: "正式基线概率" };
+  return {
+    status,
+    badge: "本期验证方向·基线记录",
+    probability: event.probability,
+    probabilityLabel: "正式基线概率",
+    rationale: "该方向已在开奖前冻结，作为基线记录供客观结算。",
+    warning: "模型尚未证明优于随机基线；该方向仅作为基线记录，不构成正式模型优势。",
+  };
 }
 
 export function ResearchWorkspace() {
@@ -250,8 +271,8 @@ function EventCard({ event }: { event: ResearchEventForecast }) {
         </div>
       </div>
 
-      <p className="v3-rationale">{event.rationale}</p>
-      {event.warning && <div className="v3-warning">{event.warning}</div>}
+      <p className="v3-rationale">{display.rationale}</p>
+      {display.warning && <div className="v3-warning">{display.warning}</div>}
 
       <details className="v3-details">
         <summary>查看模型权重与快中慢证据 <span>展开</span></summary>

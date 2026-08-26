@@ -80,8 +80,13 @@ test("research UI displays every frozen direction with its evidence status", asy
   assert.match(workspace, /本期验证方向·研究候选/);
   assert.match(workspace, /本期验证方向·基线记录/);
   assert.match(workspace, /正式验证方向/);
+  assert.match(workspace, /className="v3-rationale">\{display\.rationale\}<\/p>/);
+  assert.match(workspace, /\{display\.warning && <div className="v3-warning">\{display\.warning\}<\/div>\}/);
   assert.doesNotMatch(workspace, /正式层暂无已验证方向/);
   assert.doesNotMatch(workspace, /不向本期给出方向/);
+  assert.doesNotMatch(workspace, /主动弃权/);
+  assert.doesNotMatch(workspace, /className="v3-rationale">\{event\.rationale\}<\/p>/);
+  assert.doesNotMatch(workspace, /\{event\.warning && <div className="v3-warning">\{event\.warning\}<\/div>\}/);
   assert.match(workspace, /多源一致/);
   assert.match(engine, /calibrated_absolute_probability/);
   assert.doesNotMatch(review, /20期/);
