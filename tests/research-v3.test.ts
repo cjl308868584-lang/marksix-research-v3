@@ -142,28 +142,39 @@ test("special parity and size use exact 01-49 boundaries", () => {
     expectedDrawAt: drawAt,
     generatedAt: "2026-09-30T10:00:00.000Z",
   });
-  const settle = (special: number) => {
-    const review = buildReview(
+  const cases = [
+    {
+      special: 24,
+      expected: { special_parity: "双", special_size: "小" },
+    },
+    {
+      special: 25,
+      expected: { special_parity: "单", special_size: "大" },
+    },
+  ] as const;
+  const settled = cases.map(({ special, expected }) => ({
+    expected,
+    review: buildReview(
       snapshot,
       verifiedDraw({ issue: "2026999", special }),
       "2026-10-01T22:00:00+08:00",
-    );
-    return Object.fromEntries(
-      review.events
-        .filter((event: any) =>
-          event.slot === "special_parity" || event.slot === "special_size"
-        )
-        .map((event: any) => [event.slot, event.actualLabel]),
-    );
-  };
-  assert.deepEqual(settle(24), {
-    special_parity: "双",
-    special_size: "小",
-  });
-  assert.deepEqual(settle(25), {
-    special_parity: "单",
-    special_size: "大",
-  });
+    ),
+  }));
+  for (const slot of ["special_parity", "special_size"] as const) {
+    const forecast = snapshot.events.find((event: any) => event.slot === slot);
+    assert.ok(forecast);
+    const matches = settled.map(({ expected, review }) => {
+      const event = review.events.find((item: any) => item.slot === slot);
+      assert.ok(event);
+      assert.equal(event.actualLabel, expected[slot]);
+      assert.equal(
+        event.actualMatched,
+        forecast.predictedValue === expected[slot],
+      );
+      return event.actualMatched;
+    });
+    assert.deepEqual([...matches].sort(), [false, true]);
+  }
 });
 
 test("changing main numbers cannot change special slot settlement", () => {
