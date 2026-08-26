@@ -5,8 +5,8 @@ import {
 } from "./lottery";
 import { ZODIAC_NAMES } from "./zodiac";
 import {
-  RESEARCH_V3_ENGINE_VERSION,
-  RESEARCH_V3_MODEL_VERSION,
+  RESEARCH_V3_PRIOR_ENGINE_VERSION,
+  RESEARCH_V3_PRIOR_MODEL_VERSION,
   RESEARCH_V3_SCHEMA_VERSION,
   type ResearchEventFamily,
   type ResearchEventForecast,
@@ -207,12 +207,12 @@ export function buildResearchV3Snapshot({
       )
     ).join("|"),
   )}`;
-  const modelVersion = `${RESEARCH_V3_MODEL_VERSION}-${datasetVersion.slice(-8)}`;
+  const modelVersion = `${RESEARCH_V3_PRIOR_MODEL_VERSION}-${datasetVersion.slice(-8)}`;
   const formal = selected.every((event) => event.evidenceTier === "verified");
 
   return {
     schemaVersion: RESEARCH_V3_SCHEMA_VERSION,
-    engineVersion: RESEARCH_V3_ENGINE_VERSION,
+    engineVersion: RESEARCH_V3_PRIOR_ENGINE_VERSION,
     modelVersion,
     runId: `rv3_${game}_${targetIssue}_${stableHash(
       `${datasetVersion}:${expectedDrawAt}:${modelVersion}`,

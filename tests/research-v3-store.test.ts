@@ -104,7 +104,25 @@ type StoreModule = {
     randomChampionPercentile: number;
   };
 };
+type EngineModule = {
+  buildResearchV3Snapshot(input: {
+    game: "new_macau";
+    draws: Array<{
+      game: "new_macau";
+      issue: string;
+      drawAt: string;
+      numbers: number[];
+      special: number;
+      source: string;
+      verified: boolean;
+    }>;
+    targetIssue: string;
+    expectedDrawAt: string;
+    generatedAt: string;
+  }): unknown;
+};
 let store: StoreModule;
+let engine: EngineModule;
 const testRuntime = globalThis as typeof globalThis & {
   __marksixD1?: unknown;
   __marksixResearchV3SchemaReady?: unknown;
@@ -119,6 +137,7 @@ before(async () => {
     logLevel: "silent",
   });
   store = await server.ssrLoadModule("/lib/research-v3-store.ts") as StoreModule;
+  engine = await server.ssrLoadModule("/lib/research-v3-engine.ts") as EngineModule;
 });
 
 after(async () => {
@@ -197,6 +216,38 @@ test("v3.2 requires the two special-only slots while v3.1 stays readable", () =>
     frozenAt: current.expectedDrawAt,
   }), false);
 });
+
+test("engine-generated legacy slots remain valid until special-slot generation ships", () => {
+  const snapshot = engine.buildResearchV3Snapshot({
+    game: "new_macau",
+    draws: engineHistory(60),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-08-02T14:00:00.000Z",
+    generatedAt: "2026-08-01T14:00:00.000Z",
+  }) as { engineVersion: unknown; modelVersion: unknown };
+
+  assert.equal(snapshot.engineVersion, "high-probability-events-v3.1");
+  assert.match(String(snapshot.modelVersion), /^champion-challenger-v3\.1-/);
+  assert.equal(store.isResearchV3Snapshot(snapshot), true);
+});
+
+function engineHistory(count: number) {
+  const start = Date.parse("2026-01-01T21:32:32+08:00");
+  return Array.from({ length: count }, (_, index) => {
+    const pool = Array.from({ length: 49 }, (__, numberIndex) => numberIndex + 1);
+    const shift = (index * 11) % 49;
+    const ordered = [...pool.slice(shift), ...pool.slice(0, shift)];
+    return {
+      game: "new_macau" as const,
+      issue: String(2026001 + index),
+      drawAt: new Date(start + index * 86_400_000).toISOString(),
+      numbers: ordered.slice(0, 6),
+      special: ordered[6],
+      source: "engine-store regression",
+      verified: index >= count - 60,
+    };
+  });
+}
 
 test("a warm research database does not replay schema DDL in a fresh isolate", async () => {
   const prepared: string[] = [];
