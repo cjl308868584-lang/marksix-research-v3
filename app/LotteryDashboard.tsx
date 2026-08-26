@@ -346,7 +346,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
           <div className="hero-copy">
             <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · EVENT RESEARCH</div>
             <h1>让每一期数据<br />都有可解释的结论</h1>
-            <p>香港与新澳门双彩开奖数据实时校验，集中研究6+1生肖、尾数、指定位置单双与大小，并在每期开奖后自动复盘学习。</p>
+            <p>香港与新澳门双彩开奖数据实时校验，集中研究6+1生肖、6+1尾数、特码单双与特码大小，并在每期开奖后自动复盘学习。</p>
             <div className="hero-actions">
               <a className="primary-action" href="/research">进入高概率策略 <span>→</span></a>
               <a className="ghost-action" href="/learning">逐期学习中心</a>

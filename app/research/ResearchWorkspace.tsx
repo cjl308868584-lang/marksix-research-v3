@@ -11,6 +11,19 @@ import type {
 
 const GAMES: readonly GameId[] = ["new_macau", "hk"];
 
+export function eventDisplay(event: ResearchEventForecast) {
+  const status = event.decisionStatus ?? (
+    event.evidenceTier === "verified" ? "formal" : "abstain"
+  );
+  if (status === "formal") {
+    return { status, badge: "正式验证方向", probability: event.probability, probabilityLabel: "正式模型概率" };
+  }
+  if (status === "research_candidate") {
+    return { status, badge: "本期验证方向·研究候选", probability: event.experimentalProbability, probabilityLabel: "校准候选概率" };
+  }
+  return { status, badge: "本期验证方向·基线记录", probability: event.probability, probabilityLabel: "正式基线概率" };
+}
+
 export function ResearchWorkspace() {
   const [game, setGame] = useState<GameId>("new_macau");
   const [snapshot, setSnapshot] = useState<ResearchV3Snapshot | null>(null);
@@ -81,8 +94,8 @@ export function ResearchWorkspace() {
           <span>HIGH-PROBABILITY EVENTS · ONLINE LEARNING</span>
           <h1>不猜号码，<br />只研究高概率事件</h1>
           <p>
-            每期只冻结四项40%–70%基线策略。开奖后全部交卷，
-            再更新规则、模型权重和下一期概率。
+            每期固定冻结 6+1生肖、6+1尾数、特码单双、特码大小四个方向。
+            开奖后全部交卷，再更新规则、模型权重和下一期概率。
           </p>
           <div className="v3-game-switch" role="group" aria-label="选择彩种">
             {GAMES.map((item) => (
@@ -131,8 +144,8 @@ export function ResearchWorkspace() {
             </section>
 
             <section className="v3-event-grid" aria-label="下一期四项高概率策略">
-              {snapshot.events.map((event, index) => (
-                <EventCard event={event} rank={index + 1} key={event.eventId} />
+              {snapshot.events.map((event) => (
+                <EventCard event={event} key={event.eventId} />
               ))}
             </section>
 
@@ -176,64 +189,48 @@ function RunContext({ snapshot }: { snapshot: ResearchV3Snapshot }) {
   );
 }
 
-function EventCard({
-  event,
-  rank,
-}: {
-  event: ResearchEventForecast;
-  rank: number;
-}) {
-  const decisionStatus = event.decisionStatus ?? (
-    event.evidenceTier === "verified" ? "formal" : "abstain"
-  );
-  const isFormal = decisionStatus === "formal";
-  const isCandidate = decisionStatus === "research_candidate";
+function EventCard({ event }: { event: ResearchEventForecast }) {
+  const display = eventDisplay(event);
+  const isCandidate = display.status === "research_candidate";
   return (
-    <article className={`v3-event-card ${decisionStatus}`}>
+    <article className={`v3-event-card ${display.status}`}>
       <header>
         <div>
-          <span>{String(rank).padStart(2, "0")} · {event.slotLabel}</span>
-          <h2>{isFormal ? event.predictionLabel : "正式层暂无已验证方向"}</h2>
-          <p>{event.scopeLabel} · {isFormal ? evidenceLabel(event.evidenceTier) : "精确随机基线"}</p>
+          <span>{display.badge}</span>
+          <h2>{event.predictionLabel}</h2>
+          <p>{event.scopeLabel} · {evidenceLabel(event.evidenceTier)}</p>
         </div>
         <div className="v3-probability">
-          <strong>{percent(event.probability)}</strong>
-          <span>{event.evidenceTier === "verified" ? "正式模型概率" : "正式基线概率"}</span>
+          <strong>{percent(display.probability)}</strong>
+          <span>{display.probabilityLabel}</span>
         </div>
       </header>
 
       {isCandidate && (
         <div className="v3-decision v3-research-candidate">
           <span>研究候选</span>
-          <strong>{event.predictionLabel}</strong>
-          <p>校准绝对概率 {percent(event.experimentalProbability)}；仅供前瞻验证，不属于正式预测。</p>
+          <strong>尚未证明优于随机基线</strong>
+          <p>开奖前冻结供逐期验证，尚未达到正式晋级门槛</p>
         </div>
       )}
-      {!isFormal && !isCandidate && (
+      {display.status === "abstain" && (
         <div className="v3-decision v3-abstain">
-          <span>研究层主动弃权</span>
-          <strong>滚动回测尚未稳定超过随机基线</strong>
-          <p>系统仍保存基线评分，但不向本期给出方向。</p>
+          <span>基线记录</span>
+          <strong>尚未证明优于随机基线</strong>
+          <p>模型尚未证明优于随机基线，本期仍保存该方向供客观结算。</p>
         </div>
       )}
 
       <div className="v3-probability-track" aria-label="预测概率对比">
-        <div style={{ width: `${event.probability * 100}%` }} />
+        <div style={{ width: `${display.probability * 100}%` }} />
         <i style={{ left: `${event.baselineProbability * 100}%` }} />
       </div>
       <div className="v3-baseline-row">
         <span>随机基线 {percent(event.baselineProbability)}</span>
-        <strong className={event.uplift > 0 ? "good" : "bad"}>
-          {signedPoints(event.uplift)}
+        <strong className={(isCandidate ? event.experimentalUplift : event.uplift) > 0 ? "good" : "bad"}>
+          {signedPoints(isCandidate ? event.experimentalUplift : event.uplift)}
         </strong>
       </div>
-
-      {isCandidate && (
-        <div className="v3-baseline-row">
-          <span>研究候选概率 {percent(event.experimentalProbability ?? event.probability)}</span>
-          <strong>{signedPoints(event.experimentalUplift ?? 0)}</strong>
-        </div>
-      )}
 
       <div className="v3-event-kpis">
         <div>

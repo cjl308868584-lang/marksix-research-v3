@@ -70,14 +70,18 @@ test("server-renders the dedicated rule research workspace", async () => {
   assert.match(html, /正在读取冻结策略与学习状态/);
 });
 
-test("research UI separates formal abstention from multi-source research candidates", async () => {
+test("research UI displays every frozen direction with its evidence status", async () => {
   const [workspace, engine, review] = await Promise.all([
     readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/research-v3-engine.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/research-v3-review.ts", import.meta.url), "utf8"),
   ]);
-  assert.match(workspace, /正式层暂无已验证方向/);
-  assert.match(workspace, /研究候选/);
+  assert.match(workspace, /<h2>\{event\.predictionLabel\}<\/h2>/);
+  assert.match(workspace, /本期验证方向·研究候选/);
+  assert.match(workspace, /本期验证方向·基线记录/);
+  assert.match(workspace, /正式验证方向/);
+  assert.doesNotMatch(workspace, /正式层暂无已验证方向/);
+  assert.doesNotMatch(workspace, /不向本期给出方向/);
   assert.match(workspace, /多源一致/);
   assert.match(engine, /calibrated_absolute_probability/);
   assert.doesNotMatch(review, /20期/);
@@ -429,7 +433,7 @@ test("keeps the product implementation free of starter preview artifacts", async
   );
   assert.match(researchWorkspace, /不猜号码/);
   assert.match(researchWorkspace, /下一期固定四项/);
-  assert.match(researchWorkspace, /每期只冻结四项40%/);
+  assert.match(researchWorkspace, /每期固定冻结 6\+1生肖、6\+1尾数、特码单双、特码大小四个方向/);
   assert.match(researchWorkspace, /随机基线/);
   assert.match(researchWorkspace, /Brier skill/);
   assert.match(researchWorkspace, /逐期开奖学习闭环/);
