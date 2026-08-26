@@ -405,18 +405,29 @@ test("v3.2 requires the two special-only slots while v3.1 stays readable", () =>
   }), false);
 });
 
-test("engine-generated legacy slots remain valid until special-slot generation ships", () => {
+test("engine-generated special slots are accepted as the current snapshot", () => {
   const snapshot = engine.buildResearchV3Snapshot({
     game: "new_macau",
     draws: engineHistory(60),
     targetIssue: "2026999",
     expectedDrawAt: "2026-08-02T14:00:00.000Z",
     generatedAt: "2026-08-01T14:00:00.000Z",
-  }) as { engineVersion: unknown; modelVersion: unknown };
+  }) as {
+    engineVersion: unknown;
+    modelVersion: unknown;
+    events: Array<{ slot: unknown }>;
+  };
 
-  assert.equal(snapshot.engineVersion, "high-probability-events-v3.1");
-  assert.match(String(snapshot.modelVersion), /^champion-challenger-v3\.1-/);
+  assert.equal(snapshot.engineVersion, "high-probability-events-v3.2");
+  assert.match(String(snapshot.modelVersion), /^champion-challenger-v3\.2-/);
+  assert.deepEqual(snapshot.events.map((event) => event.slot), [
+    "zodiac_6_plus_1",
+    "tail_6_plus_1",
+    "special_parity",
+    "special_size",
+  ]);
   assert.equal(store.isResearchV3Snapshot(snapshot), true);
+  assert.equal(store.isCurrentResearchV3Snapshot(snapshot), true);
 });
 
 function engineHistory(count: number) {

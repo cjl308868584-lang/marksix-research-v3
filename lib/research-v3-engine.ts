@@ -5,9 +5,11 @@ import {
 } from "./lottery";
 import { ZODIAC_NAMES } from "./zodiac";
 import {
-  RESEARCH_V3_PRIOR_ENGINE_VERSION,
-  RESEARCH_V3_PRIOR_MODEL_VERSION,
+  CURRENT_RESEARCH_EVENT_SLOTS,
+  RESEARCH_V3_ENGINE_VERSION,
+  RESEARCH_V3_MODEL_VERSION,
   RESEARCH_V3_SCHEMA_VERSION,
+  type CurrentResearchEventSlot,
   type ResearchEventFamily,
   type ResearchEventForecast,
   type ResearchEventHistory,
@@ -89,7 +91,7 @@ export function toPublicResearchV3Snapshot(
 }
 
 type Candidate = {
-  slot: ResearchEventSlot;
+  slot: CurrentResearchEventSlot;
   scope: ResearchEventScope;
   family: ResearchEventFamily;
   value: string;
@@ -159,14 +161,7 @@ export function buildResearchV3Snapshot({
         left.issue.localeCompare(right.issue, "en", { numeric: true }),
     );
   const candidates = eventCandidates();
-  const selected = (
-    [
-      "zodiac_6_plus_1",
-      "tail_6_plus_1",
-      "position_parity",
-      "position_size",
-    ] as const
-  ).map((slot) => {
+  const selected = CURRENT_RESEARCH_EVENT_SLOTS.map((slot) => {
     const evaluations = candidates
       .filter((candidate) => candidate.slot === slot)
       .map((candidate) =>
@@ -207,12 +202,12 @@ export function buildResearchV3Snapshot({
       )
     ).join("|"),
   )}`;
-  const modelVersion = `${RESEARCH_V3_PRIOR_MODEL_VERSION}-${datasetVersion.slice(-8)}`;
+  const modelVersion = `${RESEARCH_V3_MODEL_VERSION}-${datasetVersion.slice(-8)}`;
   const formal = selected.every((event) => event.evidenceTier === "verified");
 
   return {
     schemaVersion: RESEARCH_V3_SCHEMA_VERSION,
-    engineVersion: RESEARCH_V3_PRIOR_ENGINE_VERSION,
+    engineVersion: RESEARCH_V3_ENGINE_VERSION,
     modelVersion,
     runId: `rv3_${game}_${targetIssue}_${stableHash(
       `${datasetVersion}:${expectedDrawAt}:${modelVersion}`,
@@ -396,42 +391,33 @@ function eventCandidates(): Candidate[] {
       value: `${index}尾`,
     })),
   ];
-  const scopes = [
-    "special",
-    "main.position.1",
-    "main.position.2",
-    "main.position.3",
-    "main.position.4",
-    "main.position.5",
-    "main.position.6",
-  ] as const;
-  const positionEvents = scopes.flatMap((scope) => [
+  const fixedCandidates: Candidate[] = [
     {
-      slot: "position_parity" as const,
-      scope,
-      family: "parity" as const,
+      slot: "special_parity",
+      scope: "special",
+      family: "parity",
       value: "单",
     },
     {
-      slot: "position_parity" as const,
-      scope,
-      family: "parity" as const,
+      slot: "special_parity",
+      scope: "special",
+      family: "parity",
       value: "双",
     },
     {
-      slot: "position_size" as const,
-      scope,
-      family: "size" as const,
-      value: "大",
-    },
-    {
-      slot: "position_size" as const,
-      scope,
-      family: "size" as const,
+      slot: "special_size",
+      scope: "special",
+      family: "size",
       value: "小",
     },
-  ]);
-  return [...coverage, ...positionEvents];
+    {
+      slot: "special_size",
+      scope: "special",
+      family: "size",
+      value: "大",
+    },
+  ];
+  return [...coverage, ...fixedCandidates];
 }
 
 function evaluateCandidate(
@@ -1022,14 +1008,15 @@ function categoryValue(
 }
 
 function slotLabel(slot: ResearchEventSlot) {
-  return {
+  const labels: Record<CurrentResearchEventSlot, string> = {
     zodiac_6_plus_1: "6+1生肖覆盖",
     tail_6_plus_1: "6+1尾数覆盖",
     special_parity: "特码单双",
     special_size: "特码大小",
-    position_parity: "指定位置单双",
-    position_size: "指定位置大小",
-  }[slot];
+  };
+  if (slot === "position_parity") return "指定位置单双";
+  if (slot === "position_size") return "指定位置大小";
+  return labels[slot];
 }
 
 function scopeLabel(scope: ResearchEventScope) {
@@ -1041,6 +1028,9 @@ function scopeLabel(scope: ResearchEventScope) {
 function predictionLabel(candidate: Candidate) {
   if (candidate.scope === "draw.6_plus_1") {
     return `下一期6+1至少出现一次${candidate.value}`;
+  }
+  if (candidate.scope === "special") {
+    return `下一期：特码${candidate.value}`;
   }
   return `下一期${scopeLabel(candidate.scope)}：${candidate.value}`;
 }

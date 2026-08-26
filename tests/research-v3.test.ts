@@ -80,13 +80,15 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
     generatedAt: "2026-09-30T10:00:00.000Z",
   });
   assert.equal(snapshot.schemaVersion, "3");
+  assert.equal(snapshot.engineVersion, "high-probability-events-v3.2");
+  assert.match(snapshot.modelVersion, /^champion-challenger-v3\.2-/);
   assert.deepEqual(
     snapshot.events.map((event: any) => event.slot),
     [
       "zodiac_6_plus_1",
       "tail_6_plus_1",
-      "position_parity",
-      "position_size",
+      "special_parity",
+      "special_size",
     ],
   );
   for (const event of snapshot.events) {
@@ -103,6 +105,105 @@ test("v3 freezes exactly four high-probability events and never predicts numbers
     assert.equal(event.experts.length, 4);
   }
   assert.equal(snapshot.learningSummary.champion, "baseline");
+});
+
+test("special-only slots never select a main-number position", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const parity = snapshot.events.find((event: any) =>
+    event.slot === "special_parity"
+  );
+  const size = snapshot.events.find((event: any) =>
+    event.slot === "special_size"
+  );
+  assert.equal(parity?.scope, "special");
+  assert.equal(size?.scope, "special");
+  assert.match(parity?.predictionLabel, /^下一期：特码(单|双)$/);
+  assert.match(size?.predictionLabel, /^下一期：特码(大|小)$/);
+  assert.doesNotMatch(JSON.stringify([parity, size]), /main\.position/);
+});
+
+test("special parity and size use exact 01-49 boundaries", () => {
+  const drawAt = "2026-10-01T21:32:32+08:00";
+  assert.equal(baseline("special", "parity", "单", drawAt), 25 / 49);
+  assert.equal(baseline("special", "parity", "双", drawAt), 24 / 49);
+  assert.equal(baseline("special", "size", "大", drawAt), 25 / 49);
+  assert.equal(baseline("special", "size", "小", drawAt), 24 / 49);
+
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: drawAt,
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const settle = (special: number) => {
+    const review = buildReview(
+      snapshot,
+      verifiedDraw({ issue: "2026999", special }),
+      "2026-10-01T22:00:00+08:00",
+    );
+    return Object.fromEntries(
+      review.events
+        .filter((event: any) =>
+          event.slot === "special_parity" || event.slot === "special_size"
+        )
+        .map((event: any) => [event.slot, event.actualLabel]),
+    );
+  };
+  assert.deepEqual(settle(24), {
+    special_parity: "双",
+    special_size: "小",
+  });
+  assert.deepEqual(settle(25), {
+    special_parity: "单",
+    special_size: "大",
+  });
+});
+
+test("changing main numbers cannot change special slot settlement", () => {
+  const snapshot = buildSnapshot({
+    game: "new_macau",
+    draws: makeHistory(160),
+    targetIssue: "2026999",
+    expectedDrawAt: "2026-10-01T21:32:32+08:00",
+    generatedAt: "2026-09-30T10:00:00.000Z",
+  });
+  const drawA = verifiedDraw({
+    issue: "2026999",
+    numbers: [1, 2, 3, 4, 5, 6],
+    special: 25,
+  });
+  const drawB = verifiedDraw({
+    issue: "2026999",
+    numbers: [44, 45, 46, 47, 48, 49],
+    special: 25,
+  });
+  const settledA = buildReview(
+    snapshot,
+    drawA,
+    "2026-10-01T22:00:00+08:00",
+  );
+  const settledB = buildReview(
+    snapshot,
+    drawB,
+    "2026-10-01T22:00:00+08:00",
+  );
+  for (const slot of ["special_parity", "special_size"]) {
+    const eventA = settledA.events.find((event: any) => event.slot === slot);
+    const eventB = settledB.events.find((event: any) => event.slot === slot);
+    assert.ok(eventA);
+    assert.ok(eventB);
+    assert.equal(
+      eventA.actualMatched,
+      eventB.actualMatched,
+    );
+  }
 });
 
 test("candidate selection prefers calibrated absolute probability over relative uplift", () => {
@@ -602,4 +703,24 @@ function makeHistory(count: number): Draw[] {
       verified: index >= count - 60,
     };
   });
+}
+
+function verifiedDraw({
+  issue,
+  numbers = [1, 2, 3, 4, 5, 6],
+  special,
+}: {
+  issue: string;
+  numbers?: number[];
+  special: number;
+}): Draw {
+  return {
+    game: "new_macau",
+    issue,
+    drawAt: "2026-10-01T21:32:32+08:00",
+    numbers,
+    special,
+    source: "双源一致测试",
+    verified: true,
+  };
 }
