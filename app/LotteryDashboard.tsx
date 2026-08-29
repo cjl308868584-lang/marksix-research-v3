@@ -731,7 +731,7 @@ export function LiveStagePredictionPanel({
             value={prediction.coverageZodiacs}
             onChange={(event) => update("coverageZodiacs", event.target.value)}
           />
-          <small>{invalid.coverageZodiacs.length ? `无效：${invalid.coverageZodiacs.join("、")}` : "正码＋特码，逗号分隔"}</small>
+          <small>{invalid.coverageZodiacs.length ? `无效：${invalid.coverageZodiacs.join("、")}` : "正码＋特码，逗号或句点分隔"}</small>
         </label>
         <label>
           <span>6+1尾数</span>
@@ -743,7 +743,7 @@ export function LiveStagePredictionPanel({
             value={prediction.coverageTails}
             onChange={(event) => update("coverageTails", event.target.value)}
           />
-          <small>{invalid.coverageTails.length ? `无效：${invalid.coverageTails.join("、")}` : "正码＋特码，逗号分隔"}</small>
+          <small>{invalid.coverageTails.length ? `无效：${invalid.coverageTails.join("、")}` : "正码＋特码，逗号或句点分隔"}</small>
         </label>
         <label>
           <span>特码生肖</span>
@@ -755,7 +755,7 @@ export function LiveStagePredictionPanel({
             value={prediction.specialZodiacs}
             onChange={(event) => update("specialZodiacs", event.target.value)}
           />
-          <small>{invalid.specialZodiacs.length ? `无效：${invalid.specialZodiacs.join("、")}` : "只看特码，逗号分隔"}</small>
+          <small>{invalid.specialZodiacs.length ? `无效：${invalid.specialZodiacs.join("、")}` : "只看特码，逗号或句点分隔"}</small>
         </label>
         <label>
           <span>特码数字</span>
@@ -767,7 +767,7 @@ export function LiveStagePredictionPanel({
             value={prediction.specialNumbers}
             onChange={(event) => update("specialNumbers", event.target.value)}
           />
-          <small>{invalid.specialNumbers.length ? `无效：${invalid.specialNumbers.join("、")}` : "01–49，逗号分隔"}</small>
+          <small>{invalid.specialNumbers.length ? `无效：${invalid.specialNumbers.join("、")}` : "01–49，逗号或句点分隔"}</small>
         </label>
       </div>
       {filled > 0 && (

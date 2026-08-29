@@ -32,6 +32,28 @@ test("批量输入支持中英文逗号、空格、尾字和自动去重", () =>
   });
 });
 
+test("批量输入支持英文句点和中文句号分隔", () => {
+  const parsed = parseLiveStagePrediction({
+    coverageZodiacs: "蛇.龙。虎",
+    coverageTails: "1尾.7尾。9尾",
+    specialZodiacs: "兔.猴。马",
+    specialNumbers: "05.17。27",
+  });
+
+  assert.deepEqual(parsed.values, {
+    coverageZodiacs: ["蛇", "龙", "虎"],
+    coverageTails: [1, 7, 9],
+    specialZodiacs: ["兔", "猴", "马"],
+    specialNumbers: [5, 17, 27],
+  });
+  assert.deepEqual(parsed.invalid, {
+    coverageZodiacs: [],
+    coverageTails: [],
+    specialZodiacs: [],
+    specialNumbers: [],
+  });
+});
+
 test("无效批量内容会单独返回且不阻止有效项参与匹配", () => {
   const parsed = parseLiveStagePrediction({
     coverageZodiacs: "蛇,猫",

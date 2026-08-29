@@ -42,7 +42,7 @@ export type LiveStagePredictionResult = {
 const zodiacNames = new Set<string>(ZODIAC_NAMES);
 
 function tokens(value: string): string[] {
-  return [...new Set(value.trim().split(/[,，、\s]+/u).filter(Boolean))];
+  return [...new Set(value.trim().split(/[,，、\.。\s]+/u).filter(Boolean))];
 }
 
 function partition<T>(
