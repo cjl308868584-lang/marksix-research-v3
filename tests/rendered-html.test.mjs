@@ -45,6 +45,7 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
   assert.match(html, /进入高概率策略/);
+  assert.match(html, /填写我的开奖预想/);
   assert.match(html, /href="\/research"/);
   assert.match(html, /近30期条件规律/);
   assert.match(html, /href="\/patterns"/);
