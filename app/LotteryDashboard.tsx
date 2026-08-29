@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
 import {
   AI_FOCUS_OPTIONS,
@@ -42,11 +41,12 @@ import {
 } from "../lib/lottery";
 import { mergeDrawLists } from "../lib/draw-merge";
 import {
+  getLiveStageWinningNumbers,
   matchLiveStagePrediction,
+  parseLiveStagePrediction,
   type LiveStagePrediction,
   type LiveStagePredictionHit,
 } from "../lib/live-stage-prediction";
-import { ZODIAC_NAMES } from "../lib/zodiac";
 
 type ApiPayload = {
   game: GameId;
@@ -117,10 +117,10 @@ const LIVE_POLL_MS = 3_000;
 const BACKGROUND_POLL_MS = 60_000;
 const VISIBLE_GAME_IDS: readonly GameId[] = ["new_macau", "hk"];
 const EMPTY_LIVE_STAGE_PREDICTION: LiveStagePrediction = {
-  coverageZodiac: "",
-  coverageTail: null,
-  specialZodiac: "",
-  specialNumber: null,
+  coverageZodiacs: "",
+  coverageTails: "",
+  specialZodiacs: "",
+  specialNumbers: "",
 };
 
 export function LotteryDashboard({ initialNow }: { initialNow: string }) {
@@ -346,7 +346,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
   const stageVisible = demo || manualStage || liveWindow.visible;
   const stageReveal = demo ? revealed : realReveal.key === realRevealKey ? realReveal.count : 0;
   const predictionCount = Object.values(prediction).filter(
-    (value) => value !== "" && value !== null,
+    (value) => value.trim() !== "",
   ).length;
   const orderedGames = [
     selectedGame,
@@ -575,12 +575,12 @@ function LiveStage({
   const [specialRevealed, setSpecialRevealed] = useState(false);
   const [celebrationHits, setCelebrationHits] = useState<LiveStagePredictionHit[]>([]);
   const [celebrationVisible, setCelebrationVisible] = useState(false);
-  const celebratedKeyRef = useRef("");
+  const celebratedHitsRef = useRef(new Set<string>());
   const predictionSignature = [
-    prediction.coverageZodiac,
-    prediction.coverageTail ?? "",
-    prediction.specialZodiac,
-    prediction.specialNumber ?? "",
+    prediction.coverageZodiacs,
+    prediction.coverageTails,
+    prediction.specialZodiacs,
+    prediction.specialNumbers,
   ].join(":");
   const revealedNumbers = useMemo(
     () => progress
@@ -597,31 +597,37 @@ function LiveStage({
     }),
     [drawAt, prediction, revealedNumbers, slots, specialRevealed],
   );
+  const winningNumbers = useMemo(
+    () => new Set(getLiveStageWinningNumbers(prediction, {
+      drawAt,
+      revealedNumbers,
+      special: typeof slots[6] === "number" ? slots[6] : null,
+      specialRevealed,
+    })),
+    [drawAt, prediction, revealedNumbers, slots, specialRevealed],
+  );
   const celebrationKey = `${predictionSessionKey}:${predictionSignature}`;
 
   useEffect(() => {
-    if (!hits.length || celebratedKeyRef.current === celebrationKey) return;
-    celebratedKeyRef.current = celebrationKey;
-    setCelebrationHits(hits);
+    const freshHits = hits.filter((hit) => {
+      const key = `${celebrationKey}:${hit.kind}:${hit.label}`;
+      if (celebratedHitsRef.current.has(key)) return false;
+      celebratedHitsRef.current.add(key);
+      return true;
+    });
+    if (!freshHits.length) return;
+    setCelebrationHits(freshHits);
     setCelebrationVisible(true);
   }, [celebrationKey, hits]);
 
   useEffect(() => {
     if (!celebrationVisible) return;
-    const timer = window.setTimeout(() => setCelebrationVisible(false), 6_500);
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setCelebrationVisible(false);
-    };
-    window.addEventListener("keydown", dismissOnEscape);
-    return () => {
-      window.clearTimeout(timer);
-      window.removeEventListener("keydown", dismissOnEscape);
-    };
+    const timer = window.setTimeout(() => setCelebrationVisible(false), 4_500);
+    return () => window.clearTimeout(timer);
   }, [celebrationVisible]);
 
   return (
-    <>
-      <section className="live-stage" aria-label="实时开奖台">
+      <section className={`live-stage ${celebrationVisible ? "is-celebrating" : ""}`} aria-label="实时开奖台">
         <div className="live-stage-head">
           <div><span className="live-pill"><span /> {demo ? "动效预演" : "LIVE"}</span><strong>{GAME_META[game].name} · 开奖台</strong></div>
           {dismissible && <button type="button" onClick={onClose} aria-label="关闭开奖台">关闭</button>}
@@ -647,12 +653,15 @@ function LiveStage({
           prediction={prediction}
           onChange={onPredictionChange}
         />
+        {celebrationVisible && <InlinePredictionCelebration hits={celebrationHits} />}
         <div className="stage-balls" aria-label="开奖号码">
           {slots.map((number, index) => {
             const isSpecial = index === 6;
             const isRevealed = progress ? number !== null : revealed > index;
+            const isWinning = isRevealed && number !== null && winningNumbers.has(number)
+              && (!isSpecial || specialRevealed);
             return (
-            <div className={`stage-ball-wrap ${isSpecial ? "special-stage-wrap" : ""}`} key={`${number ?? "pending"}-${index}`}>
+            <div className={`stage-ball-wrap ${isSpecial ? "special-stage-wrap" : ""} ${isWinning ? "prediction-hit" : ""}`} key={`${number ?? "pending"}-${index}`}>
               {index === 6 && <span className="plus">+</span>}
               {isSpecial && isRevealed && number !== null ? (
                 <ScratchSpecialBall
@@ -661,6 +670,7 @@ function LiveStage({
                   drawAt={drawAt}
                   resetKey={`${game}:${stageIssue}:${number}:${demo ? "demo" : "live"}`}
                   onReveal={() => setSpecialRevealed(true)}
+                  winning={isWinning}
                 />
               ) : (
                 <>
@@ -682,17 +692,10 @@ function LiveStage({
           })}
         </div>
       </section>
-      {celebrationVisible && (
-        <PredictionCelebration
-          hits={celebrationHits}
-          onClose={() => setCelebrationVisible(false)}
-        />
-      )}
-    </>
   );
 }
 
-function LiveStagePredictionPanel({
+export function LiveStagePredictionPanel({
   prediction,
   onChange,
 }: {
@@ -700,8 +703,9 @@ function LiveStagePredictionPanel({
   onChange: (prediction: LiveStagePrediction) => void;
 }) {
   const filled = Object.values(prediction).filter(
-    (value) => value !== "" && value !== null,
+    (value) => value.trim() !== "",
   ).length;
+  const invalid = parseLiveStagePrediction(prediction).invalid;
   const update = <Key extends keyof LiveStagePrediction>(
     key: Key,
     value: LiveStagePrediction[Key],
@@ -719,61 +723,51 @@ function LiveStagePredictionPanel({
       <div className="live-prediction-fields">
         <label>
           <span>6+1生肖</span>
-          <select
+          <input
+            type="text"
             aria-label="预想6+1生肖"
-            value={prediction.coverageZodiac}
-            onChange={(event) => update("coverageZodiac", event.target.value)}
-          >
-            <option value="">未选择</option>
-            {ZODIAC_NAMES.map((zodiac) => <option value={zodiac} key={zodiac}>{zodiac}</option>)}
-          </select>
-          <small>正码＋特码</small>
+            autoComplete="off"
+            placeholder="虎,猴,龙"
+            value={prediction.coverageZodiacs}
+            onChange={(event) => update("coverageZodiacs", event.target.value)}
+          />
+          <small>{invalid.coverageZodiacs.length ? `无效：${invalid.coverageZodiacs.join("、")}` : "正码＋特码，逗号分隔"}</small>
         </label>
         <label>
           <span>6+1尾数</span>
-          <select
+          <input
+            type="text"
             aria-label="预想6+1尾数"
-            value={prediction.coverageTail ?? ""}
-            onChange={(event) => update(
-              "coverageTail",
-              event.target.value === "" ? null : Number(event.target.value),
-            )}
-          >
-            <option value="">未选择</option>
-            {Array.from({ length: 10 }, (_, tail) => (
-              <option value={tail} key={tail}>{tail}尾</option>
-            ))}
-          </select>
-          <small>正码＋特码</small>
+            autoComplete="off"
+            placeholder="1尾,7尾,9尾"
+            value={prediction.coverageTails}
+            onChange={(event) => update("coverageTails", event.target.value)}
+          />
+          <small>{invalid.coverageTails.length ? `无效：${invalid.coverageTails.join("、")}` : "正码＋特码，逗号分隔"}</small>
         </label>
         <label>
           <span>特码生肖</span>
-          <select
+          <input
+            type="text"
             aria-label="预想特码生肖"
-            value={prediction.specialZodiac}
-            onChange={(event) => update("specialZodiac", event.target.value)}
-          >
-            <option value="">未选择</option>
-            {ZODIAC_NAMES.map((zodiac) => <option value={zodiac} key={zodiac}>{zodiac}</option>)}
-          </select>
-          <small>只看特码</small>
+            autoComplete="off"
+            placeholder="虎,猴,龙"
+            value={prediction.specialZodiacs}
+            onChange={(event) => update("specialZodiacs", event.target.value)}
+          />
+          <small>{invalid.specialZodiacs.length ? `无效：${invalid.specialZodiacs.join("、")}` : "只看特码，逗号分隔"}</small>
         </label>
         <label>
           <span>特码数字</span>
-          <select
+          <input
+            type="text"
             aria-label="预想特码数字"
-            value={prediction.specialNumber ?? ""}
-            onChange={(event) => update(
-              "specialNumber",
-              event.target.value === "" ? null : Number(event.target.value),
-            )}
-          >
-            <option value="">未选择</option>
-            {Array.from({ length: 49 }, (_, index) => index + 1).map((number) => (
-              <option value={number} key={number}>{formatBall(number)}</option>
-            ))}
-          </select>
-          <small>只看特码</small>
+            autoComplete="off"
+            placeholder="05,17,27"
+            value={prediction.specialNumbers}
+            onChange={(event) => update("specialNumbers", event.target.value)}
+          />
+          <small>{invalid.specialNumbers.length ? `无效：${invalid.specialNumbers.join("、")}` : "01–49，逗号分隔"}</small>
         </label>
       </div>
       {filled > 0 && (
@@ -789,40 +783,32 @@ function LiveStagePredictionPanel({
   );
 }
 
-function PredictionCelebration({
+function InlinePredictionCelebration({
   hits,
-  onClose,
 }: {
   hits: readonly LiveStagePredictionHit[];
-  onClose: () => void;
 }) {
   return (
     <div
-      className="prediction-celebration"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="prediction-celebration-title"
+      className="prediction-celebration-inline"
+      role="status"
+      aria-live="polite"
     >
-      <div className="prediction-celebration-glow" aria-hidden="true" />
-      <div className="prediction-confetti" aria-hidden="true">
-        {Array.from({ length: 42 }, (_, index) => {
+      <div className="prediction-confetti-inline" aria-hidden="true">
+        {Array.from({ length: 28 }, (_, index) => {
           const style = {
             "--piece-x": `${(index * 37) % 101}%`,
             "--piece-delay": `${(index * 53) % 720}ms`,
             "--piece-drift": `${((index * 29) % 180) - 90}px`,
             "--piece-rotate": `${(index * 47) % 360}deg`,
-          } as CSSProperties;
+          } as React.CSSProperties;
           return <i style={style} key={index} />;
         })}
       </div>
-      <div className="prediction-celebration-card">
+      <div className="prediction-celebration-message">
         <span>YOU CALLED IT</span>
-        <h2 id="prediction-celebration-title">恭喜，你的预想开出来了</h2>
-        <p>命中 {hits.length} 项</p>
-        <div className="prediction-hit-list">
-          {hits.map((hit) => <strong key={hit.kind}>{hit.label}</strong>)}
-        </div>
-        <button type="button" onClick={onClose}>收下好运</button>
+        <strong>预想命中</strong>
+        <div>{hits.map((hit) => <em key={`${hit.kind}:${hit.label}`}>{hit.label}</em>)}</div>
       </div>
     </div>
   );
@@ -833,11 +819,13 @@ function ScratchSpecialBall({
   drawAt,
   resetKey,
   onReveal,
+  winning,
 }: {
   number: number;
   drawAt: string;
   resetKey: string;
   onReveal: () => void;
+  winning: boolean;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const scratchingRef = useRef(false);
@@ -1029,7 +1017,7 @@ function ScratchSpecialBall({
 
   return (
     <>
-      <div className={`scratch-ticket ${ready ? "ready" : ""} ${complete ? "complete" : ""}`}>
+      <div className={`scratch-ticket ${ready ? "ready" : ""} ${complete ? "complete" : ""} ${complete && winning ? "prediction-hit" : ""}`}>
         <div className={`scratch-reward ${ready ? "ready" : ""}`} aria-hidden={!complete}>
           <span className={`ball stage-ball wave-${getWave(number)} revealed`}>
             {formatBall(number)}
