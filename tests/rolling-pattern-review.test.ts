@@ -8,6 +8,7 @@ import type {
   RollingPatternReviewScore,
   RollingPatternReviewRecord,
   RollingPatternReviewSnapshot,
+  RollingPatternSlotPerformance,
   RollingPatternRun,
   RollingPatternSignal,
 } from "../lib/rolling-pattern-types.ts";
@@ -31,6 +32,9 @@ let summarizeRollingPatternReviewSlots: (
   coverage: Array<{ rank: number; settledCount: number; hitCount: number; missCount: number; hitRate: number; baselineRate: number }>;
   special: Array<{ rank: number; settledCount: number; hitCount: number; missCount: number; hitRate: number; baselineRate: number }>;
 };
+let slotPerformanceTone: (
+  slot: RollingPatternSlotPerformance | null | undefined,
+) => "above" | "below" | "neutral";
 
 before(async () => {
   server = await createServer({
@@ -48,6 +52,10 @@ before(async () => {
   buildRollingPatternReviewSnapshot = module.buildRollingPatternReviewSnapshot;
   settleRollingPatternReviewSnapshot = module.settleRollingPatternReviewSnapshot;
   summarizeRollingPatternReviewSlots = module.summarizeRollingPatternReviewSlots;
+  const workspace = await server.ssrLoadModule("/app/patterns/RollingPatternWorkspace.tsx") as {
+    slotPerformanceTone: typeof slotPerformanceTone;
+  };
+  slotPerformanceTone = workspace.slotPerformanceTone;
 });
 
 after(async () => {
@@ -220,6 +228,24 @@ test("aggregates hit rate and random baseline by rank slot instead of result con
   assert.equal(result.special[0]?.settledCount, 2);
   assert.equal(result.special[0]?.hitRate, 1);
   assert.ok(Math.abs((result.special[0]?.baselineRate ?? 0) - (13 / 49)) < 1e-12);
+});
+
+test("colors rank-slot performance by whether it beats its random baseline", () => {
+  const slot = (hitRate: number, baselineRate: number, settledCount = 20) => ({
+    rank: 1,
+    settledCount,
+    hitCount: Math.round(hitRate * settledCount),
+    missCount: settledCount - Math.round(hitRate * settledCount),
+    hitRate,
+    baselineRate,
+  });
+
+  assert.equal(slotPerformanceTone(slot(0.6, 0.55)), "above");
+  assert.equal(slotPerformanceTone(slot(0.5, 0.55)), "below");
+  assert.equal(slotPerformanceTone(slot(0.55, 0.55)), "neutral");
+  assert.equal(slotPerformanceTone(slot(0.55 + Number.EPSILON, 0.55)), "neutral");
+  assert.equal(slotPerformanceTone(slot(0, 0.55, 0)), "neutral");
+  assert.equal(slotPerformanceTone(null), "neutral");
 });
 
 type SlotFixture = [eventId: string, label: string, baselineRate: number, matched: boolean];

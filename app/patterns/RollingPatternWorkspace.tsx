@@ -619,7 +619,7 @@ function ReviewResultScope({
                 <strong>{summary.label}</strong>
                 <OutcomeBadge settled={settled} matched={outcome?.actualMatched} />
               </header>
-              <div className="rolling-review-slot-performance">
+              <div className={`rolling-review-slot-performance is-${slotPerformanceTone(slot)}`}>
                 <strong>
                   坑位历史 {slot ? `${slot.hitCount}/${slot.settledCount} · ${percent(slot.hitRate)}` : "0/0 · 待积累"}
                 </strong>
@@ -633,6 +633,15 @@ function ReviewResultScope({
       </div>
     </div>
   );
+}
+
+export function slotPerformanceTone(
+  slot: RollingPatternSlotPerformance | null | undefined,
+): "above" | "below" | "neutral" {
+  if (!slot || slot.settledCount <= 0) return "neutral";
+  const difference = slot.hitRate - slot.baselineRate;
+  if (Math.abs(difference) <= 1e-12) return "neutral";
+  return difference > 0 ? "above" : "below";
 }
 
 function OutcomeBadge({ settled, matched }: { settled: boolean; matched?: boolean }) {
