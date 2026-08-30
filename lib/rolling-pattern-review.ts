@@ -8,9 +8,11 @@ import type {
   RollingPatternEvent,
   RollingPatternProduct,
   RollingPatternReviewResultGroup,
+  RollingPatternReviewRecord,
   RollingPatternReviewScopeSnapshot,
   RollingPatternReviewScore,
   RollingPatternReviewSnapshot,
+  RollingPatternReviewSlotPerformance,
   RollingPatternRun,
   RollingPatternScope,
   RollingPatternSignal,
@@ -68,6 +70,56 @@ export function settleRollingPatternReviewSnapshot(
     })),
     scoredAt,
   };
+}
+
+export function summarizeRollingPatternReviewSlots(
+  reviews: readonly RollingPatternReviewRecord[],
+): RollingPatternReviewSlotPerformance {
+  return {
+    coverage: summarizeScopeSlots(reviews, "coverage"),
+    special: summarizeScopeSlots(reviews, "special"),
+  };
+}
+
+function summarizeScopeSlots(
+  reviews: readonly RollingPatternReviewRecord[],
+  scope: "coverage" | "special",
+) {
+  const slots: Array<{
+    settledCount: number;
+    hitCount: number;
+    baselineTotal: number;
+  }> = [];
+
+  for (const { snapshot, score } of reviews) {
+    if (!score) continue;
+    const outcomes = new Map(
+      (scope === "coverage" ? score.coverageResults : score.specialResults)
+        .map((item) => [item.eventId, item]),
+    );
+    snapshot[scope].resultGroups.forEach((group, index) => {
+      const outcome = outcomes.get(group.event.eventId);
+      if (!outcome) return;
+      const slot = slots[index] ?? {
+        settledCount: 0,
+        hitCount: 0,
+        baselineTotal: 0,
+      };
+      slot.settledCount += 1;
+      slot.hitCount += outcome.actualMatched ? 1 : 0;
+      slot.baselineTotal += group.summary.baselineRate;
+      slots[index] = slot;
+    });
+  }
+
+  return slots.map((slot, index) => ({
+    rank: index + 1,
+    settledCount: slot.settledCount,
+    hitCount: slot.hitCount,
+    missCount: slot.settledCount - slot.hitCount,
+    hitRate: slot.hitCount / slot.settledCount,
+    baselineRate: slot.baselineTotal / slot.settledCount,
+  }));
 }
 
 function buildScopeSnapshot(

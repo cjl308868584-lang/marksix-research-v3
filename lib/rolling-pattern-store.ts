@@ -9,6 +9,7 @@ import {
 import {
   buildRollingPatternReviewSnapshot,
   settleRollingPatternReviewSnapshot,
+  summarizeRollingPatternReviewSlots,
 } from "./rolling-pattern-review.ts";
 import { ensureResearchV3Store } from "./research-v3-store";
 import type {
@@ -57,6 +58,7 @@ type ReviewSnapshotRow = {
   frozen_at: string;
 };
 type ReviewScoreRow = { score_json: string };
+type ReviewArchiveRow = ReviewSnapshotRow & { score_json: string | null };
 type ReviewIndexRow = {
   target_issue: string;
   frozen_at: string;
@@ -220,9 +222,14 @@ export async function readRollingPatternReviewIndex(
   limit = 20,
   beforeIssue?: string | null,
 ): Promise<RollingPatternReviewIndexPage> {
-  if (!await ensureRollingPatternStore()) return { items: [], nextCursor: null };
+  const empty = (): RollingPatternReviewIndexPage => ({
+    items: [],
+    nextCursor: null,
+    slotPerformance: { coverage: [], special: [] },
+  });
+  if (!await ensureRollingPatternStore()) return empty();
   const db = runtime.__marksixD1;
-  if (!db) return { items: [], nextCursor: null };
+  if (!db) return empty();
   const bounded = Math.max(1, Math.min(50, Math.trunc(limit)));
   try {
     const beforeSql = beforeIssue
@@ -251,6 +258,7 @@ export async function readRollingPatternReviewIndex(
       /^\d{4,16}$/.test(row.target_issue) && typeof row.frozen_at === "string"
     );
     const visible = valid.slice(0, bounded);
+    const slotPerformance = await readRollingPatternReviewSlotPerformance(db, game);
     return {
       items: visible.map((row) => ({
         targetIssue: row.target_issue,
@@ -260,10 +268,38 @@ export async function readRollingPatternReviewIndex(
       nextCursor: valid.length > bounded
         ? visible.at(-1)?.target_issue ?? null
         : null,
+      slotPerformance,
     };
   } catch {
-    return { items: [], nextCursor: null };
+    return empty();
   }
+}
+
+async function readRollingPatternReviewSlotPerformance(
+  db: D1Database,
+  game: GameId,
+) {
+  const rows = await db.prepare(
+    `SELECT review.run_id, review.target_issue, review.snapshot_json,
+            review.frozen_at, score.score_json
+     FROM rolling_pattern_review_snapshots review
+     LEFT JOIN rolling_pattern_review_scores score ON score.run_id = review.run_id
+     WHERE review.game = ?
+     ORDER BY CAST(review.target_issue AS INTEGER) ASC,
+              review.frozen_at ASC, review.run_id ASC`,
+  ).bind(game).all<ReviewArchiveRow>();
+  const issues = new Set<string>();
+  const reviews: RollingPatternReviewRecord[] = [];
+  for (const row of rows.results ?? []) {
+    if (issues.has(row.target_issue)) continue;
+    issues.add(row.target_issue);
+    const snapshot = parseJson(row.snapshot_json);
+    const score = parseJson(row.score_json ?? "");
+    if (!isRollingPatternReviewSnapshot(snapshot) ||
+      !isRollingPatternReviewScore(score)) continue;
+    reviews.push({ snapshot, score });
+  }
+  return summarizeRollingPatternReviewSlots(reviews);
 }
 
 export async function readRollingPatternReview(

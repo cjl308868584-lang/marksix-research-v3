@@ -80,6 +80,23 @@ test("returns a no-store cursor index and an immutable issue detail", async () =
   assert.equal(detail.payload.review.score.actualSpecial, 9);
 });
 
+test("returns all-settled rank-slot performance with averaged random baselines", async () => {
+  seedSlotReview(db.database, "2026237", "7尾", 0.554, true);
+  seedSlotReview(db.database, "2026236", "虎", 0.472, false);
+
+  const index = await get("?game=new_macau&limit=20");
+
+  assert.deepEqual(index.payload.slotPerformance.coverage, [{
+    rank: 1,
+    settledCount: 2,
+    hitCount: 1,
+    missCount: 1,
+    hitRate: 0.5,
+    baselineRate: 0.513,
+  }]);
+  assert.deepEqual(index.payload.slotPerformance.special, []);
+});
+
 test("rejects unknown, conflicting and malformed review parameters", async () => {
   for (const query of [
     "?game=new_macau&write=true",
@@ -146,6 +163,70 @@ function seedReview(database: DatabaseSync, issue: string) {
      VALUES (?, 'new_macau', ?, ?, ?, ?)`,
   ).run(
     snapshot.runId,
+    issue,
+    JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
+    JSON.stringify(score),
+    score.scoredAt,
+  );
+}
+
+function seedSlotReview(
+  database: DatabaseSync,
+  issue: string,
+  label: string,
+  baselineRate: number,
+  matched: boolean,
+) {
+  const runId = `slot-run-${issue}`;
+  const eventId = `coverage:fixture:${label}`;
+  const frozenAt = "2026-08-24T14:27:00.000Z";
+  const snapshot = {
+    runId,
+    game: "new_macau",
+    targetIssue: issue,
+    frozenAt,
+    purchases: Array.from({ length: 5 }, (_, index) => ({ kind: `kind-${index}` })),
+    coverage: {
+      summary: {},
+      resultGroups: [{
+        event: { eventId },
+        summary: { eventId, label, baselineRate },
+      }],
+    },
+    special: { summary: {}, resultGroups: [] },
+    specialNumbers: [],
+  };
+  const score = {
+    runId,
+    game: "new_macau",
+    targetIssue: issue,
+    actualNumbers: [1, 2, 3, 4, 5, 6, 7],
+    actualSpecial: 7,
+    purchases: Array.from({ length: 5 }, (_, index) => ({ productId: `product-${index}` })),
+    coverageResults: [{ eventId, actualMatched: matched, count: matched ? 1 : 0 }],
+    specialResults: [],
+    specialNumbers: [],
+    scoredAt: "2026-08-25T14:00:00.000Z",
+  };
+  database.prepare(
+    `INSERT INTO rolling_pattern_runs (
+       run_id, game, source_issue, target_issue, window_oldest_issue,
+       window_newest_issue, window_data_hash, engine_version, status,
+       generated_at, frozen_at, run_json
+     ) VALUES (?, 'new_macau', '2026235', ?, '2026206', '2026235',
+       'fixture', 'conditional-patterns-v3', 'completed', ?, ?, '{}')`,
+  ).run(runId, issue, frozenAt, frozenAt);
+  database.prepare(
+    `INSERT INTO rolling_pattern_review_snapshots
+       (run_id, game, target_issue, snapshot_json, frozen_at)
+     VALUES (?, 'new_macau', ?, ?, ?)`,
+  ).run(runId, issue, JSON.stringify(snapshot), frozenAt);
+  database.prepare(
+    `INSERT INTO rolling_pattern_review_scores
+       (run_id, game, target_issue, actual_json, score_json, scored_at)
+     VALUES (?, 'new_macau', ?, ?, ?, ?)`,
+  ).run(
+    runId,
     issue,
     JSON.stringify({ numbers: score.actualNumbers, special: score.actualSpecial }),
     JSON.stringify(score),

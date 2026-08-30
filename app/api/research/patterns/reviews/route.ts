@@ -20,7 +20,12 @@ export async function GET(request: NextRequest) {
   }
   const page = await readRollingPatternReviewIndex(game, limit, before);
   return NextResponse.json(
-    { game, items: page.items, nextCursor: page.nextCursor },
+    {
+      game,
+      items: page.items,
+      nextCursor: page.nextCursor,
+      slotPerformance: page.slotPerformance,
+    },
     { headers: noStore() },
   );
 }

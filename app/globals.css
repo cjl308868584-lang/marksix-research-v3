@@ -8755,6 +8755,38 @@ footer p {
 .rolling-review-purchases article > header span { color: #8d9491; font-size: 8px; }
 .rolling-review-purchases article > header strong,
 .rolling-review-results article > header strong { color: #e2c66c; font-size: 12px; }
+.rolling-review-slot-rank {
+  min-width: 30px;
+  padding: 3px 5px;
+  border: 1px solid rgba(224, 197, 110, .42);
+  border-radius: 999px;
+  background: rgba(224, 197, 110, .09);
+  color: #d8bd65;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  text-align: center;
+}
+.rolling-review-slot-performance {
+  margin-top: 8px;
+  padding: 8px 9px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid rgba(104, 201, 162, .22);
+  border-radius: 6px;
+  background: rgba(104, 201, 162, .055);
+}
+.rolling-review-slot-performance strong {
+  color: #75d1aa;
+  font-size: 9px;
+  font-weight: 720;
+}
+.rolling-review-slot-performance span {
+  color: #a9b0ac;
+  font-size: 8px;
+  white-space: nowrap;
+}
 .rolling-review-purchases article p,
 .rolling-review-results article p { margin: 7px 0 0; color: #969d99; font-size: 8px; line-height: 1.6; }
 .rolling-review-purchases article small,

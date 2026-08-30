@@ -6,6 +6,7 @@ import type {
   RollingPatternEvent,
   RollingPatternProduct,
   RollingPatternReviewScore,
+  RollingPatternReviewRecord,
   RollingPatternReviewSnapshot,
   RollingPatternRun,
   RollingPatternSignal,
@@ -24,6 +25,12 @@ let settleRollingPatternReviewSnapshot: (
   draw: Draw,
   scoredAt: string,
 ) => RollingPatternReviewScore;
+let summarizeRollingPatternReviewSlots: (
+  reviews: readonly RollingPatternReviewRecord[],
+) => {
+  coverage: Array<{ rank: number; settledCount: number; hitCount: number; missCount: number; hitRate: number; baselineRate: number }>;
+  special: Array<{ rank: number; settledCount: number; hitCount: number; missCount: number; hitRate: number; baselineRate: number }>;
+};
 
 before(async () => {
   server = await createServer({
@@ -36,9 +43,11 @@ before(async () => {
   const module = await server.ssrLoadModule("/lib/rolling-pattern-review.ts") as {
     buildRollingPatternReviewSnapshot: typeof buildRollingPatternReviewSnapshot;
     settleRollingPatternReviewSnapshot: typeof settleRollingPatternReviewSnapshot;
+    summarizeRollingPatternReviewSlots: typeof summarizeRollingPatternReviewSlots;
   };
   buildRollingPatternReviewSnapshot = module.buildRollingPatternReviewSnapshot;
   settleRollingPatternReviewSnapshot = module.settleRollingPatternReviewSnapshot;
+  summarizeRollingPatternReviewSlots = module.summarizeRollingPatternReviewSlots;
 });
 
 after(async () => {
@@ -163,6 +172,150 @@ test("rejects an unverified or mismatched draw", () => {
     /目标期/,
   );
 });
+
+test("aggregates hit rate and random baseline by rank slot instead of result content", () => {
+  const reviews = [
+    reviewRecord({
+      issue: "2026238",
+      coverage: [
+        ["coverage:tail:7尾", "7尾", 0.554, true],
+        ["coverage:zodiac:马", "马", 0.472, false],
+      ],
+      special: [["special:wave:蓝波", "蓝波", 16 / 49, true]],
+    }),
+    reviewRecord({
+      issue: "2026239",
+      coverage: [["coverage:zodiac:虎", "虎", 0.472, false]],
+      special: [["special:head:1头", "1头", 10 / 49, true]],
+    }),
+    reviewRecord({
+      issue: "2026240",
+      coverage: [["coverage:tail:9尾", "9尾", 0.554, true]],
+      special: [],
+      pending: true,
+    }),
+  ];
+
+  const result = summarizeRollingPatternReviewSlots(reviews);
+
+  assert.deepEqual(result.coverage, [
+    {
+      rank: 1,
+      settledCount: 2,
+      hitCount: 1,
+      missCount: 1,
+      hitRate: 0.5,
+      baselineRate: 0.513,
+    },
+    {
+      rank: 2,
+      settledCount: 1,
+      hitCount: 0,
+      missCount: 1,
+      hitRate: 0,
+      baselineRate: 0.472,
+    },
+  ]);
+  assert.equal(result.special[0]?.rank, 1);
+  assert.equal(result.special[0]?.settledCount, 2);
+  assert.equal(result.special[0]?.hitRate, 1);
+  assert.ok(Math.abs((result.special[0]?.baselineRate ?? 0) - (13 / 49)) < 1e-12);
+});
+
+type SlotFixture = [eventId: string, label: string, baselineRate: number, matched: boolean];
+
+function reviewRecord({
+  issue,
+  coverage,
+  special,
+  pending = false,
+}: {
+  issue: string;
+  coverage: SlotFixture[];
+  special: SlotFixture[];
+  pending?: boolean;
+}): RollingPatternReviewRecord {
+  const groups = (scope: "coverage_6_plus_1" | "special", fixtures: SlotFixture[]) =>
+    fixtures.map(([eventId, label, baselineRate]) => ({
+      event: {
+        eventId,
+        scope,
+        family: eventId.includes(":tail:") ? "tail" as const
+          : eventId.includes(":wave:") ? "wave" as const
+            : eventId.includes(":head:") ? "head" as const
+              : "zodiac" as const,
+        value: label,
+        label,
+        threshold: 1 as const,
+        memberCount: Math.round(baselineRate * 49),
+      },
+      summary: {
+        eventId,
+        label,
+        family: eventId.includes(":tail:") ? "tail" as const
+          : eventId.includes(":wave:") ? "wave" as const
+            : eventId.includes(":head:") ? "head" as const
+              : "zodiac" as const,
+        strategyCount: 1,
+        triggerCount: 10,
+        hitCount: 7,
+        missCount: 3,
+        hitRate: 0.7,
+        expectedHits: baselineRate * 10,
+        baselineRate,
+        uplift: 0.7 - baselineRate,
+        strongStrategyCount: 0,
+        experimentalStrategyCount: 1,
+      },
+    }));
+  const summary = (resultGroups: ReturnType<typeof groups>) => ({
+    strategyCount: resultGroups.length,
+    resultCount: resultGroups.length,
+    triggerCount: resultGroups.length * 10,
+    hitCount: resultGroups.length * 7,
+    missCount: resultGroups.length * 3,
+    hitRate: resultGroups.length ? 0.7 : 0,
+    expectedHits: resultGroups.reduce((sum, item) => sum + item.summary.expectedHits, 0),
+    expectedMisses: 0,
+    baselineRate: resultGroups.length ? resultGroups[0]!.summary.baselineRate : 0,
+    uplift: 0,
+    strongStrategyCount: 0,
+    experimentalStrategyCount: resultGroups.length,
+    resultGroups: resultGroups.map((item) => item.summary),
+  });
+  const coverageGroups = groups("coverage_6_plus_1", coverage);
+  const specialGroups = groups("special", special);
+  const resultScores = (fixtures: SlotFixture[]) => fixtures.map(([eventId, , , matched]) => ({
+    eventId,
+    actualMatched: matched,
+    count: matched ? 1 : 0,
+  }));
+  const runId = `slot-review-${issue}`;
+  return {
+    snapshot: {
+      runId,
+      game: "new_macau",
+      targetIssue: issue,
+      frozenAt: "2026-08-24T14:27:00.000Z",
+      purchases: [],
+      coverage: { summary: summary(coverageGroups), resultGroups: coverageGroups },
+      special: { summary: summary(specialGroups), resultGroups: specialGroups },
+      specialNumbers: [],
+    },
+    score: pending ? null : {
+      runId,
+      game: "new_macau",
+      targetIssue: issue,
+      actualNumbers: [1, 2, 3, 4, 5, 6, 7],
+      actualSpecial: 7,
+      purchases: [],
+      coverageResults: resultScores(coverage),
+      specialResults: resultScores(special),
+      specialNumbers: [],
+      scoredAt: "2026-08-25T14:00:00.000Z",
+    },
+  };
+}
 
 function event(
   scope: "coverage_6_plus_1" | "special",

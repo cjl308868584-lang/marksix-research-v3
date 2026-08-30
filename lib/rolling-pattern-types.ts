@@ -380,6 +380,20 @@ export type RollingPatternReviewRecord = {
   score: RollingPatternReviewScore | null;
 };
 
+export type RollingPatternSlotPerformance = {
+  rank: number;
+  settledCount: number;
+  hitCount: number;
+  missCount: number;
+  hitRate: number;
+  baselineRate: number;
+};
+
+export type RollingPatternReviewSlotPerformance = {
+  coverage: RollingPatternSlotPerformance[];
+  special: RollingPatternSlotPerformance[];
+};
+
 export type RollingPatternReviewIndexItem = {
   targetIssue: string;
   frozenAt: string;
@@ -389,6 +403,7 @@ export type RollingPatternReviewIndexItem = {
 export type RollingPatternReviewIndexPage = {
   items: RollingPatternReviewIndexItem[];
   nextCursor: string | null;
+  slotPerformance: RollingPatternReviewSlotPerformance;
 };
 
 export type RollingPatternCycleResult =

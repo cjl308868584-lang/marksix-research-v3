@@ -10,6 +10,8 @@ import type {
   RollingPatternProduct,
   RollingPatternReviewIndexItem,
   RollingPatternReviewRecord,
+  RollingPatternReviewSlotPerformance,
+  RollingPatternSlotPerformance,
   RollingPatternResultSummary,
   RollingPatternRun,
   RollingPatternScope,
@@ -367,6 +369,7 @@ type ReviewIndexResponse = {
   game: GameId;
   items: RollingPatternReviewIndexItem[];
   nextCursor: string | null;
+  slotPerformance: RollingPatternReviewSlotPerformance;
 };
 
 type ReviewDetailResponse = {
@@ -380,6 +383,10 @@ function PatternReviewArchive({ game }: { game: GameId }) {
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [selectedIssue, setSelectedIssue] = useState<string | null>(null);
   const [review, setReview] = useState<RollingPatternReviewRecord | null>(null);
+  const [slotPerformance, setSlotPerformance] = useState<RollingPatternReviewSlotPerformance>({
+    coverage: [],
+    special: [],
+  });
   const [loadingPeriods, setLoadingPeriods] = useState(true);
   const [loadingReview, setLoadingReview] = useState(false);
   const [reviewError, setReviewError] = useState("");
@@ -390,6 +397,7 @@ function PatternReviewArchive({ game }: { game: GameId }) {
     setNextCursor(null);
     setSelectedIssue(null);
     setReview(null);
+    setSlotPerformance({ coverage: [], special: [] });
     setReviewError("");
     setLoadingPeriods(true);
     void fetch(`/api/research/patterns/reviews?game=${game}&limit=20`, {
@@ -404,6 +412,7 @@ function PatternReviewArchive({ game }: { game: GameId }) {
       .then((payload) => {
         setPeriods(payload.items);
         setNextCursor(payload.nextCursor);
+        setSlotPerformance(payload.slotPerformance ?? { coverage: [], special: [] });
         setSelectedIssue(payload.items[0]?.targetIssue ?? null);
       })
       .catch((reason) => {
@@ -459,6 +468,7 @@ function PatternReviewArchive({ game }: { game: GameId }) {
         return [...current, ...payload.items.filter((item) => !known.has(item.targetIssue))];
       });
       setNextCursor(payload.nextCursor);
+      setSlotPerformance(payload.slotPerformance ?? { coverage: [], special: [] });
     } catch (reason) {
       setReviewError(reason instanceof Error ? reason.message : "更早期数暂时无法读取。");
     } finally {
@@ -495,7 +505,9 @@ function PatternReviewArchive({ game }: { game: GameId }) {
             ))}
           </nav>
           {loadingReview && <p className="rolling-pattern-result-empty">正在读取本期冻结内容…</p>}
-          {!loadingReview && review && <PatternReviewDetail review={review} />}
+          {!loadingReview && review && (
+            <PatternReviewDetail review={review} slotPerformance={slotPerformance} />
+          )}
           {nextCursor && (
             <button
               type="button"
@@ -513,7 +525,13 @@ function PatternReviewArchive({ game }: { game: GameId }) {
   );
 }
 
-function PatternReviewDetail({ review }: { review: RollingPatternReviewRecord }) {
+function PatternReviewDetail({
+  review,
+  slotPerformance,
+}: {
+  review: RollingPatternReviewRecord;
+  slotPerformance: RollingPatternReviewSlotPerformance;
+}) {
   const { snapshot, score } = review;
   const purchaseScores = new Map(score?.purchases.map((item) => [item.productId, item]));
   const coverageScores = new Map(score?.coverageResults.map((item) => [item.eventId, item]));
@@ -549,8 +567,8 @@ function PatternReviewDetail({ review }: { review: RollingPatternReviewRecord })
 
       <section className="rolling-review-section">
         <h3>结果 B 支持复盘</h3>
-        <ReviewResultScope title="6+1生肖、尾数" groups={snapshot.coverage.resultGroups} scores={coverageScores} settled={Boolean(score)} />
-        <ReviewResultScope title="特码生肖、尾数、波色、头数" groups={snapshot.special.resultGroups} scores={specialScores} settled={Boolean(score)} />
+        <ReviewResultScope title="6+1生肖、尾数" groups={snapshot.coverage.resultGroups} scores={coverageScores} settled={Boolean(score)} slotPerformance={slotPerformance.coverage} />
+        <ReviewResultScope title="特码生肖、尾数、波色、头数" groups={snapshot.special.resultGroups} scores={specialScores} settled={Boolean(score)} slotPerformance={slotPerformance.special} />
       </section>
 
       <section className="rolling-review-section">
@@ -579,25 +597,35 @@ function ReviewResultScope({
   groups,
   scores,
   settled,
+  slotPerformance,
 }: {
   title: string;
   groups: RollingPatternReviewRecord["snapshot"]["coverage"]["resultGroups"];
   scores: Map<string, { actualMatched: boolean; count: number }>;
   settled: boolean;
+  slotPerformance: readonly RollingPatternSlotPerformance[];
 }) {
   return (
     <div className="rolling-review-results">
       <h4>{title}</h4>
       <div>
-        {groups.map(({ event, summary }) => {
+        {groups.map(({ event, summary }, index) => {
           const outcome = scores.get(event.eventId);
+          const slot = slotPerformance[index];
           return (
             <article key={event.eventId}>
               <header>
+                <span className="rolling-review-slot-rank">#{String(index + 1).padStart(2, "0")}</span>
                 <strong>{summary.label}</strong>
                 <OutcomeBadge settled={settled} matched={outcome?.actualMatched} />
               </header>
-              <p>{summary.strategyCount}条策略 · 命中/失败 {summary.hitCount}/{summary.missCount} · 历史命中率 {percent(summary.hitRate)}</p>
+              <div className="rolling-review-slot-performance">
+                <strong>
+                  坑位历史 {slot ? `${slot.hitCount}/${slot.settledCount} · ${percent(slot.hitRate)}` : "0/0 · 待积累"}
+                </strong>
+                <span>基础随机参考 {slot ? percent(slot.baselineRate) : "—"}</span>
+              </div>
+              <p>本期内容证据 · {summary.strategyCount}条策略 · 命中/失败 {summary.hitCount}/{summary.missCount} · 内容历史命中率 {percent(summary.hitRate)}</p>
               {settled && <small>开奖实际出现 {outcome?.count ?? 0} 个</small>}
             </article>
           );
