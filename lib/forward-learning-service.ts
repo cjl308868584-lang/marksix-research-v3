@@ -125,12 +125,12 @@ export async function runStoredForwardLearningCycle({
   game: GameId;
   asOf?: Date;
 }) {
-  const [{ loadServerDraws }, { readRollingPatternRun }] = await Promise.all([
-    import("./lottery-data.ts"),
+  const [{ loadPatternHistory }, { readRollingPatternRun }] = await Promise.all([
+    import("./pattern-history.ts"),
     import("./rolling-pattern-store.ts"),
   ]);
   const [history, envelope] = await Promise.all([
-    loadServerDraws(game, 500, asOf),
+    loadPatternHistory(game, asOf),
     readRollingPatternRun(game),
   ]);
   if (!envelope || envelope.run.status !== "completed") {

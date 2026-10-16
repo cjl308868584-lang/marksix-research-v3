@@ -73,10 +73,10 @@ const server = await createServer({
 });
 
 try {
-  const researchStore = await server.ssrLoadModule("/lib/research-v3-store.ts") as {
-    ensureResearchV3Store(): Promise<boolean>;
+  const researchStore = await server.ssrLoadModule("/lib/pattern-schema.ts") as {
+    ensurePatternSchema(): Promise<boolean>;
   };
-  await researchStore.ensureResearchV3Store();
+  await researchStore.ensurePatternSchema();
   await applyMigration("../../drizzle/0010_forward_learning.sql");
   await applyMigration("../../drizzle/0011_unified_forward_learning.sql");
   const run = seedImmutablePatternRun(game, scenario === "transition-blocked");
@@ -214,25 +214,6 @@ function seedImmutablePatternRun(
     run.generatedAt,
     run.frozenAt,
     JSON.stringify({ ...run, signals: [] }),
-  );
-  database.database.prepare(
-    `INSERT INTO research_v3_forecasts (
-       run_id, game, target_issue, expected_draw_at, generated_at,
-       dataset_version, engine_version, model_version, mode,
-       snapshot_json, frozen_at
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(
-    `research:${game}:2099001:contract`,
-    game,
-    targetIssue,
-    run.expectedDrawAt,
-    frozenAt,
-    run.window.dataHash,
-    "research-v3",
-    "research-v3",
-    "contract",
-    "{}",
-    frozenAt,
   );
   return run;
 }

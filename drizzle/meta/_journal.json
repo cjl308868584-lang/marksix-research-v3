@@ -71,6 +71,13 @@
       "when": 1787042255261,
       "tag": "0009_same_the_enforcers",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792143455740,
+      "tag": "0013_remove_four_slot_strategy",
+      "breakpoints": true
     }
   ]
 }

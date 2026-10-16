@@ -109,8 +109,8 @@ class FakePatternD1 {
         return { meta: { changes: 0 } };
       },
       first: async <T>() => {
-        if (sql.includes("FROM research_v3_forecasts")) {
-          const target_issue = this.currentTargets.get(String(values[0]));
+        if (sql.includes("SELECT target_issue")) {
+          const target_issue = [...this.runs.values()].filter(row => row.game === String(values[0]) && row.status === "completed" && row.engine_version === String(values[1])).sort((a,b) => b.target_issue.localeCompare(a.target_issue))[0]?.target_issue;
           return (target_issue ? { target_issue } : null) as T | null;
         }
         if (sql.includes("FROM rolling_pattern_runs")) {
@@ -430,10 +430,10 @@ test("large conditional runs are persisted in bounded, retry-safe D1 batches", a
   assert.equal(db.signals.size, 205);
 });
 
-test("current reads never fall back to a previous target issue", async () => {
+test("current reads use the latest completed pattern independent of retired strategy state", async () => {
   await store.persistRollingPatternRun(runFixture);
   db.currentTargets.set("new_macau", "2026032");
-  assert.equal(await store.readRollingPatternRun("new_macau"), null);
+  assert.equal((await store.readRollingPatternRun("new_macau"))?.run.targetIssue, "2026031");
   assert.equal(
     (await store.readRollingPatternRun("new_macau", "2026031"))?.run.targetIssue,
     "2026031",

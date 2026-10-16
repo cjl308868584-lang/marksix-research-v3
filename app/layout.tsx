@@ -14,15 +14,15 @@ export async function generateMetadata(): Promise<Metadata> {
   const host = requestHeaders.get("x-forwarded-host") ?? requestHeaders.get("host") ?? "localhost:3000";
   const protocol = requestHeaders.get("x-forwarded-proto") ?? (host.startsWith("localhost") ? "http" : "https");
   const origin = `${protocol}://${host}`;
-  const title = "六合智研｜高概率策略与逐期学习";
-  const description = "香港与新澳门开奖数据、高概率分类事件预测和逐期学习复盘：每期固定五项，公开近30期依据、赔率价值与产品学习状态。";
+  const title = "六合智研｜条件规律与逐期学习";
+  const description = "香港与新澳门开奖数据、近30期条件规律和逐期学习复盘：每期固定五项，公开近30期依据、赔率价值与产品学习状态。";
 
   return {
     metadataBase: new URL(origin),
     title: { default: title, template: "%s｜六合智研" },
     description:
-      "香港六合彩与新澳门六合彩当期开奖、历史记录、高概率事件研究、概率校准和逐期产品学习。北京时间口径。",
-    keywords: ["香港六合彩", "新澳门六合彩", "开奖记录", "高概率策略", "产品学习", "概率校准"],
+      "香港六合彩与新澳门六合彩当期开奖、历史记录、近30期规律研究、概率校准和逐期产品学习。北京时间口径。",
+    keywords: ["香港六合彩", "新澳门六合彩", "开奖记录", "条件规律", "产品学习", "概率校准"],
     openGraph: {
       title,
       description,

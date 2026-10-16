@@ -366,7 +366,7 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
         <nav className="topnav" aria-label="主导航">
           <a href="#draws">今日开奖</a>
           <a href="#analysis">多维分析</a>
-          <a href="/research">高概率策略</a>
+          <a href="/patterns">近30期条件规律</a>
           <a href="/learning">逐期学习中心</a>
           <a href="#history">历史记录</a>
         </nav>
@@ -381,11 +381,11 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
           <div className="hero-copy">
             <div className="eyebrow"><span className="signal-dot" /> LIVE DATA · EVENT RESEARCH</div>
             <h1>让每一期数据<br />都有可解释的结论</h1>
-            <p>香港与新澳门双彩开奖数据实时校验，集中研究6+1生肖、6+1尾数、特码单双与特码大小，并在每期开奖后自动复盘学习。</p>
+            <p>香港与新澳门双彩开奖数据实时校验，研究近30期条件规律与五项参考，并在每期开奖后自动复盘学习。</p>
             <div className="hero-actions">
-              <a className="primary-action" href="/research">进入高概率策略 <span>→</span></a>
+              <a className="primary-action" href="/patterns">近30期条件规律 <span>→</span></a>
               <a className="ghost-action" href="/learning">逐期学习中心</a>
-              <a className="ghost-action" href="/patterns">近30期条件规律</a>
+
               <button className="ghost-action" type="button" onClick={() => { setDemo(false); window.setTimeout(() => setDemo(true), 0); }}>
                 预览开奖动效
               </button>
@@ -518,12 +518,12 @@ export function LotteryDashboard({ initialNow }: { initialNow: string }) {
       <footer>
         <div className="footer-brand">六合智研 <span>MARK SIX INTELLIGENCE</span></div>
         <p>第三方数据研究工具 · 非官方彩票服务 · 不销售彩票 · 不构成投注建议</p>
-        <div className="footer-links"><a href="/research">高概率策略</a><a href="/learning">逐期学习中心</a><a href="/patterns">近30期条件规律</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
+        <div className="footer-links"><a href="/patterns">近30期条件规律</a><a href="/learning">逐期学习中心</a><a href="#history">数据来源</a><a href="#top">返回顶部 ↑</a></div>
       </footer>
       <nav className="mobile-nav" aria-label="手机端快捷导航">
         <a onClick={() => setActiveSection("draws")} className={activeSection === "draws" ? "active" : ""} aria-current={activeSection === "draws" ? "page" : undefined} href="#draws"><span>01</span>开奖</a>
         <a onClick={() => setActiveSection("analysis")} className={activeSection === "analysis" ? "active" : ""} aria-current={activeSection === "analysis" ? "page" : undefined} href="#analysis"><span>02</span>统计</a>
-        <a href="/research"><span>03</span>策略</a>
+        <a href="/patterns"><span>03</span>规律</a>
         <a onClick={() => setActiveSection("history")} className={activeSection === "history" ? "active" : ""} aria-current={activeSection === "history" ? "page" : undefined} href="#history"><span>04</span>历史</a>
       </nav>
     </div>

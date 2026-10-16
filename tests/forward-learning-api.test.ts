@@ -390,9 +390,9 @@ function projectRecommendations(items: Array<Record<string, unknown>>) {
 
 function createApiSchema(database: DatabaseSync) {
   database.exec(`
-    CREATE TABLE rolling_pattern_runs (run_id TEXT PRIMARY KEY, game TEXT, target_issue TEXT, engine_version TEXT, status TEXT, frozen_at TEXT, run_json TEXT);
-    CREATE TABLE rolling_pattern_signals (run_id TEXT, signal_json TEXT);
-    CREATE TABLE rolling_pattern_scores (run_id TEXT, score_json TEXT);
+    CREATE TABLE rolling_pattern_runs (run_id TEXT PRIMARY KEY, game TEXT, target_issue TEXT, engine_version TEXT, status TEXT, frozen_at TEXT, run_json TEXT, window_data_hash TEXT);
+    CREATE TABLE rolling_pattern_signals (run_id TEXT, signal_json TEXT, rule_id TEXT, game TEXT, target_issue TEXT, event_family TEXT);
+    CREATE TABLE rolling_pattern_scores (run_id TEXT, score_json TEXT, rule_id TEXT, game TEXT, target_issue TEXT);
     CREATE TABLE rolling_pattern_consensus_ledger (run_id TEXT, product_id TEXT, game TEXT, target_issue TEXT, scope TEXT, product_kind TEXT, result_key TEXT, rank INTEGER, product_json TEXT);
     CREATE TABLE rolling_pattern_consensus_scores (run_id TEXT, product_id TEXT, game TEXT, target_issue TEXT, scope TEXT, score_json TEXT);
     CREATE TABLE forward_learning_revisions (revision_id TEXT PRIMARY KEY, game TEXT, target_issue TEXT, revision INTEGER, status TEXT, revision_json TEXT);
@@ -428,7 +428,7 @@ function seedPatternRun(database: DatabaseSync, targetIssue: string) {
     },
     signals: [],
   };
-  database.prepare(`INSERT INTO rolling_pattern_runs VALUES (?, ?, ?, ?, 'completed', ?, ?)`)
+  database.prepare(`INSERT INTO rolling_pattern_runs (run_id,game,target_issue,engine_version,status,frozen_at,run_json) VALUES (?, ?, ?, ?, 'completed', ?, ?)`)
     .run(run.runId, run.game, targetIssue, run.engineVersion, run.frozenAt, JSON.stringify(run));
   for (const [index, [kind, resultKey, values, scope, probability, netOdds]] of RAW_PATTERN_PRODUCTS.entries()) {
     const productId = `raw:${targetIssue}:${kind}:${resultKey}`;

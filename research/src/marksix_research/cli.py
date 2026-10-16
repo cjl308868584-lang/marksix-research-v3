@@ -10,7 +10,6 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .pipeline import run_shadow_research
 
 HTTP_HEADERS = {
     "accept": "application/json",
@@ -52,116 +51,21 @@ PATTERN_REVISION_REPAIR_ERROR = "权威五项与冻结规律运行不一致。"
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="marksix-research")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    run = subparsers.add_parser("run", help="run the offline shadow audit")
-    run.add_argument("--history", required=True)
-    run.add_argument("--game", choices=("hk", "new_macau"), required=True)
-    run.add_argument("--output", required=True)
-
-    sync = subparsers.add_parser(
-        "sync-history",
-        help="download the latest server-owned history for both games",
-    )
-    sync.add_argument("--site-url", required=True)
-    sync.add_argument("--output", required=True)
-
-    publish = subparsers.add_parser(
-        "capture",
-        help="settle the previous v3 forecast, learn, and freeze the next snapshot",
-    )
-    publish.add_argument("--site-url", required=True)
-    publish.add_argument("--secret", required=True)
-    publish.add_argument("--game", choices=("hk", "new_macau"), required=True)
-    publish.add_argument("--artifact", required=True)
-    publish.add_argument("--max-wait-seconds", type=int, default=0)
-
-    cycle = subparsers.add_parser(
-        "cycle",
-        help="sync one game, rebuild its artifact, and capture once",
-    )
-    cycle.add_argument("--site-url", required=True)
-    cycle.add_argument("--secret", required=True)
-    cycle.add_argument("--game", choices=("hk", "new_macau"), required=True)
-    cycle.add_argument("--output-dir", required=True)
-
-    health = subparsers.add_parser(
-        "health-check",
-        help="verify that a verified draw was reviewed and the next issue frozen",
-    )
-    health.add_argument("--site-url", required=True)
-    health.add_argument("--game", choices=("hk", "new_macau"), required=True)
-
-    update_check = subparsers.add_parser(
-        "check-update",
-        help="check whether a verified result has reached the frozen target",
-    )
-    update_check.add_argument("--site-url", required=True)
-    update_check.add_argument("--game", choices=("hk", "new_macau"), required=True)
-
+    parser.add_argument("command", choices=("cycle", "check-update", "health-check"))
+    parser.add_argument("--site-url", required=True)
+    parser.add_argument("--game", choices=("hk", "new_macau"), required=True)
+    parser.add_argument("--secret")
+    parser.add_argument("--output-dir", default="research-artifacts")
     args = parser.parse_args()
-    if args.command == "sync-history":
-        sync_history(args.site_url, args.output)
-        return
-    if args.command == "run":
-        result = run_shadow_research(args.history, args.game)
-        destination = Path(args.output)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_text(
-            json.dumps(result, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        print(json.dumps(result["resourceFunnel"], ensure_ascii=False))
-        return
-    if args.command == "check-update":
+    if args.command == "cycle":
+        if not args.secret:
+            parser.error("cycle requires --secret")
+        result = run_cycle(args.site_url, args.secret, args.game, args.output_dir)
+    elif args.command == "check-update":
         result = check_update_required(args.site_url, args.game)
-    elif args.command == "health-check":
-        result = verify_production_health(args.site_url, args.game)
-    elif args.command == "cycle":
-        result = run_cycle(
-            args.site_url,
-            args.secret,
-            args.game,
-            args.output_dir,
-        )
     else:
-        result = capture(
-            args.site_url,
-            args.secret,
-            args.game,
-            args.artifact,
-            args.max_wait_seconds,
-        )
+        result = verify_production_health(args.site_url, args.game)
     print(json.dumps(result, ensure_ascii=False, separators=(",", ":")))
-
-
-def sync_history(site_url: str, output_path: str) -> None:
-    base = site_url.rstrip("/")
-    payload: dict[str, list[dict[str, object]]] = {}
-    for game in ("hk", "new_macau"):
-        payload[game] = sync_game_history(site_url, game)
-    destination = Path(output_path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
-def sync_game_history(site_url: str, game: str) -> list[dict[str, object]]:
-    if game not in ("hk", "new_macau"):
-        raise ValueError(f"unsupported game: {game}")
-    base = site_url.rstrip("/")
-    request = Request(
-        f"{base}/api/lottery?game={game}&limit=500",
-        headers={**HTTP_HEADERS, "referer": f"{base}/"},
-    )
-    with urlopen(request, timeout=90) as response:
-        body = json.loads(response.read().decode("utf-8"))
-    draws = body.get("draws")
-    if not isinstance(draws, list) or not draws:
-        raise ValueError(f"server history unavailable for {game}")
-    return draws
 
 
 def fetch_json(url: str, referer: str) -> dict[str, object]:
@@ -182,33 +86,6 @@ def fetch_optional_json(url: str, referer: str) -> dict[str, object] | None:
     except HTTPError as error:
         if error.code == 404:
             return None
-        raise
-
-
-def fetch_update_patterns(
-    url: str,
-    referer: str,
-) -> tuple[dict[str, object] | None, bool]:
-    try:
-        return fetch_optional_json(url, referer), False
-    except HTTPError as error:
-        if error.code != 503:
-            raise
-        try:
-            body = error.read()
-        except AttributeError:
-            raise
-        error.fp = error.file = BytesIO(body)
-        error.read = error.file.read
-        try:
-            payload = json.loads(body.decode("utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError):
-            raise
-        if (
-            isinstance(payload, dict)
-            and payload.get("error") == PATTERN_REVISION_REPAIR_ERROR
-        ):
-            return None, True
         raise
 
 
@@ -369,382 +246,124 @@ def _validate_recommendation_sources(
     return learning_revision
 
 
-def verify_production_health(
-    site_url: str,
-    game: str,
-) -> dict[str, object]:
-    if game not in ("hk", "new_macau"):
-        raise ValueError(f"unsupported game: {game}")
-    base = site_url.rstrip("/")
-    lottery = fetch_json(
-        f"{base}/api/lottery?game={game}&limit=120",
-        f"{base}/",
-    )
-    draws = lottery.get("draws")
-    if not isinstance(draws, list) or not draws or not isinstance(draws[0], dict):
-        raise RuntimeError(f"{game} latest draw unavailable")
-    latest = draws[0]
-    verified_count = sum(
-        1 for draw in draws
-        if isinstance(draw, dict) and draw.get("verified") is True
-    )
-    latest_issue = str(latest.get("issue") or "")
-    if not latest_issue:
-        raise RuntimeError(f"{game} latest draw issue unavailable")
-    if latest.get("verified") is not True:
-        return {
-            "status": "awaiting_verification",
-            "game": game,
-            "latestIssue": latest_issue,
-        }
-
-    forecast = fetch_json(
-        f"{base}/api/research/forecast?game={game}",
-        f"{base}/research",
-    )
-    target_issue = str(forecast.get("targetIssue") or "")
-    if not target_issue or _issue_number(target_issue) <= _issue_number(latest_issue):
-        raise RuntimeError(
-            f"{game} verified issue {latest_issue} did not advance forecast "
-            f"target {target_issue or 'missing'}"
-        )
-    events = forecast.get("events")
-    expected_slots = (
-        "zodiac_6_plus_1",
-        "tail_6_plus_1",
-        "special_parity",
-        "special_size",
-    )
-    if (
-        not isinstance(events, list)
-        or not all(isinstance(event, dict) for event in events)
-        or tuple(event.get("slot") for event in events) != expected_slots
-    ):
-        raise RuntimeError("远端冻结快照不是当前四槽位")
-    if events[2].get("scope") != "special" or events[3].get("scope") != "special":
-        raise RuntimeError("特码单双/大小范围不是特码")
-    if any(
-        isinstance(event, dict) and event.get("family") == "number"
-        for event in events
-    ):
-        raise RuntimeError(f"{game} target {target_issue} leaked a number forecast")
-
-    review_payload = fetch_json(
-        f"{base}/api/research/reviews?game={game}&limit=5",
-        f"{base}/research/review",
-    )
-    reviews = review_payload.get("reviews")
-    has_review = isinstance(reviews, list) and any(
-        isinstance(review, dict) and str(review.get("targetIssue")) == latest_issue
-        for review in reviews
-    )
-
-    learning_payload = fetch_json(
-        f"{base}/api/research/learning-runs?game={game}&limit=5",
-        f"{base}/research/review",
-    )
-    learning_runs = learning_payload.get("learningRuns")
-    has_learning_run = isinstance(learning_runs, list) and any(
-        isinstance(run, dict)
-        and str(run.get("settledIssue")) == latest_issue
-        and run.get("status") == "completed"
-        for run in learning_runs
-    )
-    primary_bootstrap = False
-    if has_review != has_learning_run:
-        if not has_review:
-            raise RuntimeError(f"{game} review missing for verified issue {latest_issue}")
-        raise RuntimeError(
-            f"{game} completed learning run missing for verified issue {latest_issue}"
-        )
-    if not has_review:
-        previous_primary = fetch_optional_json(
-            f"{base}/api/research/forecast?game={game}&issue={latest_issue}",
-            f"{base}/research",
-        )
-        if previous_primary is not None:
-            raise RuntimeError(f"{game} review missing for verified issue {latest_issue}")
-        primary_bootstrap = True
-
-    forward = fetch_optional_json(
-        f"{base}/api/learning/forecast?game={game}",
-        f"{base}/learning",
-    )
-    if forward is None:
-        patterns = fetch_optional_json(
-            f"{base}/api/research/patterns?game={game}",
-            f"{base}/patterns",
-        )
-        if patterns is None and verified_count < 30:
-            return {
-                "status": "degraded",
-                "reason": "forward_learning_pattern_window_unavailable",
-                "game": game,
-                "settledIssue": None if primary_bootstrap else latest_issue,
-                "targetIssue": target_issue,
-                "forwardLearningForecastCount": 0,
-            }
-        raise RuntimeError(
-            f"{game} target {target_issue} is missing the five-slot forward freeze"
-        )
-    patterns = fetch_optional_json(
-        f"{base}/api/research/patterns?game={game}",
-        f"{base}/patterns",
-    )
-    revision = _validate_recommendation_sources(
-        patterns,
-        forward,
-        game,
-        target_issue,
-    )
-
-    previous_forward = fetch_optional_json(
-        f"{base}/api/learning/forecast?game={game}&issue={latest_issue}",
-        f"{base}/learning",
-    )
-    if previous_forward is not None:
-        previous_revision = _resolved_forward_learning_revision(
-            previous_forward,
-            game,
-            latest_issue,
-        )
-        if previous_revision is None:
-            raise RuntimeError(
-                f"{game} verified issue {latest_issue} has an invalid prior resolved-v2 freeze"
-            )
-        forward_reviews = fetch_json(
-            f"{base}/api/learning/reviews?game={game}&limit=5",
-            f"{base}/learning",
-        )
-        if not is_complete_forward_learning_review(
-            forward_reviews,
-            latest_issue,
-            previous_revision,
-        ):
-            raise RuntimeError(
-                f"{game} forward review for {latest_issue} is not a complete five-slot learning run (resolved-v2)"
-            )
-    return {
-        "status": "frozen",
-        "game": game,
-        "settledIssue": None if primary_bootstrap else latest_issue,
-        "targetIssue": target_issue,
-        "forwardLearningTargetIssue": target_issue,
-        "revision": revision,
-    }
-
-
-def check_update_required(
-    site_url: str,
-    game: str,
-) -> dict[str, object]:
-    """Return whether the latest verified result is ready to be settled."""
-    if game not in ("hk", "new_macau"):
-        raise ValueError(f"unsupported game: {game}")
-    base = site_url.rstrip("/")
-    lottery = fetch_json(
-        f"{base}/api/lottery?game={game}&limit=120",
-        f"{base}/",
-    )
-    draws = lottery.get("draws")
-    if not isinstance(draws, list) or not draws or not isinstance(draws[0], dict):
-        raise RuntimeError(f"{game} latest draw unavailable")
-    latest = draws[0]
-    verified_count = sum(
-        1 for draw in draws
-        if isinstance(draw, dict) and draw.get("verified") is True
-    )
-    latest_issue = str(latest.get("issue") or "")
-    if not latest_issue:
-        raise RuntimeError(f"{game} latest draw issue unavailable")
-    if latest.get("verified") is not True:
-        return {
-            "shouldRun": False,
-            "reason": "awaiting_verification",
-            "game": game,
-            "latestIssue": latest_issue,
-        }
-
-    forecast = fetch_optional_json(
-        f"{base}/api/research/forecast?game={game}",
-        f"{base}/research",
-    )
-    if forecast is None:
-        return {
-            "shouldRun": True,
-            "reason": "bootstrap_required",
-            "game": game,
-            "latestIssue": latest_issue,
-            "targetIssue": None,
-        }
-    target_issue = str(forecast.get("targetIssue") or "")
-    should_run = not target_issue or (
-        _issue_number(latest_issue) >= _issue_number(target_issue)
-    )
-    if not should_run:
-        forward = fetch_optional_json(
-            f"{base}/api/learning/forecast?game={game}",
-            f"{base}/learning",
-        )
-        if not is_complete_forward_learning_freeze(forward, game, target_issue):
-            patterns, revision_repair = fetch_update_patterns(
-                f"{base}/api/research/patterns?game={game}",
-                f"{base}/patterns",
-            )
-            if revision_repair:
-                return {
-                    "shouldRun": True,
-                    "reason": "unified_revision_repair_required",
-                    "game": game,
-                    "latestIssue": latest_issue,
-                    "targetIssue": target_issue,
-                }
-            if patterns is None and verified_count < 30:
-                return {
-                    "shouldRun": False,
-                    "reason": "forward_learning_waiting_for_pattern_window",
-                    "game": game,
-                    "latestIssue": latest_issue,
-                    "targetIssue": target_issue,
-                }
-            return {
-                "shouldRun": True,
-                "reason": (
-                    "forward_learning_repair_required"
-                    if patterns is None
-                    else "unified_revision_repair_required"
-                ),
-                "game": game,
-                "latestIssue": latest_issue,
-                "targetIssue": target_issue,
-            }
-        patterns, revision_repair = fetch_update_patterns(
-            f"{base}/api/research/patterns?game={game}",
-            f"{base}/patterns",
-        )
-        if revision_repair:
-            return {
-                "shouldRun": True,
-                "reason": "unified_revision_repair_required",
-                "game": game,
-                "latestIssue": latest_issue,
-                "targetIssue": target_issue,
-            }
-        try:
-            _validate_recommendation_sources(
-                patterns,
-                forward,
-                game,
-                target_issue,
-            )
-        except RuntimeError:
-            return {
-                "shouldRun": True,
-                "reason": "unified_revision_repair_required",
-                "game": game,
-                "latestIssue": latest_issue,
-                "targetIssue": target_issue,
-            }
-        previous_forward = fetch_optional_json(
-            f"{base}/api/learning/forecast?game={game}&issue={latest_issue}",
-            f"{base}/learning",
-        )
-        if previous_forward is not None:
-            previous_revision = _resolved_forward_learning_revision(
-                previous_forward,
-                game,
-                latest_issue,
-            )
-            if previous_revision is None:
-                return {
-                    "shouldRun": True,
-                    "reason": "forward_learning_review_repair_required",
-                    "game": game,
-                    "latestIssue": latest_issue,
-                    "targetIssue": target_issue,
-                }
-            reviews = fetch_json(
-                f"{base}/api/learning/reviews?game={game}&limit=5",
-                f"{base}/learning",
-            )
-            if not is_complete_forward_learning_review(
-                reviews,
-                latest_issue,
-                previous_revision,
-            ):
-                return {
-                    "shouldRun": True,
-                    "reason": "forward_learning_review_repair_required",
-                    "game": game,
-                    "latestIssue": latest_issue,
-                    "targetIssue": target_issue,
-                }
-    return {
-        "shouldRun": should_run,
-        "reason": "verified_result_ready" if should_run else "forecast_ahead",
-        "game": game,
-        "latestIssue": latest_issue,
-        "targetIssue": target_issue or None,
-    }
-
-
 def _issue_number(issue: str) -> int:
     if not issue.isdigit():
         raise RuntimeError(f"invalid numeric issue: {issue}")
     return int(issue)
 
 
-def run_cycle(
-    site_url: str,
-    secret: str,
-    game: str,
-    output_dir: str,
-) -> dict[str, object]:
+def _latest(site_url, game):
+    if game not in ("hk", "new_macau"):
+        raise ValueError(f"unsupported game: {game}")
+    base = site_url.rstrip("/")
+    payload = fetch_json(f"{base}/api/lottery?game={game}&limit=120", f"{base}/")
+    draws = payload.get("draws")
+    if not isinstance(draws, list) or not draws or not isinstance(draws[0], dict):
+        raise RuntimeError(f"{game} latest draw unavailable")
+    latest = draws[0]
+    _issue_number(str(latest.get("issue") or ""))
+    return latest, sum(1 for d in draws if isinstance(d,dict) and d.get("verified") is True)
+
+
+def _patterns(site_url, game):
+    base = site_url.rstrip("/")
+    return fetch_optional_json(f"{base}/api/research/patterns?game={game}", f"{base}/patterns")
+
+
+def _target(patterns):
+    return str((patterns or {}).get("run", {}).get("targetIssue") or "")
+
+
+def _prior_review(site_url, game, issue):
+    base = site_url.rstrip("/")
+    prior = fetch_optional_json(f"{base}/api/learning/forecast?game={game}&issue={issue}", f"{base}/learning")
+    if prior is None:
+        return True  # No prediction was frozen; never fabricate a retrospective score.
+    revision = _resolved_forward_learning_revision(prior,game,issue)
+    if revision is None:
+        return False
+    reviews = fetch_json(f"{base}/api/learning/reviews?game={game}&limit=5", f"{base}/learning")
+    return is_complete_forward_learning_review(reviews,issue,revision)
+
+
+def check_update_required(site_url, game):
+    latest, count = _latest(site_url,game)
+    issue = str(latest["issue"])
+    if latest.get("verified") is not True:
+        return dict(shouldRun=False,reason="awaiting_verification",game=game,latestIssue=issue)
+    patterns = _patterns(site_url,game)
+    target = _target(patterns)
+    if not target or _issue_number(target) <= _issue_number(issue):
+        return dict(shouldRun=True,reason="verified_result_ready",game=game,latestIssue=issue,targetIssue=target or None)
+    base = site_url.rstrip("/")
+    forward = fetch_optional_json(f"{base}/api/learning/forecast?game={game}",f"{base}/learning")
+    try:
+        _validate_recommendation_sources(patterns,forward,game,target)
+        healthy = _prior_review(site_url,game,issue)
+    except RuntimeError:
+        healthy = False
+    return dict(shouldRun=not healthy,reason="forecast_ahead" if healthy else "learning_repair_required",game=game,latestIssue=issue,targetIssue=target)
+
+
+def verify_production_health(site_url, game):
+    latest, count = _latest(site_url,game)
+    issue = str(latest["issue"])
+    if latest.get("verified") is not True:
+        return dict(status="awaiting_verification",game=game,latestIssue=issue)
+    patterns = _patterns(site_url,game)
+    if patterns is None and count < 30:
+        return dict(status="degraded",reason="insufficient_pattern_history",game=game)
+    target = _target(patterns)
+    if not target or _issue_number(target) <= _issue_number(issue):
+        raise RuntimeError(f"{game} verified issue {issue} did not advance pattern target {target or 'missing'}")
+    base = site_url.rstrip("/")
+    forward = fetch_optional_json(f"{base}/api/learning/forecast?game={game}", f"{base}/learning")
+    revision = _validate_recommendation_sources(patterns,forward,game,target)
+    if not _prior_review(site_url,game,issue):
+        raise RuntimeError(f"{game} forward review for {issue} is not a complete resolved-v2 learning run")
+    # Verify the pattern archive was settled too, independently of forward learning.
+    archive = fetch_optional_json(f"{base}/api/research/patterns/reviews?game={game}&issue={issue}",f"{base}/patterns")
+    if archive and archive.get("review") is not None and not archive["review"].get("score"):
+        raise RuntimeError(f"{game} pattern review missing for {issue}")
+    return dict(status="frozen",game=game,settledIssue=issue,targetIssue=target,revision=revision)
+
+
+def capture_patterns(site_url, secret, game):
+    base = site_url.rstrip("/")
+    # No old response cache: every invocation rechecks live verification.
+    body = json.dumps(dict(taskId=f"patterns-v1:{game}",game=game),separators=(",", ":")).encode()
+    timestamp = str(int(time.time()*1000))
+    signature = hmac.new(secret.encode(),timestamp.encode()+b"."+body,hashlib.sha256).hexdigest()
+    request = Request(f"{base}/api/internal/patterns/settle-and-freeze",data=body,method="POST",headers={
+        **HTTP_HEADERS,"content-type":"application/json","origin":base,"referer":f"{base}/patterns",
+        "x-research-timestamp":timestamp,"x-research-signature":signature,
+    })
+    try:
+        with urlopen(request,timeout=90) as response:
+            result = json.loads(response.read().decode())
+    except HTTPError as error:
+        if error.code != 425:
+            raise
+        result = json.loads(error.read().decode())
+    if not isinstance(result,dict) or not isinstance(result.get("status"),str):
+        raise RuntimeError("invalid pattern update response")
+    return result
+
+
+def run_cycle(site_url, secret, game, output_dir):
+    result = capture_patterns(site_url,secret,game)
+    if result["status"].startswith("awaiting_"):
+        return result
+    if result["status"] == "insufficient_data":
+        return result
+    target = str(result.get("targetIssue") or "")
+    if not target:
+        raise RuntimeError("pattern update returned no target")
+    result["forwardLearning"] = capture_forward_learning(site_url,secret,game,target)
     destination = Path(output_dir)
-    destination.mkdir(parents=True, exist_ok=True)
-    history_path = destination / f"{game}-history.json"
-    artifact_path = destination / f"{game}.json"
-    draws = sync_game_history(site_url, game)
-    history_path.write_text(
-        json.dumps({game: draws}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    artifact = run_shadow_research(history_path, game)
-    artifact_path.write_text(
-        json.dumps(artifact, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    primary = capture(
-        site_url,
-        secret,
-        game,
-        str(artifact_path),
-        max_wait_seconds=0,
-    )
-    if primary.get("status") == "awaiting_verification":
-        return primary
-    rolling = primary.get("rollingPatterns")
-    if isinstance(rolling, dict) and rolling.get("status") == "insufficient_data":
-        missing = rolling.get("missing")
-        return {
-            **primary,
-            "forwardLearning": {
-                "status": "insufficient_data",
-                "missing": missing if isinstance(missing, int) else None,
-                "forecastCount": 0,
-            },
-        }
-    target_issue = str(primary.get("targetIssue") or "")
-    if not target_issue:
-        raise RuntimeError(f"{game} primary capture returned no target issue")
-    forward = capture_forward_learning(
-        site_url,
-        secret,
-        game,
-        target_issue,
-        max_wait_seconds=0,
-    )
-    return {**primary, "forwardLearning": forward}
+    destination.mkdir(parents=True,exist_ok=True)
+    (destination/"cycle-result.json").write_text(json.dumps(result,ensure_ascii=False),encoding="utf-8")
+    return result
 
 
 def capture_forward_learning(
@@ -834,98 +453,6 @@ def capture_forward_learning(
                 f"forward learning capture timed out for {game}"
             ) from last_error
         time.sleep(min(30, max(1, deadline - time.monotonic())))
-
-
-def capture(
-    site_url: str,
-    secret: str,
-    game: str,
-    artifact_path: str,
-    max_wait_seconds: int = 0,
-) -> dict[str, object]:
-    base = site_url.rstrip("/")
-    artifact = json.loads(Path(artifact_path).read_text(encoding="utf-8"))
-    if (
-        artifact.get("schemaVersion") != "python-shadow-v3"
-        or artifact.get("game") != game
-    ):
-        raise ValueError("artifact schema or game mismatch")
-    body = json.dumps(
-        {
-            "taskId": capture_task_id(game, artifact),
-            "game": game,
-            "researchArtifact": artifact,
-        },
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    deadline = time.monotonic() + max(0, max_wait_seconds)
-    last_error: BaseException | None = None
-    while True:
-        timestamp = str(int(time.time() * 1000))
-        signature = hmac.new(
-            secret.encode("utf-8"),
-            timestamp.encode("utf-8") + b"." + body,
-            hashlib.sha256,
-        ).hexdigest()
-        request = Request(
-            f"{base}/api/internal/research/settle-and-learn",
-            data=body,
-            method="POST",
-            headers={
-                **HTTP_HEADERS,
-                "content-type": "application/json",
-                "origin": base,
-                "referer": f"{base}/research",
-                "x-research-timestamp": timestamp,
-                "x-research-signature": signature,
-            },
-        )
-        try:
-            with urlopen(request, timeout=90) as response:
-                result = json.loads(response.read().decode("utf-8"))
-                if not isinstance(result, dict):
-                    raise ValueError(f"invalid research response for {game}")
-                return result
-        except HTTPError as error:
-            if error.code == 425:
-                return {"status": "awaiting_verification"}
-            if error.code not in (409, 425, 429, 502, 503, 504):
-                raise
-            last_error = error
-        except (URLError, TimeoutError) as error:
-            last_error = error
-        if time.monotonic() >= deadline:
-            if max_wait_seconds <= 0 and isinstance(last_error, HTTPError):
-                raise RuntimeError(
-                    f"research request failed for {game}: HTTP {last_error.code}"
-                ) from last_error
-            if max_wait_seconds <= 0 and last_error is not None:
-                raise RuntimeError(
-                    f"research request failed for {game}: {last_error}"
-                ) from last_error
-            raise TimeoutError(
-                f"research capture timed out for {game}"
-            ) from last_error
-        time.sleep(min(60, max(1, deadline - time.monotonic())))
-
-
-PATTERN_TASK_VERSION = "conditional-patterns-v2"
-
-
-def capture_task_id(game: str, artifact: dict[str, object]) -> str:
-    audit = artifact.get("audit")
-    audit = audit if isinstance(audit, dict) else {}
-    issue = str(audit.get("newestIssue") or "empty")
-    artifact_hash = hashlib.sha256(
-        json.dumps(
-            artifact,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
-    ).hexdigest()
-    return f"scheduled-{game}-{issue}-{PATTERN_TASK_VERSION}-{artifact_hash[:20]}"
 
 
 if __name__ == "__main__":

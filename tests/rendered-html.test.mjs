@@ -35,7 +35,7 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
 
   const html = await response.text();
-  assert.match(html, /<title>六合智研｜高概率策略与逐期学习<\/title>/i);
+  assert.match(html, /<title>六合智研｜条件规律与逐期学习<\/title>/i);
   assert.match(html, /让每一期数据/);
   assert.match(html, /北京时间/);
   assert.match(html, /香港六合彩/);
@@ -44,9 +44,9 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.match(html, /号码 12，羊，红波/);
   assert.match(html, /特码 25，马，蓝波/);
   assert.doesNotMatch(html, /[鼠牛虎兔龙蛇马羊猴鸡狗猪]肖/);
-  assert.match(html, /进入高概率策略/);
+  assert.doesNotMatch(html, /高概率策略/);
   assert.match(html, /填写我的开奖预想/);
-  assert.match(html, /href="\/research"/);
+  assert.doesNotMatch(html, /href="\/research"/);
   assert.match(html, /近30期条件规律/);
   assert.match(html, /href="\/patterns"/);
   assert.doesNotMatch(html, /双轨概率研究实验室/);
@@ -59,51 +59,8 @@ test("server-renders the finished lottery research dashboard", async () => {
   assert.doesNotMatch(html, /codex-preview|Building your site|Your site is taking shape/i);
 });
 
-test("server-renders the dedicated rule research workspace", async () => {
-  const response = await render("/research");
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /<title>高概率策略中心｜六合智研<\/title>/i);
-  assert.match(html, /不猜号码/);
-  assert.match(html, /只研究高概率事件/);
-  assert.match(html, /新澳门六合彩/);
-  assert.match(html, /香港六合彩/);
-  assert.match(html, /正在读取冻结策略与学习状态/);
-});
 
-test("research UI displays every frozen direction with its evidence status", async () => {
-  const [workspace, engine, review] = await Promise.all([
-    readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../lib/research-v3-engine.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/research-v3-review.ts", import.meta.url), "utf8"),
-  ]);
-  assert.match(workspace, /<h2>\{event\.predictionLabel\}<\/h2>/);
-  assert.match(workspace, /本期验证方向·研究候选/);
-  assert.match(workspace, /本期验证方向·基线记录/);
-  assert.match(workspace, /正式验证方向/);
-  assert.match(workspace, /className="v3-rationale">\{display\.rationale\}<\/p>/);
-  assert.match(workspace, /\{display\.warning && <div className="v3-warning">\{display\.warning\}<\/div>\}/);
-  assert.doesNotMatch(workspace, /正式层暂无已验证方向/);
-  assert.doesNotMatch(workspace, /不向本期给出方向/);
-  assert.doesNotMatch(workspace, /主动弃权/);
-  assert.doesNotMatch(workspace, /className="v3-rationale">\{event\.rationale\}<\/p>/);
-  assert.doesNotMatch(workspace, /\{event\.warning && <div className="v3-warning">\{event\.warning\}<\/div>\}/);
-  assert.match(workspace, /多源一致/);
-  assert.match(engine, /calibrated_absolute_probability/);
-  assert.doesNotMatch(review, /20期/);
-  assert.match(review, /50期/);
-});
 
-test("server-renders the immutable period review workspace", async () => {
-  const response = await render("/research/review");
-  assert.equal(response.status, 200);
-  const html = await response.text();
-  assert.match(html, /<title>逐期学习复盘｜六合智研<\/title>/i);
-  assert.match(html, /每期开奖后/);
-  assert.match(html, /模型都必须交卷/);
-  assert.match(html, /正在读取不可变复盘账本/);
-  assert.match(html, /href="\/research"/);
-});
 
 test("server-renders the independent forward learning center", async () => {
   const response = await render("/learning");
@@ -171,30 +128,8 @@ test("server-renders the mobile-first rolling 30 pattern workspace", async () =>
   assert.doesNotMatch(workspace, /本期不推荐/);
 });
 
-test("legacy rolling pattern route redirects to the independent page", async () => {
-  const response = await render("/research/patterns");
-  assert.ok([307, 308].includes(response.status));
-  assert.equal(new URL(response.headers.get("location"), "http://localhost").pathname, "/patterns");
-});
 
-test("strategy and review stay linked while patterns remain a standalone workspace", async () => {
-  for (const path of ["/research", "/research/review"]) {
-    const response = await render(path);
-    const html = await response.text();
-    assert.match(html, /href="\/research"/);
-    assert.match(html, /href="\/research\/review"/);
-    assert.doesNotMatch(html, /href="\/patterns"/);
-  }
-});
 
-test("review API accepts the fifty-period history requested by the review page", async () => {
-  const response = await fetchWorker(
-    "/api/research/reviews?game=new_macau&limit=50",
-  );
-  assert.equal(response.status, 200);
-  const payload = await response.json();
-  assert.deepEqual(payload, { game: "new_macau", reviews: [] });
-});
 
 test("learning APIs remain read-only and return an explicit empty ledger", async () => {
   const forecast = await fetchWorker("/api/learning/forecast?game=new_macau");
@@ -271,36 +206,10 @@ test("rolling pattern API rejects a family that is unavailable in the selected s
   });
 });
 
-test("public research reads never settle, train, or freeze forecasts", async () => {
-  const [forecastRoute, reviewRoute, modelRoute, rulesRoute, lotteryRoute, analyzeRoute] =
-    await Promise.all([
-      readFile(new URL("../app/api/research/forecast/route.ts", import.meta.url), "utf8"),
-      readFile(new URL("../app/api/research/reviews/route.ts", import.meta.url), "utf8"),
-      readFile(new URL("../app/api/research/models/route.ts", import.meta.url), "utf8"),
-      readFile(new URL("../app/api/research/rules/route.ts", import.meta.url), "utf8"),
-      readFile(new URL("../app/api/lottery/route.ts", import.meta.url), "utf8"),
-      readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8"),
-    ]);
-  for (const route of [forecastRoute, reviewRoute, modelRoute, rulesRoute]) {
-    assert.doesNotMatch(route, /loadResearchV3Envelope/);
-    assert.doesNotMatch(route, /settleResearchV3Forecasts/);
-  }
-  assert.doesNotMatch(lotteryRoute, /settleResearchForecasts/);
-  assert.doesNotMatch(lotteryRoute, /settleLatestResearch/);
-  assert.match(forecastRoute, /readResearchV3Envelope/);
-  assert.match(rulesRoute, /CURRENT_RESEARCH_EVENT_SLOTS/);
-  assert.doesNotMatch(rulesRoute, /"position_parity"/);
-  assert.doesNotMatch(rulesRoute, /"position_size"/);
-  const analyzeGet = analyzeRoute.slice(
-    analyzeRoute.indexOf("export async function GET"),
-    analyzeRoute.indexOf("export async function POST"),
-  );
-  assert.doesNotMatch(analyzeGet, /settleForecastLedger/);
-});
 
 test("public feeds preserve official verification and require conflict-free cross-source agreement", async () => {
   const lotteryRoute = await readFile(
-    new URL("../app/api/lottery/route.ts", import.meta.url),
+    new URL("../lib/lottery-feed.ts", import.meta.url),
     "utf8",
   );
   assert.match(
@@ -317,76 +226,20 @@ test("public feeds preserve official verification and require conflict-free cros
   );
 });
 
-test("research writes are guarded by task idempotency and a settlement claim", async () => {
-  const [store, internalRoute, schema] = await Promise.all([
-    readFile(new URL("../lib/research-v3-store.ts", import.meta.url), "utf8"),
-    readFile(
-      new URL("../app/api/internal/research/settle-and-learn/route.ts", import.meta.url),
-      "utf8",
-    ),
-    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
-  ]);
-  assert.match(store, /INSERT OR IGNORE INTO research_settlement_claims/);
-  assert.match(store, /status = 'completed'/);
-  assert.ok(
-    store.indexOf("claimResearchSettlement") <
-      store.indexOf("INSERT INTO research_rule_states"),
-  );
-  assert.match(internalRoute, /claimResearchTask/);
-  assert.match(internalRoute, /completeResearchTask/);
-  assert.match(schema, /research_settlement_claims/);
-  assert.match(schema, /research_task_runs/);
-});
 
-test("scheduled learning sends Python artifacts and verified-only data through the signed writer", async () => {
-  const [workflow, service, engine, pipeline, store] = await Promise.all([
-    readFile(new URL("../.github/workflows/research-v2.yml", import.meta.url), "utf8"),
-    readFile(new URL("../lib/research-v3-service.ts", import.meta.url), "utf8"),
-    readFile(new URL("../lib/research-v3-engine.ts", import.meta.url), "utf8"),
-    readFile(new URL("../research/src/marksix_research/pipeline.py", import.meta.url), "utf8"),
-    readFile(new URL("../lib/research-v3-store.ts", import.meta.url), "utf8"),
-  ]);
-  const crons = [...workflow.matchAll(/cron:\s*["']([^"']+)["']/g)].map(
-    (match) => match[1],
-  );
-  assert.deepEqual(crons, [
-    "40,45,50,55 13 * * *",
-    "0,5,10,15,20,25,30 14 * * *",
-    "17 */2 * * *",
-  ]);
-  assert.match(workflow, /matrix:[\s\S]*game:\s*\[hk, new_macau\]/);
-  assert.match(workflow, /fail-fast:\s*false/);
-  assert.match(workflow, /group:\s*research-v3-learning-\$\{\{ github\.ref \}\}/);
-  assert.doesNotMatch(workflow, /github\.event\.schedule/);
-  assert.match(workflow, /marksix-research cycle[\s\S]*--game "\$GAME"/);
-  assert.match(workflow, /marksix-research health-check[\s\S]*--game "\$GAME"/);
-  assert.match(workflow, /check-update[\s\S]*should_run/);
-  assert.match(workflow, /steps\.update_check\.outputs\.should_run == 'true'/);
-  assert.doesNotMatch(workflow, /--max-wait-seconds\s+3600/);
-  assert.doesNotMatch(workflow, /npm run test:ai|npm run typecheck/);
-  assert.match(workflow, /test -n "\$RESEARCH_SECRET"/);
-  assert.match(service, /previous frozen forecasts could not be settled/);
-  assert.match(service, /persistResearchDataset/);
-  assert.match(engine, /draw\.verified === true/);
-  assert.match(pipeline, /formal_draws = \[draw for draw in draws if draw\.verified\]/);
-  assert.match(store, /draw_source_snapshots/);
-  assert.match(store, /dataset_versions/);
-});
 
 test("keeps the product implementation free of starter preview artifacts", async () => {
-  const [page, layout, dashboard, researchWorkspace, reviewWorkspace, researchStore, reviewEngine, reviewMigration, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
+  const [page, layout, dashboard, researchStore, reviewEngine, reviewMigration, styles, packageJson, lotteryLib, lotteryRoute, analyzeRoute, aiEngine, aiTypes, aiRateLimit, aiLedger, aiOnlineLearning, primaryLockMigration] = await Promise.all([
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/LotteryDashboard.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/research/ResearchWorkspace.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/research/review/ResearchReviewWorkspace.tsx", import.meta.url), "utf8"),
     readFile(new URL("../lib/research-v2-store.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/research-review.ts", import.meta.url), "utf8"),
     readFile(new URL("../drizzle/0004_black_night_nurse.sql", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
     readFile(new URL("../lib/lottery.ts", import.meta.url), "utf8"),
-    readFile(new URL("../app/api/lottery/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/lottery-feed.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/analyze/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/ai-engine.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/ai-types.ts", import.meta.url), "utf8"),
@@ -429,7 +282,7 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(dashboard, /destination-out/);
   assert.match(dashboard, /onLostPointerCapture/);
   assert.match(dashboard, /tabIndex=\{complete \? -1 : 0\}/);
-  assert.match(dashboard, /href="\/research"/);
+  assert.doesNotMatch(dashboard, /href="\/research"/);
   assert.doesNotMatch(
     dashboard.slice(
       dashboard.indexOf("export function LotteryDashboard"),
@@ -437,26 +290,6 @@ test("keeps the product implementation free of starter preview artifacts", async
     ),
     /三路候选策略|双轨概率研究实验室|冻结概率与规律挑战场/,
   );
-  assert.match(researchWorkspace, /不猜号码/);
-  assert.match(researchWorkspace, /下一期固定四项/);
-  assert.match(researchWorkspace, /每期固定冻结 6\+1生肖、6\+1尾数、特码单双、特码大小四个方向/);
-  assert.match(researchWorkspace, /随机基线/);
-  assert.match(researchWorkspace, /Brier skill/);
-  assert.match(researchWorkspace, /逐期开奖学习闭环/);
-  assert.match(researchWorkspace, /快中慢证据/);
-  assert.match(researchWorkspace, /不输出01–49候选/);
-  assert.match(researchWorkspace, /href="\/research\/review"/);
-  assert.doesNotMatch(researchWorkspace, /最高交集号码|共识号码前三/);
-  assert.match(reviewWorkspace, /模型都必须交卷/);
-  assert.match(reviewWorkspace, /误差归因/);
-  assert.match(reviewWorkspace, /模型权重如何变化/);
-  assert.match(reviewWorkspace, /模型是否真的在进步/);
-  assert.match(reviewWorkspace, /selectedRunId/);
-  assert.match(reviewWorkspace, /item\.runId === selectedRunId/);
-  assert.match(reviewWorkspace, /onSelect\(review\.runId\)/);
-  assert.match(reviewWorkspace, /v3\.2 当前口径/);
-  assert.match(reviewWorkspace, /v3\.1 历史口径/);
-  assert.doesNotMatch(reviewWorkspace, /item\.targetIssue === selectedIssue/);
   assert.match(reviewEngine, /buildResearchReview/);
   assert.match(reviewEngine, /negative_avoided/);
   assert.match(researchStore, /INSERT OR IGNORE INTO research_rule_ledger/);
@@ -489,10 +322,7 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(styles, /\.mobile-nav a[\s\S]*min-height: 52px/);
   assert.match(styles, /@media \(max-width: 680px\)/);
   assert.match(styles, /max-width: 370px/);
-  assert.match(
-    styles,
-    /@media \(max-width: 370px\)[\s\S]*?\.v3-issue-picker \{ margin-inline: -9px; padding-inline: 9px; \}/,
-  );
+
   assert.match(styles, /touch-action: none/);
   assert.match(styles, /\.special-stage-wrap[\s\S]*grid-column: 1 \/ -1/);
   assert.match(lotteryLib, /new_macau/);
@@ -504,8 +334,8 @@ test("keeps the product implementation free of starter preview artifacts", async
   assert.match(lotteryRoute, /api3\.marksix6\.net/);
   assert.match(lotteryRoute, /api\.api16868\.com/);
   assert.match(lotteryRoute, /10092/);
-  assert.match(lotteryRoute, /const liveRequest =/);
-  assert.match(lotteryRoute, /private, no-store, max-age=0/);
+
+
   assert.match(lotteryRoute, /getLiveDraws/);
   assert.match(lotteryRoute, /getCachedLiveDraws/);
   assert.match(lotteryRoute, /LIVE_MICRO_CACHE_MS = 2_000/);
@@ -818,4 +648,14 @@ test("model output cannot override the server abstention decision", async () => 
       else process.env[key] = value;
     }
   }
+});
+
+test("retired strategy pages and APIs return 404", async () => {
+  for (const path of ["/research","/research/review","/research/patterns","/api/research/forecast","/api/research/reviews","/api/research/models","/api/research/rules","/api/research/performance","/api/research/learning-runs"]) {
+    assert.equal((await fetchWorker(path)).status,404,path);
+  }
+});
+test("pattern writer requires a valid server signature", async () => {
+  const response = await fetchWorker("/api/internal/patterns/settle-and-freeze",{ method:"POST",headers:{"content-type":"application/json"},body:'{"game":"new_macau","taskId":"test-task"}' });
+  assert.ok([401,503].includes(response.status));
 });

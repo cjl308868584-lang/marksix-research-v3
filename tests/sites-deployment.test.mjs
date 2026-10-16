@@ -21,8 +21,8 @@ test("Sites owns the production database through one logical binding", async () 
 
 test("the production source has no workers.dev dependency", async () => {
   const files = [
-    "../lib/research-v3-service.ts",
-    "../app/api/internal/research/settle-and-learn/route.ts",
+    "../lib/pattern-update-service.ts",
+    "../app/api/internal/patterns/settle-and-freeze/route.ts",
     "../package.json",
   ];
   const source = (await Promise.all(
@@ -231,5 +231,20 @@ test("the unified forward learning migration creates the committed revision ledg
     "forward_learning_revisions",
     "forward_learning_rollouts",
   ]);
+  database.close();
+});
+
+test("strategy removal migration drops only exclusive tables and preserves pattern and forward rows", async () => {
+  const database = new DatabaseSync(":memory:");
+  const exclusive = ["research_event_ledger","research_event_scores","research_learning_runs","research_model_artifacts","research_model_weights","research_rule_states","research_settlement_claims","research_task_runs","research_v3_forecasts"];
+  for (const table of [...exclusive,"lottery_draws","rolling_pattern_runs","rolling_pattern_consensus_scores","forward_learning_revisions","forward_learning_revision_scores"]) {
+    database.exec(`CREATE TABLE ${table} (id TEXT); INSERT INTO ${table} VALUES ('preserved')`);
+  }
+  const migration = await readFile(new URL("../drizzle/0013_remove_four_slot_strategy.sql",import.meta.url),"utf8");
+  database.exec(migration.split("--> statement-breakpoint").join("\n"));
+  for (const table of exclusive) assert.throws(()=>database.prepare(`SELECT * FROM ${table}`).all());
+  for (const table of ["lottery_draws","rolling_pattern_runs","rolling_pattern_consensus_scores","forward_learning_revisions","forward_learning_revision_scores"]) {
+    assert.equal(database.prepare(`SELECT id FROM ${table}`).get().id,"preserved");
+  }
   database.close();
 });

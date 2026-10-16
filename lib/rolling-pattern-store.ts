@@ -11,7 +11,7 @@ import {
   settleRollingPatternReviewSnapshot,
   summarizeRollingPatternReviewSlots,
 } from "./rolling-pattern-review.ts";
-import { ensureResearchV3Store } from "./research-v3-store";
+import { ensurePatternSchema } from "./pattern-schema";
 import type {
   RollingPatternEnvelope,
   ProductHistoryCounts,
@@ -75,7 +75,7 @@ const REQUIRED_REVIEW_PRODUCT_KINDS = new Set<RollingPatternProductKind>([
 ]);
 
 export async function ensureRollingPatternStore() {
-  return ensureResearchV3Store();
+  return ensurePatternSchema();
 }
 
 export async function persistRollingPatternRun(
@@ -397,11 +397,11 @@ export async function readRollingPatternRun(
     if (!targetIssue) {
       const current = await db.prepare(
         `SELECT target_issue
-         FROM research_v3_forecasts
-         WHERE game = ?
-         ORDER BY expected_draw_at DESC, frozen_at ASC
+         FROM rolling_pattern_runs
+         WHERE game = ? AND engine_version = ? AND status = 'completed'
+         ORDER BY CAST(target_issue AS INTEGER) DESC, frozen_at ASC
          LIMIT 1`,
-      ).bind(game).first<{ target_issue: string }>();
+      ).bind(game, ROLLING_PATTERN_ENGINE_VERSION).first<{ target_issue: string }>();
       targetIssue = current?.target_issue ?? null;
     }
     if (!targetIssue) return null;

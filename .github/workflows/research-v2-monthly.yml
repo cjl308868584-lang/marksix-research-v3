@@ -1,4 +1,4 @@
-name: Research v3 fair-random audit
+name: Classification analysis fair-random audit
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: Research v3 settle, learn and freeze
+name: Patterns settle and five-slot freeze
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: research-v3-learning-${{ github.ref }}
+  group: patterns-learning-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -56,7 +56,7 @@ jobs:
         run: |
           test -n "$SITE_URL"
           test -n "$RESEARCH_SECRET"
-      - name: Run the signed primary cycle and separate forward freeze
+      - name: Settle patterns and freeze five-slot learning
         if: github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true'
         run: |
           set -o pipefail
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/upload-artifact@v6
         if: always() && (github.event_name == 'workflow_dispatch' || steps.update_check.outputs.should_run == 'true')
         with:
-          name: research-v3-${{ matrix.game }}-${{ github.run_id }}
+          name: patterns-${{ matrix.game }}-${{ github.run_id }}
           path: research-artifacts/${{ matrix.game }}
           retention-days: 90
           if-no-files-found: warn
