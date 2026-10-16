@@ -98,3 +98,24 @@ test('signed pattern writer rejects malformed payloads and stale or forged signa
   assert.equal((await request({game:'new_macau',taskId:'contract-task'},String(Date.now()),true)).status,401);
   delete (globalThis as any).__marksixBindings;
 });
+
+test('latest canonical feed finishes before deep-history requests can occupy outbound connections', async () => {
+  const { loadPatternHistory } = await server.ssrLoadModule('/lib/pattern-history.ts');
+  const calls: string[] = [];
+  await loadPatternHistory('new_macau',new Date('2026-10-16T09:00:00Z'),{
+    feed: async () => { calls.push('feed-start'); await Promise.resolve(); calls.push('feed-done'); return {draws:[]}; },
+    history: async () => { calls.push('history-start'); return {draws:[]}; },
+    stored: async () => [],
+  });
+  assert.deepEqual(calls,['feed-start','feed-done','history-start']);
+});
+
+test('temporary upstream fallback retains already stored verified history', async () => {
+  const { loadPatternHistory } = await server.ssrLoadModule('/lib/pattern-history.ts');
+  const verified = {game:'new_macau',issue:'2026288',drawAt:'2026-10-15T13:32:00Z',numbers:[1,2,3,4,5,6],special:7,source:'stored-cross-verified',verified:true};
+  const stale = {...verified,issue:'2026203',drawAt:'2026-07-22T13:32:00Z',verified:false};
+  const result = await loadPatternHistory('new_macau',new Date('2026-10-16T09:00:00Z'),{
+    feed:async()=>({draws:[stale]}),history:async()=>({draws:[stale]}),stored:async()=>[verified],
+  });
+  assert.equal(result.draws[0].issue,'2026288'); assert.equal(result.draws[0].verified,true);
+});
